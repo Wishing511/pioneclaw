@@ -1762,15 +1762,20 @@ onUnmounted(() => {
       // 工具调用气泡
       .tool-call-bubble {
         background: var(--pc-bg-elevated);
-        padding: 8px;
+        padding: 10px 14px;
         border-radius: 8px;
         max-width: 85%;
         border: 1px solid var(--pc-border);
 
         .tool-call-item {
-            padding: 6px 8px;
+            padding: 8px 10px;
+            margin-bottom: 4px;
             border-radius: 6px;
             transition: background 0.15s;
+
+            &:last-child {
+                margin-bottom: 0;
+            }
 
             &:hover {
                 background: rgba(var(--pc-primary-rgb), 0.04);
@@ -1779,7 +1784,7 @@ onUnmounted(() => {
             .tool-call-header {
                 display: flex;
                 align-items: center;
-                gap: 6px;
+                gap: 8px;
                 cursor: pointer;
                 user-select: none;
 
@@ -1787,6 +1792,7 @@ onUnmounted(() => {
                     transition: transform 0.2s;
                     color: var(--pc-text-muted);
                     font-size: 12px;
+                    flex-shrink: 0;
 
                     &.expanded {
                         transform: rotate(90deg);
@@ -1794,7 +1800,8 @@ onUnmounted(() => {
                 }
 
                 .tool-icon {
-                    font-size: 14px;
+                    font-size: 15px;
+                    flex-shrink: 0;
 
                     &.tool-icon-file { color: #409eff; }
                     &.tool-icon-search { color: #e6a23c; }
@@ -1810,17 +1817,16 @@ onUnmounted(() => {
                     font-size: 13px;
                     font-weight: 600;
                     color: var(--pc-text-primary);
+                    flex-shrink: 0;
                 }
 
                 .tool-result-summary {
-                    margin-left: auto;
+                    margin-left: 8px;
                     font-size: 12px;
                     color: var(--pc-text-muted);
-                    text-align: right;
                     overflow: hidden;
                     text-overflow: ellipsis;
                     white-space: nowrap;
-                    max-width: 200px;
                     font-family: 'JetBrains Mono', 'Fira Code', monospace;
                 }
             }
@@ -1828,10 +1834,10 @@ onUnmounted(() => {
             .tool-result {
                 font-size: 12px;
                 color: var(--pc-text-secondary);
-                padding: 8px 10px;
+                padding: 10px 12px;
                 background: var(--pc-bg-surface);
                 border-radius: 4px;
-                margin-top: 6px;
+                margin-top: 8px;
                 line-height: 1.6;
                 max-height: 200px;
                 overflow-y: auto;
