@@ -595,7 +595,9 @@ const streamingMsgHasContent = computed(() => {
   const msgs = currentConversation.value?.messages
   if (!msgs?.length) return false
   const last = msgs[msgs.length - 1]
-  return last.role === 'assistant' && last.isStreaming && !!(last.thinkingContent || last.content)
+  const hasVisibleContent = !!(last.thinkingContent || last.content)
+  const hasToolCalls = !!(last.toolCalls && last.toolCalls.length > 0)
+  return last.role === 'assistant' && last.isStreaming && (hasVisibleContent || hasToolCalls)
 })
 
 // 上下文使用率状态（用于 UI 提示）
@@ -1118,9 +1120,9 @@ async function sendMessage() {
                   streamingMsg.content = contentBuffer  // 实时更新，实现流式显示
                   break
                 case 'new_iteration':
-                  // 新一轮迭代 → 丢弃缓冲的规划文本
+                  // 新一轮迭代 → 重置 contentBuffer，但保留已显示的规划文本
+                  // 这样用户在工具执行期间仍能看到之前的思考过程
                   contentBuffer = ''
-                  streamingMsg.content = ''
                   break
                 case 'tool_start':
                   if (!streamingMsg.toolCalls) streamingMsg.toolCalls = []
@@ -1150,10 +1152,11 @@ async function sendMessage() {
                   scrollToBottom()
                   break
                 case 'done':
-                  // 提交最终缓冲内容（工具调用期间所有规划文本已被丢弃）
+                  // 提交最终缓冲内容，优先使用本轮累积的 contentBuffer
+                  // 其次使用后端返回的 response（覆盖之前保留的规划文本）
                   if (contentBuffer) {
                     streamingMsg.content = contentBuffer
-                  } else if (data.response && !streamingMsg.content) {
+                  } else if (data.response) {
                     streamingMsg.content = data.response.replace(/^\n{2,}/, '\n').replace(/^\s{2,}/, '')
                   }
                   if (data.thinking_content && !streamingMsg.thinkingContent) {

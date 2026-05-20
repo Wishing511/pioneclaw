@@ -647,10 +647,25 @@ class AgentLoop:
                 # 并行执行优化：如果所有工具都是 parallel_safe，并行执行
                 # 成功后清空 tool_calls_buffer，下面的 for 循环跳过
                 if len(tool_calls_buffer) > 1:
+                    original_buffer = list(tool_calls_buffer)
                     tool_calls_buffer = await self._try_parallel_execute(
                         tool_calls_buffer, messages, content_buffer,
                         reasoning_content_buffer, cancel_token, yield_intermediate,
                     )
+
+                    # 如果并行执行成功（返回空列表），yield 所有标记
+                    # 注意：_try_parallel_execute 已把结果写入 self.last_tool_results
+                    if not tool_calls_buffer:
+                        for tc in original_buffer:
+                            tc_name = tc.get("name", "")
+                            yield f"<!--TOOL_START:{json.dumps({'name': tc_name}, ensure_ascii=False)}-->"
+                        for tc in original_buffer:
+                            tc_name = tc.get("name", "")
+                            if tc_name in self.last_tool_results:
+                                result = self.last_tool_results[tc_name]
+                                yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'result': result}, ensure_ascii=False)}-->"
+                        content_buffer = ""  # 与 for 循环结束后的清理保持一致
+                        continue  # 跳过 for 循环，进入下一轮迭代
 
                 # 顺序执行工具调用
                 for tool_call in tool_calls_buffer:
