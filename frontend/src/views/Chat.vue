@@ -1111,6 +1111,7 @@ async function sendMessage() {
                   break
                 case 'content':
                   contentBuffer += data.content
+                  streamingMsg.content = contentBuffer  // 实时更新，实现流式显示
                   break
                 case 'new_iteration':
                   // 新一轮迭代 → 丢弃缓冲的规划文本
