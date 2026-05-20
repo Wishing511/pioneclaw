@@ -389,7 +389,7 @@ class ModelEngine:
     def _get_llm_detector(self) -> Optional[LLMDetector]:
         """获取 LLMDetector 实例（支持运行时配置热更新）"""
         # 优先使用运行时配置判断是否启用 LLM
-        runtime = LLMDetector._get_runtime_config()
+        runtime = get_runtime_config()
         enabled = runtime.get("enable_model_llm", settings.ENABLE_MODEL_LLM)
         if not enabled:
             return None

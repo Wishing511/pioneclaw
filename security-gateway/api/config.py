@@ -10,33 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from schemas.security import SecurityGatewayConfig, TestLLMRequest
 from config import settings
 from core.utils import normalize_llm_url
+from core.runtime_config import get_runtime_config, update_runtime_config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["config"])
-
-# 运行时配置覆盖（内存级，服务重启后恢复为环境变量值）
-_runtime_overrides: dict = {}
-
-
-def _get_merged_config() -> dict:
-    """合并环境变量默认值 + 运行时覆盖"""
-    base = {
-        "enable_word_engine": settings.ENABLE_WORD_ENGINE,
-        "enable_regex_engine": settings.ENABLE_REGEX_ENGINE,
-        "enable_model_engine": settings.ENABLE_MODEL_ENGINE,
-        "enable_model_llm": settings.ENABLE_MODEL_LLM,
-        "ai_config_id": None,
-        "model_engine_llm_url": settings.MODEL_ENGINE_LLM_URL,
-        "model_engine_llm_model": settings.MODEL_ENGINE_LLM_MODEL,
-        "model_engine_llm_api_key": settings.MODEL_ENGINE_LLM_API_KEY,
-        "model_engine_llm_timeout": settings.MODEL_ENGINE_LLM_TIMEOUT,
-        "word_engine_cache_ttl": settings.WORD_ENGINE_CACHE_TTL,
-        "fail_open": settings.FAIL_OPEN,
-        "log_retention_days": settings.LOG_RETENTION_DAYS,
-    }
-    base.update(_runtime_overrides)
-    return base
 
 
 def verify_admin(x_api_key: str = Header("", alias="X-API-Key")):
@@ -53,7 +31,7 @@ def verify_admin(x_api_key: str = Header("", alias="X-API-Key")):
 @router.get("/config", response_model=SecurityGatewayConfig)
 async def get_config():
     """获取当前配置（环境变量 + 运行时覆盖）"""
-    return SecurityGatewayConfig(**_get_merged_config())
+    return SecurityGatewayConfig(**get_runtime_config())
 
 
 @router.put("/config", response_model=SecurityGatewayConfig)
@@ -66,9 +44,8 @@ async def update_config(
     注意：运行时配置仅在当前服务进程生效，重启后恢复为环境变量值。
     如需持久化，请在 .env 文件中设置对应的环境变量。
     """
-    global _runtime_overrides
     update_data = data.model_dump(exclude_unset=True)
-    _runtime_overrides.update(update_data)
+    merged = update_runtime_config(update_data)
 
     # 如果 LLM 相关配置变更，清理旧的 LLM detector 缓存
     # 下次 model_engine.check() 时会使用新配置重新创建
@@ -76,7 +53,7 @@ async def update_config(
     LLMDetector._clear_instance_cache()
 
     logger.info(f"Runtime config updated: {list(update_data.keys())}")
-    return SecurityGatewayConfig(**_get_merged_config())
+    return SecurityGatewayConfig(**merged)
 
 
 @router.post("/config/test-llm")
@@ -137,8 +114,3 @@ async def test_llm_connection(
         return {"success": False, "message": f"连接超时（{data.timeout}s）"}
     except Exception as e:
         return {"success": False, "message": f"连接失败: {str(e)}"}
-
-
-def get_runtime_config() -> dict:
-    """供内部模块获取最新运行时配置"""
-    return _get_merged_config()

@@ -5,6 +5,15 @@ const sgApi = axios.create({
   timeout: 10000,
 })
 
+// 自动附加 X-API-Key（如配置了安全网关管理密钥）
+sgApi.interceptors.request.use((config) => {
+  const key = import.meta.env.VITE_SG_ADMIN_API_KEY
+  if (key) {
+    config.headers['X-API-Key'] = key
+  }
+  return config
+})
+
 export interface FilterResult {
   action: string
   content?: string
