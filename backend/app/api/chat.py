@@ -266,6 +266,8 @@ class ReActResponse(BaseModel):
     messages: List[dict] = []  # 分开的消息列表
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
+    approval_id: Optional[int] = None  # 安全网关审批ID
+    pending_approval: bool = False  # 是否等待审批
 
 
 class CompactRequest(BaseModel):
@@ -384,6 +386,36 @@ async def react_chat(
         }
     )
     if error:
+        # 安全网关审批：创建审批记录
+        if error.get("action") == "approve":
+            from app.models.approval import Approval, ApprovalStatus, ApprovalType
+            approval = Approval(
+                approval_type=ApprovalType.SECURITY_GATEWAY,
+                status=ApprovalStatus.PENDING,
+                title=f"安全网关审批: {request.message[:50]}...",
+                description=error.get("reason", "安全检测触发审批流程"),
+                requester_id=current_user.id,
+                requester_org_id=current_user.organization_id,
+                resource_type="security_check",
+                resource_id=request.session_id or str(current_user.id),
+                target_scope="org",
+                target_org_id=current_user.organization_id,
+                extra_data={
+                    "risk_level": error.get("risk_level"),
+                    "session_id": request.session_id,
+                    "content_preview": request.message[:200],
+                },
+            )
+            db.add(approval)
+            await db.commit()
+            await db.refresh(approval)
+            return ReActResponse(
+                success=False,
+                message=error["message"],
+                latency_ms=error["latency_ms"],
+                approval_id=approval.id,
+                pending_approval=True,
+            )
         return ReActResponse(
             success=error["success"],
             message=error["message"],

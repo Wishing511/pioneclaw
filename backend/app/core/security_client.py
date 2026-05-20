@@ -174,12 +174,18 @@ async def apply_input_filter(
             "success": False,
             "message": f"安全拦截: {result.reason}",
             "latency_ms": 0,
+            "action": "block",
+            "reason": result.reason,
+            "risk_level": result.risk_level,
         }
     elif result.action == "approve":
         return text, {
             "success": False,
             "message": f"待审批: {result.reason}",
             "latency_ms": 0,
+            "action": "approve",
+            "reason": result.reason,
+            "risk_level": result.risk_level,
         }
     elif result.action == "sanitize" and result.content:
         return result.content, None

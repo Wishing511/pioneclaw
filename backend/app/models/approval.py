@@ -28,6 +28,7 @@ class ApprovalType(str, enum.Enum):
     DOC_TO_SYSTEM = "doc_to_system"       # 文档共享到全局
     USER_JOIN_ORG = "user_join_org"       # 用户申请加入组织
     TASK_APPROVAL = "task_approval"       # 任务审批
+    SECURITY_GATEWAY = "security_gateway" # 安全网关审批
 
 
 class Approval(Base):

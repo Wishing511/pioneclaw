@@ -98,3 +98,11 @@ class SecurityGatewayConfig(BaseModel):
     word_engine_cache_ttl: int = 60
     fail_open: bool = True
     log_retention_days: int = 180
+
+
+class DashboardStatsResponse(BaseModel):
+    """看板统计响应"""
+    risk_trend: List[dict]
+    top_words: List[dict]
+    top_users: List[dict]
+    summary: dict

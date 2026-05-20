@@ -7,6 +7,83 @@
     </el-page-header>
 
     <el-tabs v-model="activeTab" class="mt-4">
+      <!-- 安全看板 -->
+      <el-tab-pane label="安全看板" name="dashboard">
+        <div v-loading="dashboardLoading">
+          <!-- 今日概览卡片 -->
+          <el-row :gutter="16" class="mb-4">
+            <el-col :span="6">
+              <el-card>
+                <div class="stat-card">
+                  <div class="stat-value">{{ dashboardData.summary.total_checks_today }}</div>
+                  <div class="stat-label">今日总检测</div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="6">
+              <el-card>
+                <div class="stat-card">
+                  <div class="stat-value text-danger">{{ dashboardData.summary.block_count_today }}</div>
+                  <div class="stat-label">今日拦截</div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="6">
+              <el-card>
+                <div class="stat-card">
+                  <div class="stat-value text-warning">{{ dashboardData.summary.critical_count_today }}</div>
+                  <div class="stat-label">今日严重事件</div>
+                </div>
+              </el-card>
+            </el-col>
+            <el-col :span="6">
+              <el-card>
+                <div class="stat-card">
+                  <div class="stat-value">{{ dashboardData.summary.avg_response_ms }}ms</div>
+                  <div class="stat-label">平均响应时间</div>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <!-- 图表区域 -->
+          <el-row :gutter="16" class="mb-4">
+            <el-col :span="16">
+              <el-card>
+                <template #header>
+                  <span>风险趋势（近7天）</span>
+                </template>
+                <v-chart :option="trendChartOption" style="height: 300px" autoresize />
+              </el-card>
+            </el-col>
+            <el-col :span="8">
+              <el-card>
+                <template #header>
+                  <span>高频敏感词 TOP 10</span>
+                </template>
+                <v-chart :option="topWordsChartOption" style="height: 300px" autoresize />
+              </el-card>
+            </el-col>
+          </el-row>
+
+          <!-- 用户风险排名 -->
+          <el-card>
+            <template #header>
+              <span>用户风险排名 TOP 10</span>
+            </template>
+            <el-table :data="dashboardData.top_users" stripe size="small">
+              <el-table-column type="index" label="排名" width="60" />
+              <el-table-column prop="username" label="用户" />
+              <el-table-column prop="block_count" label="拦截次数" width="120">
+                <template #default="{ row }">
+                  <el-tag type="danger">{{ row.block_count }}</el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
+        </div>
+      </el-tab-pane>
+
       <!-- 检测测试 -->
       <el-tab-pane label="检测测试" name="test">
         <el-card>
@@ -213,12 +290,84 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
+import { use } from 'echarts/core'
+import { LineChart, BarChart } from 'echarts/charts'
+import { TitleComponent, TooltipComponent, LegendComponent, GridComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
 import { securityGatewayApi, type FilterResult, type WordItem, type AuditLogItem } from '@/api/security_gateway'
 
-const activeTab = ref('test')
+use([LineChart, BarChart, TitleComponent, TooltipComponent, LegendComponent, GridComponent, CanvasRenderer])
+
+const activeTab = ref('dashboard')
+
+// 安全看板
+const dashboardLoading = ref(false)
+const dashboardData = reactive({
+  risk_trend: [] as any[],
+  top_words: [] as any[],
+  top_users: [] as any[],
+  summary: {
+    total_checks_today: 0,
+    block_count_today: 0,
+    critical_count_today: 0,
+    avg_response_ms: 0,
+  },
+})
+
+const trendChartOption = computed(() => {
+  const dates = dashboardData.risk_trend.map((d: any) => d.date)
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['拦截', '审批', '脱敏', '放行'] },
+    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'category', boundaryGap: false, data: dates },
+    yAxis: { type: 'value' },
+    series: [
+      { name: '拦截', type: 'line', data: dashboardData.risk_trend.map((d: any) => d.block), smooth: true, itemStyle: { color: '#f56c6c' } },
+      { name: '审批', type: 'line', data: dashboardData.risk_trend.map((d: any) => d.approve), smooth: true, itemStyle: { color: '#e6a23c' } },
+      { name: '脱敏', type: 'line', data: dashboardData.risk_trend.map((d: any) => d.sanitize), smooth: true, itemStyle: { color: '#409eff' } },
+      { name: '放行', type: 'line', data: dashboardData.risk_trend.map((d: any) => d.allow), smooth: true, itemStyle: { color: '#67c23a' } },
+    ],
+  }
+})
+
+const topWordsChartOption = computed(() => {
+  return {
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: '3%', right: '8%', bottom: '3%', containLabel: true },
+    xAxis: { type: 'value' },
+    yAxis: {
+      type: 'category',
+      data: [...dashboardData.top_words].reverse().map((w: any) => w.word),
+    },
+    series: [
+      {
+        type: 'bar',
+        data: [...dashboardData.top_words].reverse().map((w: any) => w.count),
+        itemStyle: { color: '#409eff' },
+      },
+    ],
+  }
+})
+
+const loadDashboard = async () => {
+  dashboardLoading.value = true
+  try {
+    const { data } = await securityGatewayApi.getDashboardStats(7)
+    dashboardData.risk_trend = data.risk_trend || []
+    dashboardData.top_words = data.top_words || []
+    dashboardData.top_users = data.top_users || []
+    dashboardData.summary = data.summary || dashboardData.summary
+  } catch (e: any) {
+    ElMessage.error('加载看板数据失败: ' + (e.response?.data?.detail || e.message))
+  } finally {
+    dashboardLoading.value = false
+  }
+}
 
 // 检测测试
 const testText = ref('')
@@ -451,6 +600,7 @@ const formatTime = (time: string) => {
 }
 
 onMounted(() => {
+  loadDashboard()
   loadWords()
   loadAuditLogs()
 })
@@ -486,5 +636,30 @@ onMounted(() => {
 
 .ml-2 {
   margin-left: 8px;
+}
+
+.stat-card {
+  text-align: center;
+  padding: 12px 0;
+}
+
+.stat-value {
+  font-size: 28px;
+  font-weight: bold;
+  color: #303133;
+}
+
+.stat-value.text-danger {
+  color: #f56c6c;
+}
+
+.stat-value.text-warning {
+  color: #e6a23c;
+}
+
+.stat-label {
+  margin-top: 8px;
+  font-size: 14px;
+  color: #909399;
 }
 </style>

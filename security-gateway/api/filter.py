@@ -15,10 +15,16 @@ from schemas.security import (
 )
 from services.filter_service import FilterService
 from services.audit_service import AuditService
+from services.alert_service import AlertService
 from core.deps import get_db
 from config import settings
 
 router = APIRouter(tags=["filter"])
+
+
+def _should_alert(result: dict) -> bool:
+    """判断是否触发告警：BLOCK + critical"""
+    return result.get("action") == "block" and result.get("risk_level") == "critical"
 
 
 @router.post("/filter/input", response_model=FilterInputResponse)
@@ -39,6 +45,11 @@ async def filter_input(
         audit_ctx["text"] = req.text[:500]
         audit = AuditService()
         await audit.log(db, "filter_input", result, audit_ctx)
+
+        # 高危拦截告警
+        if _should_alert(result):
+            alert_service = AlertService()
+            await alert_service.send_alert("filter_input", result, audit_ctx)
 
         return FilterInputResponse(**result)
     except Exception as e:
@@ -68,6 +79,11 @@ async def filter_output(
         audit_ctx["text"] = req.text[:500]
         audit = AuditService()
         await audit.log(db, "filter_output", result, audit_ctx)
+
+        # 高危拦截告警
+        if _should_alert(result):
+            alert_service = AlertService()
+            await alert_service.send_alert("filter_output", result, audit_ctx)
 
         return FilterInputResponse(**result)
     except Exception as e:
@@ -102,6 +118,11 @@ async def check_tool(
         }
         audit = AuditService()
         await audit.log(db, "check_tool", result, audit_ctx)
+
+        # 高危拦截告警
+        if _should_alert(result):
+            alert_service = AlertService()
+            await alert_service.send_alert("check_tool", result, audit_ctx)
 
         return FilterInputResponse(**result)
     except Exception as e:

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # 词库缓存
     WORD_ENGINE_CACHE_TTL: int = 60
 
+    # 告警通知
+    ALERT_ENABLED: bool = False
+    ALERT_WEBHOOK_URL: str = ""
+
     # 降级策略
     FAIL_OPEN: bool = True
 

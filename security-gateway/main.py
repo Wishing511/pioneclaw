@@ -14,6 +14,7 @@ from api.filter import router as filter_router
 from api.words import router as words_router
 from api.audit import router as audit_router
 from api.config import router as config_router
+from api.dashboard import router as dashboard_router
 from core.database import init_db
 from services.filter_service import FilterService
 from core.deps import get_db
@@ -74,6 +75,7 @@ app.include_router(filter_router, prefix="/api/v1")
 app.include_router(words_router, prefix="/api/v1/admin")
 app.include_router(audit_router, prefix="/api/v1/admin")
 app.include_router(config_router, prefix="/api/v1/admin")
+app.include_router(dashboard_router, prefix="/api/v1/admin")
 
 
 @app.get("/health")

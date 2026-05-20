@@ -119,6 +119,147 @@ class AuditService:
         logs = result.scalars().all()
         return list(logs), total
 
+    async def get_dashboard_stats(
+        self,
+        session: AsyncSession,
+        days: int = 7,
+    ) -> Dict[str, Any]:
+        """获取看板统计数据
+
+        Args:
+            session: 数据库会话
+            days: 统计天数（默认近7天）
+
+        Returns:
+            {
+                "risk_trend": [...],
+                "top_words": [...],
+                "top_users": [...],
+                "summary": {...}
+            }
+        """
+        from sqlalchemy import func, select, desc, cast, String
+        from models.security import SecurityAuditLog
+
+        # 时间范围
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=days)
+        today_start = end_time.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 1. 风险趋势（近 N 天按天聚合）
+        trend_query = (
+            select(
+                func.date(SecurityAuditLog.created_at).label("date"),
+                func.sum(func.cast(SecurityAuditLog.action == "block", Integer)).label("block"),
+                func.sum(func.cast(SecurityAuditLog.action == "approve", Integer)).label("approve"),
+                func.sum(func.cast(SecurityAuditLog.action == "sanitize", Integer)).label("sanitize"),
+                func.sum(func.cast(SecurityAuditLog.action == "allow", Integer)).label("allow"),
+            )
+            .where(SecurityAuditLog.created_at >= start_time)
+            .group_by(func.date(SecurityAuditLog.created_at))
+            .order_by("date")
+        )
+        trend_result = await session.execute(trend_query)
+        risk_trend = [
+            {
+                "date": str(row.date),
+                "block": int(row.block or 0),
+                "approve": int(row.approve or 0),
+                "sanitize": int(row.sanitize or 0),
+                "allow": int(row.allow or 0),
+            }
+            for row in trend_result.all()
+        ]
+
+        # 2. 高频敏感词 TOP 10
+        # 从 matched_rules JSON 中提取词信息
+        # 由于 JSON 查询在 SQLite/PostgreSQL 语法不同，这里用 Python 聚合
+        word_query = (
+            select(SecurityAuditLog.matched_rules)
+            .where(
+                SecurityAuditLog.created_at >= start_time,
+                SecurityAuditLog.matched_rules.isnot(None),
+            )
+        )
+        word_result = await session.execute(word_query)
+        word_counts: Dict[str, int] = {}
+        for row in word_result.all():
+            rules = row.matched_rules
+            if not isinstance(rules, list):
+                continue
+            for rule in rules:
+                if not isinstance(rule, dict):
+                    continue
+                word = rule.get("word") or rule.get("type") or "unknown"
+                word_counts[word] = word_counts.get(word, 0) + 1
+
+        top_words = sorted(
+            [{"word": k, "count": v} for k, v in word_counts.items()],
+            key=lambda x: x["count"],
+            reverse=True,
+        )[:10]
+
+        # 3. 用户风险排名 TOP 10
+        user_query = (
+            select(
+                SecurityAuditLog.username,
+                func.count().label("block_count"),
+            )
+            .where(
+                SecurityAuditLog.created_at >= start_time,
+                SecurityAuditLog.action == "block",
+                SecurityAuditLog.username.isnot(None),
+            )
+            .group_by(SecurityAuditLog.username)
+            .order_by(desc("block_count"))
+            .limit(10)
+        )
+        user_result = await session.execute(user_query)
+        top_users = [
+            {
+                "username": row.username,
+                "block_count": int(row.block_count),
+            }
+            for row in user_result.all()
+        ]
+
+        # 4. 今日概览
+        today_total_query = select(func.count()).select_from(SecurityAuditLog).where(
+            SecurityAuditLog.created_at >= today_start
+        )
+        today_total_result = await session.execute(today_total_query)
+        total_checks_today = today_total_result.scalar() or 0
+
+        today_block_query = select(func.count()).select_from(SecurityAuditLog).where(
+            SecurityAuditLog.created_at >= today_start,
+            SecurityAuditLog.action == "block",
+        )
+        today_block_result = await session.execute(today_block_query)
+        block_count_today = today_block_result.scalar() or 0
+
+        today_critical_query = select(func.count()).select_from(SecurityAuditLog).where(
+            SecurityAuditLog.created_at >= today_start,
+            SecurityAuditLog.risk_level == "critical",
+        )
+        today_critical_result = await session.execute(today_critical_query)
+        critical_count_today = today_critical_result.scalar() or 0
+
+        # 平均响应时间（用 created_at 的分钟粒度模拟，实际可记录响应时间字段）
+        # 由于没有专门的响应时间字段，这里返回固定占位值
+        avg_response_ms = 0.0
+
+        return {
+            "risk_trend": risk_trend,
+            "top_words": top_words,
+            "top_users": top_users,
+            "summary": {
+                "total_checks_today": total_checks_today,
+                "block_count_today": block_count_today,
+                "critical_count_today": critical_count_today,
+                "avg_response_ms": avg_response_ms,
+            },
+        }
+
     @staticmethod
     def _infer_event_type(matched_rules: List[Dict[str, Any]]) -> str:
         """从匹配规则推断事件类型"""
