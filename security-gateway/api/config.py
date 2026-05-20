@@ -6,9 +6,10 @@
 """
 
 import logging
-from fastapi import APIRouter
-from schemas.security import SecurityGatewayConfig
+from fastapi import APIRouter, Depends, HTTPException, Header
+from schemas.security import SecurityGatewayConfig, TestLLMRequest
 from config import settings
+from core.utils import normalize_llm_url
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,17 @@ def _get_merged_config() -> dict:
     return base
 
 
+def verify_admin(x_api_key: str = Header("", alias="X-API-Key")):
+    """校验管理接口权限
+
+    通过 X-API-Key 请求头校验。ADMIN_API_KEY 为空时不校验（开发环境便利）。
+    """
+    if not settings.ADMIN_API_KEY:
+        return
+    if x_api_key != settings.ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="无效的 API Key")
+
+
 @router.get("/config", response_model=SecurityGatewayConfig)
 async def get_config():
     """获取当前配置（环境变量 + 运行时覆盖）"""
@@ -45,7 +57,10 @@ async def get_config():
 
 
 @router.put("/config", response_model=SecurityGatewayConfig)
-async def update_config(data: SecurityGatewayConfig):
+async def update_config(
+    data: SecurityGatewayConfig,
+    _: None = Depends(verify_admin),
+):
     """更新运行时配置
 
     注意：运行时配置仅在当前服务进程生效，重启后恢复为环境变量值。
@@ -65,7 +80,10 @@ async def update_config(data: SecurityGatewayConfig):
 
 
 @router.post("/config/test-llm")
-async def test_llm_connection(data: dict):
+async def test_llm_connection(
+    data: TestLLMRequest,
+    _: None = Depends(verify_admin),
+):
     """测试 LLM 连接是否可用
 
     接收临时配置参数，尝试发送一个简单请求验证连通性。
@@ -73,30 +91,22 @@ async def test_llm_connection(data: dict):
     import time
     import httpx
 
-    url = data.get("url", "")
-    model = data.get("model", "")
-    api_key = data.get("api_key", "")
-    timeout = float(data.get("timeout", 5.0))
-
+    url = normalize_llm_url(data.url)
     if not url:
         return {"success": False, "message": "LLM API 地址不能为空"}
-
-    # 自动补全 /chat/completions 路径
-    if not url.endswith("/chat/completions"):
-        url = url.rstrip("/") + "/chat/completions"
 
     start = time.time()
     try:
         headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        if data.api_key:
+            headers["Authorization"] = f"Bearer {data.api_key}"
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(data.timeout)) as client:
             resp = await client.post(
                 url,
                 headers=headers,
                 json={
-                    "model": model or "test",
+                    "model": data.model or "test",
                     "messages": [{"role": "user", "content": "Hi"}],
                     "max_tokens": 5,
                 },
@@ -124,7 +134,7 @@ async def test_llm_connection(data: dict):
                     "latency_ms": int((time.time() - start) * 1000),
                 }
     except httpx.TimeoutException:
-        return {"success": False, "message": f"连接超时（{timeout}s）"}
+        return {"success": False, "message": f"连接超时（{data.timeout}s）"}
     except Exception as e:
         return {"success": False, "message": f"连接失败: {str(e)}"}
 

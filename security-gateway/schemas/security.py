@@ -106,6 +106,13 @@ class SecurityGatewayConfig(BaseModel):
     log_retention_days: int = 180
 
 
+class TestLLMRequest(BaseModel):
+    url: str
+    model: str = ""
+    api_key: str = ""
+    timeout: float = 5.0
+
+
 class DashboardStatsResponse(BaseModel):
     """看板统计响应"""
     risk_trend: List[dict]

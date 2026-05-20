@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, List
 import httpx
 
 from config import settings
+from core.utils import normalize_llm_url
+from core.runtime_config import get_runtime_config
 
 logger = logging.getLogger(__name__)
 
@@ -249,24 +251,14 @@ class LLMDetector:
         timeout: Optional[float] = None,
     ):
         # 优先使用传入参数，其次运行时配置，最后 settings 默认值
-        runtime = self._get_runtime_config()
-        url = api_url or runtime.get("model_engine_llm_url") or settings.MODEL_ENGINE_LLM_URL
-        if url and not url.endswith("/chat/completions"):
-            url = url.rstrip("/") + "/chat/completions"
-        self._api_url = url
+        runtime = get_runtime_config()
+        self._api_url = normalize_llm_url(
+            api_url or runtime.get("model_engine_llm_url") or settings.MODEL_ENGINE_LLM_URL
+        )
         self._model = model or runtime.get("model_engine_llm_model") or settings.MODEL_ENGINE_LLM_MODEL
         self._api_key = api_key or runtime.get("model_engine_llm_api_key") or settings.MODEL_ENGINE_LLM_API_KEY
         self._timeout = timeout or runtime.get("model_engine_llm_timeout") or settings.MODEL_ENGINE_LLM_TIMEOUT
         self._client: Optional[httpx.AsyncClient] = None
-
-    @classmethod
-    def _get_runtime_config(cls) -> dict:
-        """获取运行时配置（如果 api.config 已加载）"""
-        try:
-            from api.config import get_runtime_config
-            return get_runtime_config()
-        except Exception:
-            return {}
 
     @classmethod
     def _clear_instance_cache(cls):
