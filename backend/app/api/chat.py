@@ -521,6 +521,8 @@ async def react_chat_stream(
     from app.models import Workspace
     from app.modules.agent.context_pruner import ContextPruner as CP
     from app.modules.agent.compactor import Compactor as C, CompactionConfig as CC
+    from app.modules.agent.token_budget import TokenBudget
+    from app.modules.agent.compression_service import ContextCompressionService
     ws_result = await db.execute(
         select(Workspace).where(Workspace.owner_id == current_user.id, Workspace.is_default == True)
     )

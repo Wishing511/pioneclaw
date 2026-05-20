@@ -1111,6 +1111,7 @@ async function sendMessage() {
                   break
                 case 'content':
                   contentBuffer += data.content
+                  streamingMsg.content = contentBuffer  // 实时更新，实现流式显示
                   break
                 case 'new_iteration':
                   // 新一轮迭代 → 丢弃缓冲的规划文本
@@ -1676,7 +1677,8 @@ onUnmounted(() => {
         background: var(--pc-bg-elevated);
         padding: 12px 16px;
         border-radius: 12px;
-        max-width: 85%;
+        max-width: 100%;
+        width: fit-content;
         position: relative;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         border: 1px solid var(--pc-border);
@@ -1817,7 +1819,8 @@ onUnmounted(() => {
         background: var(--pc-primary);
         padding: 12px 16px;
         border-radius: 12px;
-        max-width: 85%;
+        max-width: 100%;
+        width: fit-content;
 
         .message-content {
           font-size: 14px;
