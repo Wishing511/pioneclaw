@@ -218,7 +218,8 @@ class AgentLoop:
         self.retry_delay = retry_delay
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.last_tool_results: dict[str, str] = {}  # 记录最后一次工具调用结果
+        self.last_tool_results: dict[str, str] = {}  # 记录最后一次工具调用结果（key=tool_call_id）
+        self.last_tool_durations: dict[str, int] = {}  # 记录最后一次工具调用耗时(ms)（key=tool_call_id）
         self.session_id = session_id  # WebSocket 会话 ID
         self.agent_config = agent_config or {}  # Agent 配置（含 tool_policy）
 
@@ -485,6 +486,7 @@ class AgentLoop:
         final_content = ""
         iterations_log: list[AgentIteration] = []
         self.last_tool_results = {}  # 清空上次的工具调用结果
+        self.last_tool_durations = {}  # 清空上次的工具调用耗时
         
         try:
             while iteration < runtime_max_iterations:
@@ -648,6 +650,12 @@ class AgentLoop:
                 # 成功后清空 tool_calls_buffer，下面的 for 循环跳过
                 if len(tool_calls_buffer) > 1:
                     original_buffer = list(tool_calls_buffer)
+                    # 为缺失 id 的工具调用分配稳定 fallback id，避免并行执行时空串 key 覆盖
+                    for tc in tool_calls_buffer:
+                        if not tc.get("id"):
+                            tc["id"] = self._fallback_tool_call_id(
+                                tc.get("name", ""), tc.get("arguments", {})
+                            )
                     tool_calls_buffer = await self._try_parallel_execute(
                         tool_calls_buffer, messages, content_buffer,
                         reasoning_content_buffer, cancel_token, yield_intermediate,
@@ -657,13 +665,16 @@ class AgentLoop:
                     # 注意：_try_parallel_execute 已把结果写入 self.last_tool_results
                     if not tool_calls_buffer:
                         for tc in original_buffer:
+                            tc_id = tc.get("id", "")
                             tc_name = tc.get("name", "")
-                            yield f"<!--TOOL_START:{json.dumps({'name': tc_name}, ensure_ascii=False)}-->"
+                            yield f"<!--TOOL_START:{json.dumps({'name': tc_name, 'tool_call_id': tc_id}, ensure_ascii=False)}-->"
                         for tc in original_buffer:
+                            tc_id = tc.get("id", "")
                             tc_name = tc.get("name", "")
-                            if tc_name in self.last_tool_results:
-                                result = self.last_tool_results[tc_name]
-                                yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'result': result}, ensure_ascii=False)}-->"
+                            if tc_id in self.last_tool_results:
+                                result = self.last_tool_results[tc_id]
+                                duration_ms = self.last_tool_durations.get(tc_id)
+                                yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'tool_call_id': tc_id, 'result': result, 'duration_ms': duration_ms}, ensure_ascii=False)}-->"
                         content_buffer = ""  # 与 for 循环结束后的清理保持一致
                         continue  # 跳过 for 循环，进入下一轮迭代
 
@@ -695,6 +706,11 @@ class AgentLoop:
                             tc_id = str(tc_id[0]) if tc_id else ""
                         elif not isinstance(tc_id, str):
                             tc_id = str(tc_id) if tc_id else ""
+
+                        # 缺失 id 时生成稳定 fallback key，避免空串 key 导致同名工具覆盖
+                        if not tc_id:
+                            tc_id = self._fallback_tool_call_id(tc_name, tc_args)
+                            tool_call["id"] = tc_id
 
                         # 工具调用去重
                         if tc_id and tc_id in self.seen_tool_call_ids:
@@ -733,7 +749,7 @@ class AgentLoop:
                             await tool_handler.notify_start(tc_args)
 
                         # SSE 实时通知：工具开始执行
-                        yield f"<!--TOOL_START:{json.dumps({'name': tc_name}, ensure_ascii=False)}-->"
+                        yield f"<!--TOOL_START:{json.dumps({'name': tc_name, 'tool_call_id': tc_id}, ensure_ascii=False)}-->"
 
                         # 插件事件：工具开始
                         await self._emit_plugin_event("tool_start", {
@@ -815,12 +831,14 @@ class AgentLoop:
                                     await asyncio.sleep(self.retry_delay)
 
                         # 添加工具结果到消息列表
+                        tool_duration_ms = int((time.time() - tool_start_time) * 1000)
                         if result is not None:
-                            # 记录工具调用结果
-                            self.last_tool_results[tc_name] = result
+                            # 记录工具调用结果（以 tool_call_id 为 key，避免同名工具并行时覆盖）
+                            self.last_tool_results[tc_id] = result
+                            self.last_tool_durations[tc_id] = tool_duration_ms
 
                             # SSE 实时通知：工具执行完成
-                            yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'result': result}, ensure_ascii=False)}-->"
+                            yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'tool_call_id': tc_id, 'result': result, 'duration_ms': tool_duration_ms}, ensure_ascii=False)}-->"
 
                             # WebSocket 通知：工具调用成功
                             if tool_handler:
@@ -863,7 +881,7 @@ class AgentLoop:
                             logger.error(f"Tool {tc_name} failed permanently: {error_msg}")
 
                             # SSE 实时通知：工具执行错误
-                            yield f"<!--TOOL_ERROR:{json.dumps({'name': tc_name, 'error': str(last_error)}, ensure_ascii=False)}-->"
+                            yield f"<!--TOOL_ERROR:{json.dumps({'name': tc_name, 'tool_call_id': tc_id, 'error': str(last_error), 'duration_ms': tool_duration_ms}, ensure_ascii=False)}-->"
 
                             # WebSocket 通知：工具错误
                             if tool_handler:
@@ -1180,27 +1198,29 @@ class AgentLoop:
 
         # 并行执行所有工具
         async def execute_one(tc_id, tc_name, tc_args):
+            start = time.time()
             try:
                 result = await self._execute_tool(tc_name, tc_args)
                 # Phase 6: 跟踪文件访问
                 self._track_file_access(tc_name, tc_args, result, tc_id)
-                return (tc_id, tc_name, tc_args, result, None)
+                return (tc_id, tc_name, tc_args, result, None, int((time.time() - start) * 1000))
             except Exception as e:
-                return (tc_id, tc_name, tc_args, None, e)
+                return (tc_id, tc_name, tc_args, None, e, int((time.time() - start) * 1000))
 
         coroutines = [execute_one(tc_id, tc_name, tc_args) for tc_id, tc_name, tc_args in parsed]
         results = await asyncio.gather(*coroutines)
 
         # 处理结果并追加到 messages
         has_failure = False
-        for tc_id, tc_name, tc_args, result, error in results:
+        for tc_id, tc_name, tc_args, result, error, duration_ms in results:
             total_tool_calls_local = len(tool_calls_buffer)
 
             if tc_id:
                 self.seen_tool_call_ids.add(tc_id)
 
             if error is None and result is not None:
-                self.last_tool_results[tc_name] = result
+                self.last_tool_results[tc_id] = result
+                self.last_tool_durations[tc_id] = duration_ms
                 assistant_msg = {
                     "role": "assistant",
                     "content": content_buffer or "",
@@ -1620,6 +1640,21 @@ class AgentLoop:
             return token.is_cancelled
         except Exception:
             return False
+
+    def _fallback_tool_call_id(self, tc_name: str, tc_args: Any) -> str:
+        """为缺失 tool_call_id 的工具调用生成调用级唯一的 fallback key"""
+        if isinstance(tc_args, str):
+            try:
+                tc_args = json.loads(tc_args)
+            except Exception:
+                tc_args = {}
+        elif isinstance(tc_args, list):
+            tc_args = {"args": tc_args}
+        elif not isinstance(tc_args, dict):
+            tc_args = {}
+        args_hash = hash(json.dumps(tc_args, sort_keys=True, ensure_ascii=False)) & 0xFFFFFFFF
+        # 加入 uuid 后缀确保调用级唯一，避免同名同参工具被 seen_tool_call_ids 误判为重复
+        return f"__fb_{tc_name}_{args_hash}_{uuid.uuid4().hex[:8]}"
 
     def _get_permission_checker(self) -> PermissionChecker:
         """获取或延迟初始化权限检查器"""

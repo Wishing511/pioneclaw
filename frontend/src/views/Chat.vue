@@ -86,7 +86,7 @@
 
       <!-- 消息区域（微信风格） -->
       <div class="chat-messages" ref="messagesContainer">
-        <div v-if="!currentConversation || currentConversation.messages.length === 0" class="empty-chat">
+        <div v-if="!currentConversation || streamMessages.length === 0" class="empty-chat">
           <div class="empty-icon">
             <svg viewBox="0 0 64 64" fill="none">
               <rect x="8" y="12" width="48" height="40" rx="4" stroke="currentColor" stroke-width="2"/>
@@ -117,8 +117,8 @@
 
         <div v-else class="messages-wrapper">
           <template
-            v-for="(msg, index) in currentConversation.messages"
-            :key="index"
+            v-for="(msg, index) in displayMessages"
+            :key="msg.id || index"
           >
             <div
               v-if="!(msg.isStreaming && !msg.content && !msg.thinkingContent && !(msg.toolCalls && msg.toolCalls.length > 0))"
@@ -138,20 +138,20 @@
                   <el-icon><Cpu /></el-icon>
                 </el-avatar>
                 <div class="message-body">
-                  <!-- 思考/推理内容（可折叠，流式时自动展开） -->
-                  <div v-if="msg.thinkingContent && reactMode && showThinking" class="thinking-collapse">
-                    <details class="thinking-details" :open="msg.isStreaming">
-                      <summary class="thinking-summary">
-                        <span class="thinking-icon">💭</span>
-                        <span>思考过程</span>
-                        <span class="thinking-chars">({{ msg.thinkingContent.length }} 字)</span>
-                      </summary>
-                      <div class="thinking-content">{{ msg.thinkingContent }}</div>
-                    </details>
+                  <!-- 思考/推理内容（默认折叠，显示思考时长） -->
+                  <div v-if="msg.thinkingContent" class="thinking-collapse">
+                    <div class="thinking-toggle" @click="toggleThinking(index)">
+                      <span class="thinking-dot"></span>
+                      <span class="thinking-label">Thought for {{ formatThinkingDuration(msg.thinkingContent) }}</span>
+                      <el-icon class="thinking-arrow" :class="{ expanded: isThinkingExpanded(index) }">
+                        <ArrowRight />
+                      </el-icon>
+                    </div>
+                    <div v-show="isThinkingExpanded(index)" class="thinking-content">{{ msg.thinkingContent }}</div>
                   </div>
                   <!-- 工具调用 -->
                   <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="tool-call-bubble">
-                    <div v-for="(tc, tcIndex) in msg.toolCalls" :key="tcIndex" class="tool-call-item">
+                    <div v-for="(tc, tcIndex) in msg.toolCalls" :key="tcIndex" class="tool-call-item" :class="`tool-status-${tc.status}`">
                       <div class="tool-call-header" @click="toggleToolCall(index, tcIndex)">
                         <el-icon class="expand-icon" :class="{ expanded: isToolCallExpanded(index, tcIndex) }">
                           <ArrowRight />
@@ -164,9 +164,15 @@
                           <span class="loading-dots"><span></span><span></span><span></span></span>
                           <span class="loading-text">执行中...</span>
                         </span>
-                        <span v-else-if="tc.result" class="tool-result-summary">{{ tc.result.substring(0, 60) }}{{ tc.result.length > 60 ? '…' : '' }}</span>
+                        <span v-else class="tool-result-summary" :class="{ 'is-error': tc.status === 'error' }">
+                          {{ formatToolResultSummary(tc) }}
+                        </span>
+                        <span v-if="tc.duration != null" class="tool-duration">{{ tc.duration }}ms</span>
                       </div>
-                      <div v-show="isToolCallExpanded(index, tcIndex)" class="tool-result">{{ tc.result }}</div>
+                      <div v-show="isToolCallExpanded(index, tcIndex)" class="tool-result">
+                        <pre v-if="isJsonString(tc.result)" class="tool-result-json"><code>{{ formatJsonResult(tc.result) }}</code></pre>
+                        <template v-else>{{ tc.result }}</template>
+                      </div>
                     </div>
                   </div>
                   <!-- 普通回复 - 流式时内容为空则不显示气泡 -->
@@ -285,15 +291,6 @@
         <!-- 底部工具栏 -->
         <div class="input-footer">
           <div class="footer-left">
-            <!-- Quick/Think mode -->
-            <el-radio-group v-model="reactMode" size="small">
-              <el-radio-button :value="false">{{ $t('chat.quick') }}</el-radio-button>
-              <el-radio-button :value="true">{{ $t('chat.think') }}</el-radio-button>
-            </el-radio-group>
-            <el-checkbox v-model="showThinking" size="small" class="show-thinking-check">
-              显示思考
-            </el-checkbox>
-
             <!-- Upload file -->
             <el-button size="small" :title="$t('chat.uploadFile')">
               <el-icon><Paperclip /></el-icon>
@@ -334,6 +331,9 @@ import { getAccessToken } from '@/stores/user'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { logger } from '../utils/logger'
+import { useMessageStreaming } from '@/composables/useMessageStreaming'
+import { useChatRealtime } from '@/composables/useChatRealtime'
+import type { ChatMessage, StreamRealtimeMessage } from '@/types/chat'
 
 const { locale, t: $t } = useI18n()
 
@@ -355,6 +355,60 @@ interface ToolExecution {
   duration_ms?: number
 }
 const activeTools = ref<Map<string, ToolExecution>>(new Map())
+
+// ─── 流式消息状态（reducer 架构）───
+const {
+  messages: streamMessages,
+  isStreaming: isStreamActive,
+  dispatchStreamEvent,
+  replaceMessages,
+  clearMessages,
+  addMessage,
+  cacheSessionMessages,
+  readSessionMessages,
+  restoreSessionMessages,
+} = useMessageStreaming()
+
+// 包装 dispatch：拦截 done 事件保存 context_usage
+const wrappedDispatch = (data: StreamRealtimeMessage) => {
+  if (data.type === 'done' && data.context_usage) {
+    contextUsage.value = data.context_usage
+  }
+  dispatchStreamEvent(data)
+}
+
+// 映射旧字段 → 模板期望的字段（兼容现有模板）
+const displayMessages = computed(() => {
+  const result = streamMessages.value
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({
+      ...m,
+      thinkingContent: m.reasoningContent,
+      toolCalls: m.toolCalls?.map((tc) => ({
+        ...tc,
+        result: tc.result || tc.error || '',
+        status: tc.status || (tc.error ? 'error' : tc.result ? 'success' : 'pending'),
+        loading: tc.status === 'running',
+      })),
+    }))
+  return result
+})
+
+const { startStream } = useChatRealtime({
+  dispatchStreamEvent: wrappedDispatch,
+  getCurrentSessionId: () => currentConversation.value?.sessionId || null,
+  cacheSessionMessages,
+  onError: (msg: string) => {
+    ElMessage.error(msg)
+    // 添加一条 assistant 错误消息，避免 UI 卡在 loading 且无内容
+    addMessage({
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      role: 'assistant',
+      content: `⚠️ ${msg}`,
+      timestamp: new Date(),
+    })
+  },
+})
 
 // 连接 WebSocket
 function connectWebSocket() {
@@ -435,9 +489,8 @@ function handleWebSocketMessage(data: any) {
         completeTool.duration_ms = data.duration_ms
       }
       logger.log(`✅ Tool complete: ${data.tool} (${data.duration_ms?.toFixed(0)}ms)`)
-      // 3秒后移除
-      const completeTimer = setTimeout(() => activeTools.value.delete(data.tool_call_id), 3000)
-      toolCleanupTimers.add(completeTimer)
+      // 立即移除，避免与消息内的工具卡片重叠
+      activeTools.value.delete(data.tool_call_id)
       break
 
     // 工具执行错误
@@ -449,9 +502,8 @@ function handleWebSocketMessage(data: any) {
         errorTool.duration_ms = data.duration_ms
       }
       console.error(`❌ Tool error: ${data.tool} - ${data.error}`)
-      // 5秒后移除
-      const errorTimer = setTimeout(() => activeTools.value.delete(data.tool_call_id), 5000)
-      toolCleanupTimers.add(errorTimer)
+      // 立即移除
+      activeTools.value.delete(data.tool_call_id)
       break
 
     case 'agent_complete':
@@ -460,25 +512,16 @@ function handleWebSocketMessage(data: any) {
 
     // 流式响应块 - 需要检查 session_id 是否匹配当前会话
     case 'stream_chunk':
-      // 只有当前会话才处理
-      const currentSessId = currentConversation.value?.sessionId
-      if (currentSessId && data.session_id === currentSessId && currentConversation.value) {
-        // 追加到当前消息
-        const lastMsg = currentConversation.value.messages[currentConversation.value.messages.length - 1]
-        if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-          lastMsg.content += data.chunk
+      {
+        const currentSessId = currentConversation.value?.sessionId
+        if (currentSessId && data.session_id === currentSessId) {
+          dispatchStreamEvent({ type: 'content', content: data.chunk })
         }
       }
       break
 
     case 'stream_end':
-      // 结束流式
-      if (currentConversation.value) {
-        const lastMsg = currentConversation.value.messages[currentConversation.value.messages.length - 1]
-        if (lastMsg && lastMsg.isStreaming) {
-          lastMsg.isStreaming = false
-        }
-      }
+      dispatchStreamEvent({ type: 'message_complete' })
       break
   }
 }
@@ -525,22 +568,10 @@ const slashCommands = [
 //   return slashCommands.filter(cmd => cmd.command.startsWith(query))
 // })
 
-interface Message {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  thinkingContent?: string  // AI 推理/思考内容
-  latency?: number
-  input_tokens?: number
-  output_tokens?: number
-  timestamp?: Date
-  toolCalls?: { name: string; result: string }[]
-  isStreaming?: boolean
-}
-
 interface Conversation {
   id: string
   title: string
-  messages: Message[]
+  messages: ChatMessage[]
   createdAt: Date
   updatedAt?: Date
   sessionId?: string  // 每个会话独立的 WebSocket session ID
@@ -579,23 +610,40 @@ const tieredModels = computed(() => {
 const messagesContainer = ref<HTMLElement | null>(null)
 const sidebarCollapsed = ref(false) // 左侧栏折叠状态
 const searchKeyword = ref('')
-const reactMode = ref(false)  // 默认快速模式
-const showThinking = ref(false)  // 默认不显示思考过程
 const contextUsage = ref<any>(null)  // 上下文使用率信息
 const expandedToolCalls = ref<Set<string>>(new Set())  // 展开的工具调用
+const expandedThinking = ref<Set<number>>(new Set())  // 展开的思考过程
+
+// 切换思考过程展开/收缩
+function toggleThinking(msgIndex: number) {
+  if (expandedThinking.value.has(msgIndex)) {
+    expandedThinking.value.delete(msgIndex)
+  } else {
+    expandedThinking.value.add(msgIndex)
+  }
+}
+
+function isThinkingExpanded(msgIndex: number): boolean {
+  return expandedThinking.value.has(msgIndex)
+}
+
+/** 根据思考内容长度估算思考时长（字符数 / 100 ≈ 秒数） */
+function formatThinkingDuration(content: string): string {
+  const seconds = Math.max(1, Math.round((content?.length || 0) / 100))
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
 
 // 检查当前会话是否正在加载
 function isCurrentConversationLoading(): boolean {
-  if (!currentConversation.value) return false
-  return loadingConversationId.value === currentConversation.value.id
+  return isStreamActive.value && loadingConversationId.value === currentConversation.value?.id
 }
 
 // 最后一条 AI 消息是否正在流式且有可见内容
 const streamingMsgHasContent = computed(() => {
-  const msgs = currentConversation.value?.messages
-  if (!msgs?.length) return false
+  const msgs = streamMessages.value
+  if (!msgs.length) return false
   const last = msgs[msgs.length - 1]
-  const hasVisibleContent = !!(last.thinkingContent || last.content)
+  const hasVisibleContent = !!(last.reasoningContent || last.content)
   const hasToolCalls = !!(last.toolCalls && last.toolCalls.length > 0)
   return last.role === 'assistant' && last.isStreaming && (hasVisibleContent || hasToolCalls)
 })
@@ -685,10 +733,63 @@ function getToolIcon(name: string) {
 }
 
 function formatToolName(name: string): string {
+  if (!name) return ''
+  // 如果已经是可读格式（包含空格或大写驼峰），直接返回
+  if (/\s/.test(name) || /^[A-Z][a-z]+([A-Z][a-z]+)+$/.test(name)) {
+    return name
+  }
   return name
     .split('_')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .map(word => {
+      if (!word) return ''
+      // 纯中文或已是大写的词不处理
+      if (/^[一-龥]+$/.test(word) || /^[A-Z]+$/.test(word)) return word
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    })
     .join(' ')
+}
+
+/** 智能摘要：根据工具状态/结果生成友好的 header 摘要 */
+function formatToolResultSummary(tc: any): string {
+  if (tc.status === 'error') {
+    const err = tc.result || '执行失败'
+    return err.length > 30 ? err.substring(0, 30) + '…' : err
+  }
+  const result = tc.result || ''
+  if (!result) return ''
+  // JSON 结果：提取关键状态
+  const json = tryParseJson(result)
+  if (json) {
+    if (json.success === true) return '✅ 成功'
+    if (json.success === false) return `❌ ${json.message || json.error || '失败'}`
+    if (json.error) return `❌ ${json.error}`
+    return '✅ 完成'
+  }
+  // 文本结果：截取前 40 字符
+  return result.length > 40 ? result.substring(0, 40) + '…' : result
+}
+
+function tryParseJson(str: string): any | null {
+  if (!str || typeof str !== 'string') return null
+  const trimmed = str.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+}
+
+function isJsonString(str: string): boolean {
+  return tryParseJson(str) !== null
+}
+
+function formatJsonResult(str: string): string {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2)
+  } catch {
+    return str
+  }
 }
 
 function toggleToolCall(msgIndex: number, tcIndex: number) {
@@ -755,6 +856,8 @@ function saveConversations() {
 
 // 新建对话
 async function newConversation() {
+  syncCurrentMessagesToConv()
+  clearMessages()
   try {
     const res = await api.post('/chat/sessions', null, { params: { title: $t('chat.newChat') } })
     const s = res.data
@@ -781,32 +884,70 @@ async function newConversation() {
     conversations.value.unshift(conv)
     currentConversation.value = conv
   }
+  inputMessage.value = ''
   saveConversations()
+}
+
+/** 统一切换会话：保存旧会话状态 → 切换 → 恢复新会话消息 */
+function syncCurrentMessagesToConv() {
+  if (currentConversation.value) {
+    currentConversation.value.draftText = inputMessage.value
+    currentConversation.value.messages = [...streamMessages.value]
+  }
 }
 
 // 选择对话
 async function selectConversation(conv: Conversation) {
-  // 保存当前会话的输入内容
-  if (currentConversation.value) {
-    currentConversation.value.draftText = inputMessage.value
-  }
+  syncCurrentMessagesToConv()
   currentConversation.value = conv
-  // 恢复目标会话的输入内容
   inputMessage.value = conv.draftText || ''
-  // 如果本地没有消息，从后端加载
-  if (conv.messages.length === 0) {
-    try {
-      const res = await api.get(`/chat/sessions/${conv.id}`)
-      if (res.data?.messages) {
-        conv.messages = res.data.messages.map((m: any) => ({
-          role: m.role,
-          content: m.content,
-          toolCalls: m.tool_calls,
-          timestamp: new Date(m.created_at),
-        }))
-      }
-    } catch (e) { /* 静默降级 */ }
+
+  let loadedMessages: ChatMessage[] = []
+
+  // 1. 优先从后端加载（持久化数据为准）
+  try {
+    const res = await api.get(`/chat/sessions/${conv.id}`)
+    if (res.data?.messages && res.data.messages.length > 0) {
+      loadedMessages = res.data.messages.map((m: any, i: number) => ({
+        id: m.id || `msg-${Date.now()}-${i}`,
+        role: m.role,
+        content: m.content,
+        reasoningContent: m.thinkingContent || m.reasoning_content,
+        toolCalls: m.tool_calls?.map((tc: any, j: number) => ({
+          id: tc.id || `tc-${Date.now()}-${j}`,
+          name: tc.name,
+          arguments: tc.arguments,
+          result: tc.result,
+          status: tc.loading ? 'running' : tc.result ? 'success' : 'pending',
+        })),
+        timestamp: new Date(m.created_at),
+      }))
+      conv.messages = loadedMessages
+    }
+  } catch (e) { /* 静默降级，继续尝试其他来源 */ }
+
+  // 2. 后端无数据时，用本地已保存的消息
+  if (loadedMessages.length === 0 && conv.messages.length > 0) {
+    loadedMessages = [...conv.messages]
   }
+
+  // 3. 尝试从 sessionStorage 读取流式中断状态（不修改 runtime）
+  let cacheMessages: ChatMessage[] = []
+  let cacheIsStreaming = false
+  if (conv.sessionId) {
+    const cache = readSessionMessages(conv.sessionId)
+    if (cache && cache.messages.length > 0) {
+      cacheMessages = cache.messages
+      cacheIsStreaming = cache.isStreaming
+    }
+  }
+
+  // 4. 选择数据源：只有缓存标记为流式中断时才优先用缓存，否则后端持久化数据为准
+  if (cacheIsStreaming && cacheMessages.length > 0) {
+    loadedMessages = cacheMessages
+  }
+
+  replaceMessages(loadedMessages)
   scrollToBottom()
 }
 
@@ -817,7 +958,14 @@ async function deleteCurrentConversation() {
   const index = conversations.value.findIndex(c => c.id === convId)
   if (index > -1) {
     conversations.value.splice(index, 1)
-    currentConversation.value = conversations.value[0] || null
+    syncCurrentMessagesToConv()
+    const nextConv = conversations.value[0] || null
+    currentConversation.value = nextConv
+    if (nextConv) {
+      replaceMessages(nextConv.messages.length > 0 ? [...nextConv.messages] : [])
+    } else {
+      clearMessages()
+    }
     saveConversations()
   }
   try {
@@ -828,6 +976,7 @@ async function deleteCurrentConversation() {
 // 清空当前对话
 function clearCurrentConversation() {
   if (currentConversation.value) {
+    clearMessages()
     currentConversation.value.messages = []
     currentConversation.value.title = $t('chat.newChat')
     saveConversations()
@@ -837,7 +986,7 @@ function clearCurrentConversation() {
 // 导出对话
 function exportConversation() {
   if (!currentConversation.value) return
-  const content = currentConversation.value.messages
+  const content = streamMessages.value
     .map(m => `[${m.role === 'user' ? 'User' : 'AI'}] ${m.content}`)
     .join('\n\n')
 
@@ -856,14 +1005,14 @@ async function compactContext(instruction?: string) {
     ElMessage.warning('请先选择一个会话')
     return
   }
-  if (currentConversation.value.messages.length === 0) {
+  if (streamMessages.value.length === 0) {
     ElMessage.warning('当前会话没有消息可压缩')
     return
   }
 
   const loading = ElMessage.info({ message: '正在压缩上下文...', duration: 0 })
   try {
-    const messages = currentConversation.value.messages.map(m => ({
+    const messages = streamMessages.value.map(m => ({
       role: m.role,
       content: m.content,
     }))
@@ -877,13 +1026,14 @@ async function compactContext(instruction?: string) {
 
     const data = res.data
     if (data.success) {
-      const originalCount = currentConversation.value.messages.length
+      const originalCount = streamMessages.value.length
       const summaryText = data.summary || ''
 
       // 用后端返回的压缩后消息列表替换当前会话
+      let nextMessages: ChatMessage[] = []
       if (data.messages && data.messages.length > 0) {
-        currentConversation.value.messages = data.messages.map((m: any) => ({
-          id: Date.now() + Math.random(),
+        nextMessages = data.messages.map((m: any, i: number) => ({
+          id: `msg-${Date.now()}-${i}`,
           role: m.role,
           content: m.content,
           timestamp: new Date(),
@@ -893,12 +1043,15 @@ async function compactContext(instruction?: string) {
       // 追加压缩统计信息作为系统消息
       const infoText = `--- 上下文已压缩 ---\n压缩前: ${data.before_tokens?.toLocaleString() || '?'} tokens (${originalCount} 条消息)\n压缩后: ${data.after_tokens?.toLocaleString() || '?'} tokens (${data.kept_messages} 条消息)\n节省: ${data.saved_tokens?.toLocaleString() || '?'} tokens\n\n[摘要]\n${summaryText}`
 
-      currentConversation.value.messages.push({
-        id: Date.now() + Math.random(),
+      nextMessages.push({
+        id: `msg-${Date.now()}-info`,
         role: 'system',
         content: infoText,
         timestamp: new Date(),
       })
+
+      replaceMessages(nextMessages)
+      currentConversation.value.messages = [...nextMessages]
       saveConversations()
       ElMessage.success(`上下文已压缩，节省 ${data.saved_tokens?.toLocaleString() || '?'} tokens`)
     } else {
@@ -932,6 +1085,7 @@ function handleSlashCommand(command: string) {
 
     case 'clear':
       if (currentConversation.value) {
+        clearMessages()
         currentConversation.value.messages = []
         saveConversations()
         ElMessage.success($t('chat.chatCleared'))
@@ -985,12 +1139,8 @@ function handleSlashCommand(command: string) {
 // 发送消息
 async function sendMessage() {
   if (!inputMessage.value.trim()) return
-  // 当前会话正在加载时不允许重复发送，但不阻塞其他会话
-  if (loadingConversationId.value === currentConversation.value?.id) {
-    return
-  }
+  if (loadingConversationId.value === currentConversation.value?.id) return
 
-  // 处理斜杠命令
   if (inputMessage.value.startsWith('/')) {
     handleSlashCommand(inputMessage.value.trim())
     return
@@ -1004,208 +1154,82 @@ async function sendMessage() {
   inputMessage.value = ''
   if (currentConversation.value) currentConversation.value.draftText = ''
 
-  // 添加用户消息
-  currentConversation.value!.messages.push({
+  // 添加用户消息到流式状态
+  addMessage({
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     role: 'user',
     content: userMessage,
-    timestamp: new Date()
+    timestamp: new Date(),
   })
 
   // 持久化用户消息到后端
   persistMessage(currentConversation.value!, 'user', userMessage)
 
   // 更新标题
-  if (currentConversation.value!.messages.length === 1) {
+  if (streamMessages.value.length === 1) {
     currentConversation.value!.title = userMessage.slice(0, 30) + (userMessage.length > 30 ? '...' : '')
   }
-
   currentConversation.value!.updatedAt = new Date()
   scrollToBottom()
 
-  // 设置加载状态
   loadingConversationId.value = currentConversation.value!.id
-
-  // 保存当前会话的引用（防止等待期间用户切换会话）
   const targetConversation = currentConversation.value
   if (!targetConversation) return
 
   try {
-    // 统一使用 ReAct SSE 流式调用（快速模式也会调用工具）
     const sessionId = targetConversation.sessionId || crypto.randomUUID()
-      if (!targetConversation.sessionId) {
-        targetConversation.sessionId = sessionId
-      }
+    if (!targetConversation.sessionId) {
+      targetConversation.sessionId = sessionId
+    }
 
-      // 创建流式占位消息并获取其响应式代理（关键：push 后从数组中取回响应式版本）
-      targetConversation.messages.push({
-        role: 'assistant',
-        content: '',
-        thinkingContent: '',
-        timestamp: new Date(),
-        toolCalls: [],
-        isStreaming: true,
-      })
-      // 从数组中取回响应式代理，否则 Vue 无法追踪对 plain object 的修改
-      const streamingMsg = targetConversation.messages[targetConversation.messages.length - 1]
+    // 构造 context（排除最后一条 user message）
+    const contextMessages = streamMessages.value
+      .slice(0, -1)
+      .filter((m) => !m.isStreaming && m.role)
+      .map((m) => ({ role: m.role, content: m.content }))
 
-      // P1: 构造 context，传入压缩后的历史消息
-      // 排除当前刚输入的 user message（后端会自己 append request.message）
-      // 和正在 streaming 的 assistant 占位消息
-      const contextMessages = targetConversation.messages
-        .slice(0, -2) // 排除最后两条：user + streaming assistant
-        .filter((m: any) => !m.isStreaming && m.role)
-        .map((m: any) => ({ role: m.role, content: m.content }))
+    const token = getAccessToken() || localStorage.getItem('token') || ''
 
-      const token = getAccessToken() || localStorage.getItem('token')
-      const response = await fetch('/api/chat/react/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          message: userMessage,
-          context: contextMessages.length > 0 ? contextMessages : undefined,
-          model_config_id: selectedModelId.value,
-          enable_tools: true,
-          max_iterations: 10,
-          session_id: sessionId,
-          fast_mode: !reactMode.value,
-        }),
-      })
+    await startStream(
+      '/api/chat/react/stream',
+      {
+        message: userMessage,
+        context: contextMessages.length > 0 ? contextMessages : undefined,
+        model_config_id: selectedModelId.value,
+        enable_tools: true,
+        max_iterations: 10,
+        session_id: sessionId,
+        fast_mode: false,
+      },
+      token
+    )
 
-      if (response.status === 401) {
-        streamingMsg.content = '⚠️ 登录已过期，请重新登录'
-        streamingMsg.isStreaming = false
-        localStorage.removeItem('token')
-        setTimeout(() => { window.location.href = '/login' }, 1000)
-        return
-      }
-
-      if (!response.ok) {
-        streamingMsg.content = `⚠️ 请求失败 (${response.status})`
-        streamingMsg.isStreaming = false
-        return
-      }
-
-      // 读取 SSE 流
-      const reader = response.body!.getReader()
-      const decoder = new TextDecoder()
-      let sseBuffer = ''
-      let contentBuffer = ''   // 本地缓冲：工具调用期间的规划文本放在这里，可丢弃
-      // 工具结果标记（保留用于未来扩展）
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          sseBuffer += decoder.decode(value, { stream: true })
-          const lines = sseBuffer.split('\n')
-          sseBuffer = lines.pop() || ''  // 保留不完整的行
-
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue
-            const dataStr = line.slice(6)
-            if (dataStr === '[DONE]') continue
-
-            try {
-              const data = JSON.parse(dataStr)
-              switch (data.type) {
-                case 'thinking':
-                  streamingMsg.thinkingContent! += data.content
-                  break
-                case 'content':
-                  contentBuffer += data.content
-                  streamingMsg.content = contentBuffer  // 实时更新，实现流式显示
-                  break
-                case 'new_iteration':
-                  // 新一轮迭代 → 重置 contentBuffer，但保留已显示的规划文本
-                  // 这样用户在工具执行期间仍能看到之前的思考过程
-                  contentBuffer = ''
-                  break
-                case 'tool_start':
-                  if (!streamingMsg.toolCalls) streamingMsg.toolCalls = []
-                  streamingMsg.toolCalls.push({ name: data.name, result: '', loading: true })
-                  scrollToBottom()
-                  break
-                case 'tool_result':
-                  if (!streamingMsg.toolCalls) streamingMsg.toolCalls = []
-                  const existing = streamingMsg.toolCalls.find((tc: any) => tc.name === data.name && tc.loading)
-                  if (existing) {
-                    existing.result = data.result
-                    existing.loading = false
-                  } else {
-                    streamingMsg.toolCalls.push({ name: data.name, result: data.result })
-                  }
-                  scrollToBottom()
-                  break
-                case 'tool_error':
-                  if (!streamingMsg.toolCalls) streamingMsg.toolCalls = []
-                  const errTc = streamingMsg.toolCalls.find((tc: any) => tc.name === data.name && tc.loading)
-                  if (errTc) {
-                    errTc.result = `⚠️ ${data.error}`
-                    errTc.loading = false
-                  } else {
-                    streamingMsg.toolCalls.push({ name: data.name, result: `⚠️ ${data.error}` })
-                  }
-                  scrollToBottom()
-                  break
-                case 'done':
-                  // 提交最终缓冲内容，优先使用本轮累积的 contentBuffer
-                  // 其次使用后端返回的 response（覆盖之前保留的规划文本）
-                  if (contentBuffer) {
-                    streamingMsg.content = contentBuffer
-                  } else if (data.response) {
-                    streamingMsg.content = data.response.replace(/^\n{2,}/, '\n').replace(/^\s{2,}/, '')
-                  }
-                  if (data.thinking_content && !streamingMsg.thinkingContent) {
-                    streamingMsg.thinkingContent = data.thinking_content
-                  }
-                  streamingMsg.latency = data.latency_ms
-                  streamingMsg.input_tokens = data.input_tokens
-                  streamingMsg.output_tokens = data.output_tokens
-                  streamingMsg.isStreaming = false
-                  // 保存上下文使用率
-                  if (data.context_usage) {
-                    contextUsage.value = data.context_usage
-                  }
-                  // 持久化 AI 回复
-                  persistMessage(targetConversation, 'assistant', streamingMsg.content || '', streamingMsg.toolCalls)
-                  break
-                case 'error':
-                  streamingMsg.content = `⚠️ ${data.message}`
-                  streamingMsg.isStreaming = false
-                  persistMessage(targetConversation, 'assistant', streamingMsg.content || '')
-                  break
-              }
-            } catch (e) {
-              // 忽略 JSON 解析错误
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock()
-        // 确保 isStreaming 为 false
-        if (streamingMsg.isStreaming) {
-          streamingMsg.isStreaming = false
-          if (!streamingMsg.content) {
-            streamingMsg.content = '(No response)'
-          }
-        }
-      }
+    // 流式结束后同步回 conversation
+    targetConversation.messages = [...streamMessages.value]
+    const lastMsg = streamMessages.value[streamMessages.value.length - 1]
+    if (lastMsg && lastMsg.role === 'assistant') {
+      persistMessage(targetConversation, 'assistant', lastMsg.content || '', lastMsg.toolCalls)
+    }
   } catch (error: any) {
-    // 异常时添加错误提示消息，而不是删除用户消息
     console.error('sendMessage error:', error)
-    console.error('  response:', error.response)
-    console.error('  status:', error.response?.status)
-    console.error('  data:', error.response?.data)
-    console.error('  message:', error.message)
-    const errorMsg = error.response?.data?.detail || error.detail || error.message || $t('chat.requestFailed')
-    targetConversation.messages.push({
+    const msg = error.message || ''
+    if (msg.includes('401')) {
+      addMessage({
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        role: 'assistant',
+        content: '⚠️ 登录已过期，请重新登录',
+        timestamp: new Date(),
+      })
+      localStorage.removeItem('token')
+      setTimeout(() => { window.location.href = '/login' }, 1000)
+      return
+    }
+    const errorMsg = error.response?.data?.detail || error.detail || msg || $t('chat.requestFailed')
+    addMessage({
+      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       role: 'assistant',
       content: `⚠️ ${errorMsg}`,
-      timestamp: new Date()
+      timestamp: new Date(),
     })
     ElMessage.error(errorMsg)
   } finally {
@@ -1219,12 +1243,13 @@ async function sendMessage() {
 // 重新生成
 async function regenerate(index: number) {
   // 找到上一条用户消息
-  const messages = currentConversation.value!.messages.slice(0, index)
+  const messages = streamMessages.value.slice(0, index)
   const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
   if (!lastUserMsg) return
 
   // 删除从 index 开始的所有消息
-  currentConversation.value!.messages = messages
+  replaceMessages(messages)
+  currentConversation.value!.messages = [...messages]
 
   // 重新发送
   const targetConversation = currentConversation.value
@@ -1240,14 +1265,17 @@ async function regenerate(index: number) {
       let content = response.data.response
       content = content.replace(/^\n{2,}/, '\n').replace(/^\s{2,}/, '')
 
-      targetConversation!.messages.push({
+      const assistantMsg: ChatMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         role: 'assistant',
         content: content,
         latency: response.data.latency_ms,
         input_tokens: response.data.usage?.input_tokens,
         output_tokens: response.data.usage?.output_tokens,
-        timestamp: new Date()
-      })
+        timestamp: new Date(),
+      }
+      addMessage(assistantMsg)
+      targetConversation!.messages = [...streamMessages.value]
     } else {
       ElMessage.error(response.data.message)
     }
@@ -1318,7 +1346,7 @@ function formatFullTime(date?: Date | string): string {
 // 是否显示时间分隔线（每隔5分钟显示一次）
 function shouldShowTime(index: number): boolean {
   if (index === 0) return true
-  const messages = currentConversation.value?.messages
+  const messages = streamMessages.value
   if (!messages || index >= messages.length) return false
 
   const currentMsg = messages[index]
@@ -1401,11 +1429,58 @@ function formatMessage(content: string): string {
   return DOMPurify.sanitize(html)
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadModels()
-  loadConversations()
+  await loadConversations()
   if (conversations.value.length > 0) {
-    currentConversation.value = conversations.value[0]
+    const firstConv = conversations.value[0]
+    currentConversation.value = firstConv
+    let loadedMessages: ChatMessage[] = []
+
+    // 1. 优先从后端加载消息（持久化数据为准）
+    try {
+      const res = await api.get(`/chat/sessions/${firstConv.id}`)
+      if (res.data?.messages && res.data.messages.length > 0) {
+        loadedMessages = res.data.messages.map((m: any, i: number) => ({
+          id: m.id || `msg-${Date.now()}-${i}`,
+          role: m.role,
+          content: m.content,
+          reasoningContent: m.thinkingContent || m.reasoning_content,
+          toolCalls: m.tool_calls?.map((tc: any, j: number) => ({
+            id: tc.id || `tc-${Date.now()}-${j}`,
+            name: tc.name,
+            arguments: tc.arguments,
+            result: tc.result,
+            status: tc.loading ? 'running' : tc.result ? 'success' : 'pending',
+          })),
+          timestamp: new Date(m.created_at),
+        }))
+        firstConv.messages = loadedMessages
+      }
+    } catch (e) { /* 静默降级 */ }
+
+    // 2. 后端无数据时，用本地已保存的消息
+    if (loadedMessages.length === 0 && firstConv.messages.length > 0) {
+      loadedMessages = [...firstConv.messages]
+    }
+
+    // 3. 尝试从 sessionStorage 读取流式中断状态（不修改 runtime）
+    let cacheMessages: ChatMessage[] = []
+    let cacheIsStreaming = false
+    if (firstConv.sessionId) {
+      const cache = readSessionMessages(firstConv.sessionId)
+      if (cache && cache.messages.length > 0) {
+        cacheMessages = cache.messages
+        cacheIsStreaming = cache.isStreaming
+      }
+    }
+
+    // 4. 选择数据源：只有缓存标记为流式中断时才优先用缓存，否则后端持久化数据为准
+    if (cacheIsStreaming && cacheMessages.length > 0) {
+      loadedMessages = cacheMessages
+    }
+
+    replaceMessages(loadedMessages)
   }
   // 连接 WebSocket
   connectWebSocket()
@@ -1869,58 +1944,65 @@ onUnmounted(() => {
 
       // 思考/推理内容（可折叠）
       .thinking-collapse {
-        max-width: 85%;
+        max-width: 100%;
         margin-bottom: 4px;
 
-        .thinking-details {
+        .thinking-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 12px;
+          border-radius: 6px;
+          background: var(--pc-bg-surface);
           border: 1px solid var(--pc-border);
-          border-radius: 8px;
-          border-left: 3px solid #a78bfa;  // 紫色区分
-          background: var(--pc-bg-elevated);
-          overflow: hidden;
+          cursor: pointer;
+          user-select: none;
+          font-size: 12px;
+          color: var(--pc-text-secondary);
+          transition: background 0.15s;
 
-          .thinking-summary {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 12px;
-            cursor: pointer;
-            user-select: none;
-            font-size: 12px;
-            color: var(--pc-text-secondary);
-            list-style: none;  // 隐藏默认三角
-
-            &::-webkit-details-marker {
-              display: none;
-            }
-
-            &:hover {
-              background: rgba(167, 139, 250, 0.08);
-            }
-
-            .thinking-icon {
-              font-size: 13px;
-            }
-
-            .thinking-chars {
-              color: var(--pc-text-muted);
-              font-size: 11px;
-              margin-left: auto;
-            }
+          &:hover {
+            background: rgba(var(--pc-primary-rgb), 0.06);
           }
 
-          .thinking-content {
+          .thinking-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--pc-primary);
+            flex-shrink: 0;
+          }
+
+          .thinking-label {
             font-size: 12px;
             color: var(--pc-text-secondary);
-            padding: 8px 12px;
-            background: var(--pc-bg-surface);
-            border-top: 1px solid var(--pc-border);
-            line-height: 1.5;
-            max-height: 300px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            word-break: break-word;
           }
+
+          .thinking-arrow {
+            font-size: 12px;
+            color: var(--pc-text-muted);
+            transition: transform 0.2s;
+            flex-shrink: 0;
+
+            &.expanded {
+              transform: rotate(90deg);
+            }
+          }
+        }
+
+        .thinking-content {
+          font-size: 12px;
+          color: var(--pc-text-secondary);
+          padding: 8px 12px;
+          background: var(--pc-bg-surface);
+          border: 1px solid var(--pc-border);
+          border-top: none;
+          border-radius: 0 0 6px 6px;
+          line-height: 1.5;
+          max-height: 300px;
+          overflow-y: auto;
+          white-space: pre-wrap;
+          word-break: break-word;
         }
       }
 
@@ -1929,7 +2011,7 @@ onUnmounted(() => {
         background: var(--pc-bg-elevated);
         padding: 10px 14px;
         border-radius: 8px;
-        max-width: 85%;
+        max-width: 100%;
         border: 1px solid var(--pc-border);
 
         .tool-call-item {
@@ -1944,6 +2026,11 @@ onUnmounted(() => {
 
             &:hover {
                 background: rgba(var(--pc-primary-rgb), 0.04);
+            }
+
+            &.tool-status-error {
+              border-left: 3px solid var(--pc-accent-red, #f56c6c);
+              padding-left: 7px;
             }
 
             .tool-call-header {
@@ -1993,6 +2080,17 @@ onUnmounted(() => {
                     text-overflow: ellipsis;
                     white-space: nowrap;
                     font-family: 'JetBrains Mono', 'Fira Code', monospace;
+
+                    &.is-error {
+                      color: var(--pc-accent-red, #f56c6c);
+                    }
+                }
+
+                .tool-duration {
+                    margin-left: auto;
+                    font-size: 11px;
+                    color: var(--pc-text-muted);
+                    flex-shrink: 0;
                 }
 
                 .tool-loading {
@@ -2034,12 +2132,27 @@ onUnmounted(() => {
                 border-radius: 4px;
                 margin-top: 8px;
                 line-height: 1.6;
-                max-height: 200px;
+                max-height: 300px;
                 overflow-y: auto;
                 border: 1px solid var(--pc-border);
                 white-space: pre-wrap;
                 word-break: break-word;
                 font-family: 'JetBrains Mono', 'Fira Code', monospace;
+
+                .tool-result-json {
+                  margin: 0;
+                  padding: 0;
+                  background: transparent;
+                  border: none;
+                  code {
+                    background: transparent;
+                    color: var(--pc-text-secondary);
+                    padding: 0;
+                    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+                    font-size: 12px;
+                    line-height: 1.6;
+                  }
+                }
             }
         }
       }
@@ -2108,11 +2221,6 @@ onUnmounted(() => {
         display: flex;
         align-items: center;
         gap: 8px;
-
-        .show-thinking-check {
-          margin-left: 4px;
-          font-size: 12px;
-        }
 
         .el-radio-group {
           :deep(.el-radio-button__inner) {

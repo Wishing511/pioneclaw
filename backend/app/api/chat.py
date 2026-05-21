@@ -684,19 +684,19 @@ async def react_chat_stream(
                 for match in tool_start_pattern.finditer(chunk):
                     try:
                         tool_data = json.loads(match.group(1))
-                        yield f"data: {json.dumps({'type': 'tool_start', 'name': tool_data.get('name', '')}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool_start', 'name': tool_data.get('name', ''), 'tool_call_id': tool_data.get('tool_call_id', '')}, ensure_ascii=False)}\n\n"
                     except json.JSONDecodeError:
                         pass
                 for match in tool_result_pattern.finditer(chunk):
                     try:
                         tool_data = json.loads(match.group(1))
-                        yield f"data: {json.dumps({'type': 'tool_result', 'name': tool_data.get('name', ''), 'result': tool_data.get('result', '')}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool_result', 'name': tool_data.get('name', ''), 'tool_call_id': tool_data.get('tool_call_id', ''), 'result': tool_data.get('result', ''), 'duration_ms': tool_data.get('duration_ms')}, ensure_ascii=False)}\n\n"
                     except json.JSONDecodeError:
                         pass
                 for match in tool_error_pattern.finditer(chunk):
                     try:
                         tool_data = json.loads(match.group(1))
-                        yield f"data: {json.dumps({'type': 'tool_error', 'name': tool_data.get('name', ''), 'error': tool_data.get('error', '')}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool_error', 'name': tool_data.get('name', ''), 'tool_call_id': tool_data.get('tool_call_id', ''), 'error': tool_data.get('error', ''), 'duration_ms': tool_data.get('duration_ms')}, ensure_ascii=False)}\n\n"
                     except json.JSONDecodeError:
                         pass
 
@@ -748,14 +748,11 @@ async def react_chat_stream(
             # 确定最终响应
             final_response = content_buffer.strip() or last_good_content.strip()
 
-            # 如果 LLM 没有生成文字回复但调用了工具，基于工具结果拼一个总结
+            # 如果 LLM 没有生成文字回复但调用了工具，提示用户查看工具结果
             if not final_response and agent_loop.last_tool_results:
-                parts = []
-                for name, result in agent_loop.last_tool_results.items():
-                    if result and len(str(result)) < 500:
-                        parts.append(f"{name}: {result}")
-                if parts:
-                    final_response = "已获取以下信息：\n" + "\n".join(parts[:5])
+                tool_names = list(agent_loop.last_tool_results.keys())
+                if tool_names:
+                    final_response = f"已执行 {len(tool_names)} 个工具，请查看上方工具结果。"
 
             # 发送完成事件
             input_tokens = provider.last_input_tokens or 0
