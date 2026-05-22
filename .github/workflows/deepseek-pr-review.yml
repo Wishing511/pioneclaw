@@ -1,0 +1,129 @@
+name: DeepSeek PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout base repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Get PR diff
+        run: |
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" > pr.diff
+
+          # 按行截断，保留前 2000 行 diff，防止 token 超限
+          # 若被截断，在末尾附加提示标记
+          total_lines=$(wc -l < pr.diff)
+          if [ "$total_lines" -gt 2000 ]; then
+              head -n 2000 pr.diff > pr_trimmed.diff
+              echo "" >> pr_trimmed.diff
+              echo "[... diff truncated after 2000 lines, total $total_lines lines]" >> pr_trimmed.diff
+          else
+              cp pr.diff pr_trimmed.diff
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
+      - name: Ask DeepSeek to review
+        run: |
+          python3 <<'PY'
+          import os
+          import requests
+
+          api_key = os.environ["DEEPSEEK_API_KEY"]
+
+          with open("pr_trimmed.diff", "r", encoding="utf-8", errors="ignore") as f:
+              diff = f.read()
+
+          prompt = (
+              "你是一个严格但务实的资深代码审查员。请审查下面的 GitHub PR diff。\n\n"
+              "重点关注：\n"
+              "1. 明显 bug\n"
+              "2. 安全风险\n"
+              "3. 并发、边界条件、空值问题\n"
+              "4. 性能问题\n"
+              "5. 可维护性和可读性\n"
+              "6. 测试缺失\n\n"
+              "输出要求：\n"
+              '- 用中文\n'
+              '- 不要泛泛而谈\n'
+              '- 只指出与本次 diff 直接相关的问题\n'
+              '- 按严重程度排序\n'
+              '- 如果没有重大问题，请明确说"未发现明显阻塞问题"\n'
+              '- 使用 Markdown\n'
+              '- 每条建议包含：问题、影响、建议修改方式\n\n'
+              "PR diff:\n\n"
+              f"```diff\n{diff}\n```\n"
+          )
+
+          payload = {
+              "model": "deepseek-v4-pro",
+              "messages": [
+                  {
+                      "role": "system",
+                      "content": "你是一个专业的 GitHub Pull Request 代码审查助手。"
+                  },
+                  {
+                      "role": "user",
+                      "content": prompt
+                  }
+              ],
+              "stream": False,
+              "reasoning_effort": "high",
+              "thinking": {"type": "enabled"}
+          }
+
+          try:
+              resp = requests.post(
+                  "https://api.deepseek.com/chat/completions",
+                  headers={
+                      "Authorization": f"Bearer {api_key}",
+                      "Content-Type": "application/json"
+                  },
+                  json=payload,
+                  timeout=120
+              )
+              resp.raise_for_status()
+              data = resp.json()
+
+              choices = data.get("choices", [])
+              if not choices or not isinstance(choices, list):
+                  raise ValueError(f"API 响应缺少 choices: {data}")
+
+              message = choices[0].get("message", {})
+              review = message.get("content", "")
+              if not review:
+                  raise ValueError(f"API 响应内容为空: {data}")
+
+          except Exception as e:
+              review = f"**DeepSeek 审查调用失败**\n\n错误信息：{e}\n\n请检查 API Key、网络连接及 DeepSeek 服务状态。"
+
+          with open("review.md", "w", encoding="utf-8") as f:
+              f.write("## DeepSeek PR 自动审查\n\n")
+              f.write(review)
+              f.write("\n\n---\n")
+              f.write("_由 GitHub Actions + DeepSeek 自动生成，请人工确认后采纳。_\n")
+          PY
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+      - name: Comment review on PR
+        run: |
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file review.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
