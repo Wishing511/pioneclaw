@@ -33,7 +33,7 @@ python-pptx==1.0.2               # PowerPoint .pptx reading
 openpyxl==3.1.5                  # Excel .xlsx reading
 
 # ── PDF Parsing ────────────────────────────────────────────────
-pdfplumber==0.11.4               # PDF text extraction
+pdfplumber==0.11.9               # PDF text extraction
 
 # ── Screenshot (Optional) ──────────────────────────────────────
 mss==10.0.0                      # Desktop screenshot (cross-platform)
