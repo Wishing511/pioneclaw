@@ -2,10 +2,11 @@
 GraphRAG 模块测试
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import tempfile
 import os
+import tempfile
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.modules.graph_rag import GraphRAGClient, GraphRAGSettings
 
@@ -146,7 +147,9 @@ class TestGraphRAGClient:
         client._rag = mock_rag
 
         # Mock lightrag.QueryMode 在方法内部导入
-        with patch.dict("sys.modules", {"lightrag": MagicMock(QueryMode=MagicMock(Hybrid="hybrid"))}):
+        with patch.dict(
+            "sys.modules", {"lightrag": MagicMock(QueryMode=MagicMock(Hybrid="hybrid"))}
+        ):
             result = await client.query("test query", mode="hybrid")
 
         assert result["result"] == "query result"
@@ -161,14 +164,12 @@ class TestGraphRAGClient:
 
         modes = ["local", "global", "hybrid", "naive", "mix"]
         mock_query_mode = MagicMock(
-            Local="local",
-            Global="global",
-            Hybrid="hybrid",
-            Naive="naive",
-            Mix="mix"
+            Local="local", Global="global", Hybrid="hybrid", Naive="naive", Mix="mix"
         )
 
-        with patch.dict("sys.modules", {"lightrag": MagicMock(QueryMode=mock_query_mode)}):
+        with patch.dict(
+            "sys.modules", {"lightrag": MagicMock(QueryMode=mock_query_mode)}
+        ):
             for mode in modes:
                 result = await client.query("test", mode=mode)
                 assert result["mode"] == mode
@@ -180,7 +181,9 @@ class TestGraphRAGClient:
         mock_rag.query = MagicMock(side_effect=Exception("Query failed"))
         client._rag = mock_rag
 
-        with patch.dict("sys.modules", {"lightrag": MagicMock(QueryMode=MagicMock(Hybrid="hybrid"))}):
+        with patch.dict(
+            "sys.modules", {"lightrag": MagicMock(QueryMode=MagicMock(Hybrid="hybrid"))}
+        ):
             result = await client.query("test query")
 
         assert "查询失败" in result["result"]
@@ -254,7 +257,7 @@ class TestGraphRAGClientIntegration:
 
     @pytest.mark.skipif(
         True,  # 默认跳过，需要 LightRAG 安装
-        reason="需要安装 lightrag-hku"
+        reason="需要安装 lightrag-hku",
     )
     @pytest.mark.asyncio
     async def test_full_workflow(self, temp_working_dir):
@@ -293,6 +296,7 @@ class TestGraphRAGWrappers:
 
             # 包装函数应该返回协程
             import asyncio
+
             result = asyncio.run(wrapped("test prompt"))
             assert result == "LLM response"
 
@@ -306,6 +310,7 @@ class TestGraphRAGWrappers:
             wrapped = client._wrap_embedding_func()
 
             import asyncio
+
             result = asyncio.run(wrapped(["text1", "text2"]))
             assert len(result) == 2
             assert len(result[0]) == 512
@@ -319,6 +324,7 @@ class TestGraphRAGWrappers:
             wrapped = client._wrap_llm_caller()
 
             import asyncio
+
             result = asyncio.run(wrapped("test"))
             assert result == ""
 
@@ -331,5 +337,6 @@ class TestGraphRAGWrappers:
             wrapped = client._wrap_embedding_func()
 
             import asyncio
+
             result = asyncio.run(wrapped(["text"]))
             assert result == []

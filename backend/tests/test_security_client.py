@@ -5,11 +5,12 @@ SecurityClient fail-open 降级测试
 避免安全网关故障导致主业务不可用。
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.core.security_client import SecurityClient, FilterResult, apply_input_filter
+from app.core.security_client import FilterResult, SecurityClient, apply_input_filter
 
 
 class TestSecurityClientFailOpen:
@@ -54,7 +55,9 @@ class TestSecurityClientFailOpen:
     async def test_http_500_fail_open(self, client):
         """HTTP 500 时降级放行"""
         mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = Exception("500 Internal Server Error")
+        mock_response.raise_for_status.side_effect = Exception(
+            "500 Internal Server Error"
+        )
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
@@ -204,7 +207,9 @@ class TestApplyInputFilter:
     @pytest.mark.asyncio
     async def test_fail_open_on_exception(self, mock_security_client):
         """helper 内部异常应向上传播（由 SecurityClient.filter_input 负责 fail-open）"""
-        mock_security_client.filter_input = AsyncMock(side_effect=Exception("Unexpected"))
+        mock_security_client.filter_input = AsyncMock(
+            side_effect=Exception("Unexpected")
+        )
 
         # apply_input_filter 本身没有 try/except，异常会向上抛
         # 实际使用中 SecurityClient.filter_input 已经捕获所有异常并返回 ALLOW

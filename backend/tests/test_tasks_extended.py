@@ -7,19 +7,22 @@
 
 import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.models import User
-from app.main import app
 from app.core.database import get_db
+from app.main import app
+from app.models import User
 from tests.conftest import auth_headers
 
 
 @pytest_asyncio.fixture
 async def tasks_client(db_engine):
     """HTTP 测试客户端"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-    session_maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    session_maker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async def override_get_db():
         async with session_maker() as session:
@@ -90,7 +93,9 @@ class TestSubtasks:
         assert len(subtasks) == 3
 
     @pytest.mark.asyncio
-    async def test_subtask_not_found_parent(self, tasks_client: AsyncClient, test_user: User):
+    async def test_subtask_not_found_parent(
+        self, tasks_client: AsyncClient, test_user: User
+    ):
         """测试父任务不存在时创建子任务"""
         resp = await tasks_client.post(
             "/api/tasks/99999/subtasks",

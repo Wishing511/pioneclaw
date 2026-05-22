@@ -536,11 +536,6 @@ const loadWords = async () => {
   }
 }
 
-const openCreateDialog = () => {
-  resetForm()
-  showCreateDialog.value = true
-}
-
 const openEditDialog = (row: WordItem) => {
   isEditing.value = true
   editingId.value = row.id

@@ -2,26 +2,26 @@
 Provider Health + Retry 测试 (Stage QQ)
 """
 
-import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.modules.llm.provider_health import (
-    HealthStatus,
-    ProviderHealthChecker,
-    ProviderFallbackChain,
     FallbackEntry,
+    HealthStatus,
+    ProviderFallbackChain,
+    ProviderHealthChecker,
 )
 from app.modules.llm.retry import (
-    RetryConfig,
     LLMCallRetrier,
+    RetryConfig,
     with_llm_retry,
 )
-
 
 # ============================================================
 # RetryConfig
 # ============================================================
+
 
 class TestRetryConfig:
     """测试重试配置"""
@@ -59,6 +59,7 @@ class TestRetryConfig:
 # LLMCallRetrier
 # ============================================================
 
+
 class TestLLMCallRetrier:
     """测试 LLM 调用重试器"""
 
@@ -82,7 +83,9 @@ class TestLLMCallRetrier:
                 raise exc
             return "recovered"
 
-        retrier = LLMCallRetrier(RetryConfig(max_retries=5, base_delay_ms=10, max_delay_ms=50))
+        retrier = LLMCallRetrier(
+            RetryConfig(max_retries=5, base_delay_ms=10, max_delay_ms=50)
+        )
         result = await retrier.call_with_retry(flaky)
         assert result == "recovered"
         assert call_count[0] == 3
@@ -112,7 +115,9 @@ class TestLLMCallRetrier:
             exc.status_code = 503
             raise exc
 
-        retrier = LLMCallRetrier(RetryConfig(max_retries=2, base_delay_ms=10, max_delay_ms=50))
+        retrier = LLMCallRetrier(
+            RetryConfig(max_retries=2, base_delay_ms=10, max_delay_ms=50)
+        )
         with pytest.raises(Exception, match="service unavailable"):
             await retrier.call_with_retry(always_fails)
         assert call_count[0] == 3  # 1 initial + 2 retries
@@ -130,7 +135,9 @@ class TestLLMCallRetrier:
         def is_retryable(exc: Exception) -> bool:
             return "custom retryable" in str(exc)
 
-        retrier = LLMCallRetrier(RetryConfig(max_retries=3, base_delay_ms=10, max_delay_ms=50))
+        retrier = LLMCallRetrier(
+            RetryConfig(max_retries=3, base_delay_ms=10, max_delay_ms=50)
+        )
         result = await retrier.call_with_retry(custom_err, is_retryable=is_retryable)
         assert result == "ok"
 
@@ -144,6 +151,7 @@ class TestLLMCallRetrier:
 # ============================================================
 # with_llm_retry 装饰器
 # ============================================================
+
 
 class TestWithLLMRetryDecorator:
     """测试装饰器"""
@@ -168,6 +176,7 @@ class TestWithLLMRetryDecorator:
 # ============================================================
 # ProviderHealthChecker
 # ============================================================
+
 
 class TestProviderHealthChecker:
     """测试 Provider 健康检查器"""
@@ -208,7 +217,10 @@ class TestProviderHealthChecker:
 
     async def test_check_provider_timeout(self):
         """Provider 超时 → unhealthy"""
-        with patch("httpx.AsyncClient.get", side_effect=__import__("httpx").TimeoutException("timeout")):
+        with patch(
+            "httpx.AsyncClient.get",
+            side_effect=__import__("httpx").TimeoutException("timeout"),
+        ):
             checker = ProviderHealthChecker(timeout=0.5)
             status = await checker.check_provider(
                 provider_id="slow",
@@ -227,12 +239,16 @@ class TestProviderHealthChecker:
 
             checker = ProviderHealthChecker(cache_ttl=60.0)
             # First call
-            s1 = await checker.check_provider("gpt4o", "openai", "https://api.oai.com/v1")
+            s1 = await checker.check_provider(
+                "gpt4o", "openai", "https://api.oai.com/v1"
+            )
             assert s1.healthy is True
             calls_after_first = mock_get.call_count
 
             # Second call (should hit cache)
-            s2 = await checker.check_provider("gpt4o", "openai", "https://api.oai.com/v1")
+            s2 = await checker.check_provider(
+                "gpt4o", "openai", "https://api.oai.com/v1"
+            )
             assert s2.healthy is True
             assert mock_get.call_count == calls_after_first  # no additional call
 
@@ -273,6 +289,7 @@ class TestProviderHealthChecker:
 # ProviderFallbackChain
 # ============================================================
 
+
 class TestProviderFallbackChain:
     """测试 Provider 回退链"""
 
@@ -291,10 +308,16 @@ class TestProviderFallbackChain:
         with patch("httpx.AsyncClient.get") as mock_get:
             mock_get.return_value = self._make_healthy_response()
 
-            chain = ProviderFallbackChain([
-                FallbackEntry("p1", "openai", "https://p1.example.com/v1", priority=0),
-                FallbackEntry("p2", "openai", "https://p2.example.com/v1", priority=1),
-            ])
+            chain = ProviderFallbackChain(
+                [
+                    FallbackEntry(
+                        "p1", "openai", "https://p1.example.com/v1", priority=0
+                    ),
+                    FallbackEntry(
+                        "p2", "openai", "https://p2.example.com/v1", priority=1
+                    ),
+                ]
+            )
             entry = await chain.get_healthy_entry()
             assert entry.provider_id == "p1"
 
@@ -320,15 +343,22 @@ class TestProviderFallbackChain:
             )
 
         with patch.object(ProviderHealthChecker, "check_provider", mock_check_provider):
-            chain = ProviderFallbackChain([
-                FallbackEntry("bad", "openai", "https://bad.example.com/v1", priority=0),
-                FallbackEntry("good", "openai", "https://good.example.com/v1", priority=1),
-            ])
+            chain = ProviderFallbackChain(
+                [
+                    FallbackEntry(
+                        "bad", "openai", "https://bad.example.com/v1", priority=0
+                    ),
+                    FallbackEntry(
+                        "good", "openai", "https://good.example.com/v1", priority=1
+                    ),
+                ]
+            )
             entry = await chain.get_healthy_entry()
             assert entry.provider_id == "good"
 
     async def test_all_unhealthy_raises(self):
         """所有 provider 不健康时抛异常"""
+
         async def mock_check_provider(self, **kwargs):
             return HealthStatus(
                 provider_id=kwargs["provider_id"],
@@ -339,10 +369,16 @@ class TestProviderFallbackChain:
             )
 
         with patch.object(ProviderHealthChecker, "check_provider", mock_check_provider):
-            chain = ProviderFallbackChain([
-                FallbackEntry("p1", "openai", "https://p1.example.com/v1", priority=0),
-                FallbackEntry("p2", "openai", "https://p2.example.com/v1", priority=1),
-            ])
+            chain = ProviderFallbackChain(
+                [
+                    FallbackEntry(
+                        "p1", "openai", "https://p1.example.com/v1", priority=0
+                    ),
+                    FallbackEntry(
+                        "p2", "openai", "https://p2.example.com/v1", priority=1
+                    ),
+                ]
+            )
             with pytest.raises(RuntimeError, match="All providers unavailable"):
                 await chain.get_healthy_entry()
 
@@ -361,17 +397,26 @@ class TestProviderFallbackChain:
             )
 
         with patch.object(ProviderHealthChecker, "check_provider", mock_check_provider):
-            chain = ProviderFallbackChain([
-                FallbackEntry("p1", "openai", "https://p1.example.com/v1", priority=0),
-                FallbackEntry("p2", "openai", "https://p2.example.com/v1", priority=1),
-                FallbackEntry("p3", "openai", "https://p3.example.com/v1", priority=2),
-            ])
+            chain = ProviderFallbackChain(
+                [
+                    FallbackEntry(
+                        "p1", "openai", "https://p1.example.com/v1", priority=0
+                    ),
+                    FallbackEntry(
+                        "p2", "openai", "https://p2.example.com/v1", priority=1
+                    ),
+                    FallbackEntry(
+                        "p3", "openai", "https://p3.example.com/v1", priority=2
+                    ),
+                ]
+            )
             entry = await chain.get_healthy_entry(preferred="p3")
             assert entry.provider_id == "p3"
             assert call_order[0] == "p3"  # preferred checked first
 
     async def test_record_failure_cooldown(self):
         """record_failure 触发冷却期"""
+
         async def mock_check_provider(self, **kwargs):
             return HealthStatus(
                 provider_id=kwargs["provider_id"],
@@ -383,8 +428,12 @@ class TestProviderFallbackChain:
         with patch.object(ProviderHealthChecker, "check_provider", mock_check_provider):
             chain = ProviderFallbackChain(
                 [
-                    FallbackEntry("p1", "openai", "https://p1.example.com/v1", priority=0),
-                    FallbackEntry("p2", "openai", "https://p2.example.com/v1", priority=1),
+                    FallbackEntry(
+                        "p1", "openai", "https://p1.example.com/v1", priority=0
+                    ),
+                    FallbackEntry(
+                        "p2", "openai", "https://p2.example.com/v1", priority=1
+                    ),
                 ],
                 cooldown_seconds=30.0,
             )
@@ -394,10 +443,12 @@ class TestProviderFallbackChain:
 
     def test_disable_enable_entry(self):
         """disable/enable 条目"""
-        chain = ProviderFallbackChain([
-            FallbackEntry("p1", "openai", priority=0),
-            FallbackEntry("p2", "openai", priority=1),
-        ])
+        chain = ProviderFallbackChain(
+            [
+                FallbackEntry("p1", "openai", priority=0),
+                FallbackEntry("p2", "openai", priority=1),
+            ]
+        )
         chain.disable("p1")
         assert all(e.provider_id != "p1" for e in chain.entries)
 
@@ -406,9 +457,11 @@ class TestProviderFallbackChain:
 
     def test_reset(self):
         """reset 清除所有状态"""
-        chain = ProviderFallbackChain([
-            FallbackEntry("p1", "openai", priority=0),
-        ])
+        chain = ProviderFallbackChain(
+            [
+                FallbackEntry("p1", "openai", priority=0),
+            ]
+        )
         chain.record_failure("p1")
         chain.reset()
         # After reset, failed_until should be empty
@@ -420,10 +473,16 @@ class TestProviderFallbackChain:
         with patch("httpx.AsyncClient.get") as mock_get:
             mock_get.return_value = MagicMock(status_code=200)
 
-            chain = ProviderFallbackChain([
-                FallbackEntry("p1", "openai", "https://p1.example.com/v1", priority=0),
-                FallbackEntry("p2", "openai", "https://p2.example.com/v1", priority=1),
-            ])
+            chain = ProviderFallbackChain(
+                [
+                    FallbackEntry(
+                        "p1", "openai", "https://p1.example.com/v1", priority=0
+                    ),
+                    FallbackEntry(
+                        "p2", "openai", "https://p2.example.com/v1", priority=1
+                    ),
+                ]
+            )
             results = await chain.check_all_health()
             assert len(results) == 2
             assert results["p1"].healthy is True
@@ -433,6 +492,7 @@ class TestProviderFallbackChain:
 # ============================================================
 # HealthStatus
 # ============================================================
+
 
 class TestHealthStatus:
     """测试 HealthStatus 数据结构"""
@@ -453,7 +513,9 @@ class TestHealthStatus:
         assert d["latency_ms"] == 123.0  # rounded to 1 decimal
 
     def test_default_values(self):
-        status = HealthStatus(provider_id="p", provider_type="openai", model_name="m", healthy=False)
+        status = HealthStatus(
+            provider_id="p", provider_type="openai", model_name="m", healthy=False
+        )
         assert status.latency_ms == 0.0
         assert status.error_msg is None
         assert status.checked_at is None

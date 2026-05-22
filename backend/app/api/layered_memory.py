@@ -13,26 +13,28 @@
 - DELETE /layered-memory/{uri} 删除记忆(含子层级)
 """
 
+import contextlib
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.api.auth import get_current_user
+from app.core.database import get_db
 from app.models import User
 from app.modules.agent.layered_memory.memory_orchestrator import MemoryOrchestrator
 from app.modules.agent.vector_store import get_vector_store
 from app.schemas.layered_memory import (
+    LayeredMemoryBrief,
+    LayeredMemoryEvict,
+    LayeredMemoryListResponse,
+    LayeredMemoryPromote,
+    LayeredMemoryRecall,
+    LayeredMemoryRecallResponse,
+    LayeredMemoryResponse,
+    LayeredMemoryStats,
     LayeredMemoryStore,
     LayeredMemoryUpdate,
-    LayeredMemoryRecall,
-    LayeredMemoryPromote,
-    LayeredMemoryEvict,
-    LayeredMemoryResponse,
-    LayeredMemoryBrief,
-    LayeredMemoryStats,
-    LayeredMemoryListResponse,
     RecallResultItem,
-    LayeredMemoryRecallResponse,
 )
 
 router = APIRouter(prefix="/layered-memory", tags=["分层记忆"])
@@ -41,10 +43,8 @@ router = APIRouter(prefix="/layered-memory", tags=["分层记忆"])
 def _get_orchestrator(db: AsyncSession, user: User) -> MemoryOrchestrator:
     """创建 MemoryOrchestrator 实例"""
     vector_store = None
-    try:
+    with contextlib.suppress(Exception):
         vector_store = get_vector_store()
-    except Exception:
-        pass
 
     return MemoryOrchestrator(
         db_session=db,
@@ -53,6 +53,7 @@ def _get_orchestrator(db: AsyncSession, user: User) -> MemoryOrchestrator:
 
 
 # ==================== 固定路径路由（必须在 /{uri:path} 之前）====================
+
 
 @router.post("/store", response_model=LayeredMemoryResponse, status_code=201)
 async def store_memory(
@@ -209,6 +210,7 @@ async def evict_memory(
 
 
 # ==================== 动态路径路由（必须放最后）====================
+
 
 @router.get("/{uri:path}", response_model=LayeredMemoryResponse)
 async def get_memory(

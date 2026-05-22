@@ -12,40 +12,37 @@
 - AgentTemplate 模板
 """
 
-import asyncio
-import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-from app.modules.agent.injected_state import (
-    Injected,
-    AgentState,
-    InjectedContext,
-    StateInjector,
-    is_injected_type,
-    get_injected_inner_type,
-    get_state_injector,
-    reset_state_injector,
-    injectable,
-    with_state,
-    mark_injected_in_schema,
-)
+import pytest
+
 from app.modules.agent.auto_agents import (
-    TaskComplexity,
-    AgentRole,
-    AgentTemplate,
     DEFAULT_TEMPLATES,
-    SubTask,
-    TaskDecomposition,
+    AgentRole,
     AutoAgentResult,
-    TaskAnalyzer,
     AutoAgents,
+    SubTask,
+    TaskAnalyzer,
+    TaskComplexity,
+    TaskDecomposition,
     auto_run,
 )
-
+from app.modules.agent.injected_state import (
+    AgentState,
+    Injected,
+    InjectedContext,
+    StateInjector,
+    get_injected_inner_type,
+    get_state_injector,
+    injectable,
+    is_injected_type,
+    mark_injected_in_schema,
+    reset_state_injector,
+    with_state,
+)
 
 # ==================== Injected 类型测试 ====================
+
 
 class TestInjectedType:
     def test_is_injected_type_with_injected(self):
@@ -74,6 +71,7 @@ class TestInjectedType:
 
 
 # ==================== AgentState 测试 ====================
+
 
 class TestAgentState:
     def test_defaults(self):
@@ -137,6 +135,7 @@ class TestAgentState:
 
 # ==================== InjectedContext 测试 ====================
 
+
 class TestInjectedContext:
     def test_defaults(self):
         state = AgentState(agent_id="a1", agent_name="Agent1")
@@ -153,6 +152,7 @@ class TestInjectedContext:
 
 
 # ==================== StateInjector 测试 ====================
+
 
 class TestStateInjector:
     def test_set_and_get_context(self):
@@ -238,6 +238,7 @@ class TestStateInjector:
 
 # ==================== 全局注入器测试 ====================
 
+
 class TestGlobalInjector:
     def test_get_state_injector(self):
         reset_state_injector()
@@ -255,6 +256,7 @@ class TestGlobalInjector:
 
 
 # ==================== 装饰器测试 ====================
+
 
 class TestDecorators:
     def test_injectable(self):
@@ -284,6 +286,7 @@ class TestDecorators:
 
 # ==================== Schema 辅助测试 ====================
 
+
 class TestSchemaHelpers:
     def test_mark_injected_in_schema(self):
         schema = {
@@ -303,6 +306,7 @@ class TestSchemaHelpers:
 
 # ==================== TaskAnalyzer 测试 ====================
 
+
 class TestTaskAnalyzer:
     def test_analyze_complexity_simple(self):
         analyzer = TaskAnalyzer()
@@ -312,9 +316,7 @@ class TestTaskAnalyzer:
 
     def test_analyze_complexity_moderate(self):
         analyzer = TaskAnalyzer()
-        complexity = analyzer.analyze_complexity(
-            "搜索 AI 趋势，然后分析市场数据"
-        )
+        complexity = analyzer.analyze_complexity("搜索 AI 趋势，然后分析市场数据")
         assert complexity in [TaskComplexity.MODERATE, TaskComplexity.COMPLEX]
 
     def test_analyze_complexity_complex(self):
@@ -349,20 +351,25 @@ class TestTaskAnalyzer:
     def test_decompose_simple(self):
         analyzer = TaskAnalyzer()
         decomposition = analyzer.decompose("搜索")
-        assert decomposition.complexity in [TaskComplexity.SIMPLE, TaskComplexity.MODERATE]
+        assert decomposition.complexity in [
+            TaskComplexity.SIMPLE,
+            TaskComplexity.MODERATE,
+        ]
         assert len(decomposition.subtasks) >= 1
 
     def test_decompose_complex(self):
         analyzer = TaskAnalyzer()
-        decomposition = analyzer.decompose(
-            "研究 AI 行业趋势，分析数据，撰写报告"
-        )
-        assert decomposition.complexity in [TaskComplexity.MODERATE, TaskComplexity.COMPLEX]
+        decomposition = analyzer.decompose("研究 AI 行业趋势，分析数据，撰写报告")
+        assert decomposition.complexity in [
+            TaskComplexity.MODERATE,
+            TaskComplexity.COMPLEX,
+        ]
         assert len(decomposition.subtasks) >= 2
         assert len(decomposition.execution_order) == len(decomposition.subtasks)
 
 
 # ==================== AgentTemplate 测试 ====================
+
 
 class TestAgentTemplate:
     def test_default_templates_exist(self):
@@ -381,6 +388,7 @@ class TestAgentTemplate:
 
 
 # ==================== AutoAgents 测试 ====================
+
 
 class TestAutoAgents:
     def test_create_agent(self):
@@ -402,6 +410,7 @@ class TestAutoAgents:
 
     def test_create_agent_with_factory(self):
         created_name = []
+
         def factory(config):
             created_name.append(config["name"])
             return MagicMock()
@@ -409,7 +418,7 @@ class TestAutoAgents:
         provider = MagicMock()
         auto = AutoAgents(provider=provider, agent_factory=factory)
 
-        agent = auto.create_agent(AgentRole.WRITER)
+        auto.create_agent(AgentRole.WRITER)
         assert "Writer" in created_name
 
     @pytest.mark.asyncio
@@ -421,7 +430,10 @@ class TestAutoAgents:
 
         assert result.error is None
         assert result.decomposition is not None
-        assert result.decomposition.complexity in [TaskComplexity.SIMPLE, TaskComplexity.MODERATE]
+        assert result.decomposition.complexity in [
+            TaskComplexity.SIMPLE,
+            TaskComplexity.MODERATE,
+        ]
 
     @pytest.mark.asyncio
     async def test_run_with_agent_factory(self):
@@ -471,6 +483,7 @@ class TestAutoAgents:
 
 # ==================== auto_run 便捷函数测试 ====================
 
+
 class TestAutoRun:
     @pytest.mark.asyncio
     async def test_auto_run(self):
@@ -486,6 +499,7 @@ class TestAutoRun:
 
 
 # ==================== SubTask 测试 ====================
+
 
 class TestSubTask:
     def test_defaults(self):
@@ -510,6 +524,7 @@ class TestSubTask:
 
 # ==================== TaskDecomposition 测试 ====================
 
+
 class TestTaskDecomposition:
     def test_creation(self):
         subtasks = [
@@ -527,6 +542,7 @@ class TestTaskDecomposition:
 
 
 # ==================== AutoAgentResult 测试 ====================
+
 
 class TestAutoAgentResult:
     def test_defaults(self):

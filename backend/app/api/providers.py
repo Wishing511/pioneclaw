@@ -5,23 +5,20 @@ Provider 管理 API
 """
 
 import logging
-from typing import Optional, List
+from enum import Enum
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from enum import Enum
 
 from app.api.auth import get_current_active_user
 from app.models.models import User
 from app.modules.providers import (
-    ProviderFactory,
+    THINKING_PROFILES,
+    ModelOverride,
     ProviderConfig,
     ProviderType,
     get_provider_factory,
-    KeyRotator,
-    ModelOverride,
-    THINKING_PROFILES,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +26,7 @@ router = APIRouter(prefix="/providers", tags=["Provider 管理"])
 
 
 # ==================== 请求模型 ====================
+
 
 class ProviderTypeEnum(str, Enum):
     OPENAI = "openai"
@@ -41,12 +39,13 @@ class ProviderTypeEnum(str, Enum):
 
 class ProviderCreateRequest(BaseModel):
     """创建 Provider 请求"""
+
     provider_type: ProviderTypeEnum
     name: str
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
-    api_version: Optional[str] = None
-    default_model: Optional[str] = None
+    api_key: str | None = None
+    api_base: str | None = None
+    api_version: str | None = None
+    default_model: str | None = None
     timeout: float = 60.0
     supports_streaming: bool = True
     supports_tools: bool = True
@@ -57,24 +56,27 @@ class ProviderCreateRequest(BaseModel):
 
 class ProviderUpdateRequest(BaseModel):
     """更新 Provider 请求"""
-    name: Optional[str] = None
-    api_key: Optional[str] = None
-    api_base: Optional[str] = None
-    default_model: Optional[str] = None
-    timeout: Optional[float] = None
-    extra: Optional[dict] = None
+
+    name: str | None = None
+    api_key: str | None = None
+    api_base: str | None = None
+    default_model: str | None = None
+    timeout: float | None = None
+    extra: dict | None = None
 
 
 class ModelOverrideRequest(BaseModel):
     """模型覆盖请求"""
-    model: Optional[str] = None
-    temperature: Optional[float] = None
-    max_tokens: Optional[int] = None
-    thinking_enabled: Optional[bool] = None
-    thinking_budget: Optional[int] = None
+
+    model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+    thinking_enabled: bool | None = None
+    thinking_budget: int | None = None
 
 
 # ==================== API 端点 ====================
+
 
 @router.get("")
 async def list_providers(
@@ -83,13 +85,13 @@ async def list_providers(
     """获取所有 Provider"""
     factory = get_provider_factory()
     providers = factory.get_available_providers()
-    
+
     result = []
     for provider_id in providers:
         provider = factory.get(provider_id)
         if provider:
             result.append(provider.get_info())
-    
+
     return {
         "providers": result,
         "total": len(result),
@@ -103,11 +105,12 @@ async def create_provider(
 ):
     """创建 Provider"""
     factory = get_provider_factory()
-    
+
     # 生成 Provider ID
     import uuid
+
     provider_id = f"{request.provider_type.value}_{uuid.uuid4().hex[:8]}"
-    
+
     # 创建配置
     config = ProviderConfig(
         provider_id=provider_id,
@@ -124,15 +127,15 @@ async def create_provider(
         supports_thinking=request.supports_thinking,
         extra=request.extra,
     )
-    
+
     # 注册配置
     factory.register_config(config)
-    
+
     # 创建实例
     provider = factory.create(provider_id)
     if not provider:
         raise HTTPException(status_code=400, detail="Failed to create provider")
-    
+
     return {
         "success": True,
         "provider_id": provider_id,
@@ -148,10 +151,10 @@ async def get_provider(
     """获取 Provider 详情"""
     factory = get_provider_factory()
     provider = factory.get(provider_id)
-    
+
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    
+
     return provider.get_info()
 
 
@@ -164,10 +167,10 @@ async def update_provider(
     """更新 Provider 配置"""
     factory = get_provider_factory()
     provider = factory.get(provider_id)
-    
+
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    
+
     # 更新配置
     config = provider.config
     if request.name:
@@ -182,7 +185,7 @@ async def update_provider(
         config.timeout = request.timeout
     if request.extra:
         config.extra.update(request.extra)
-    
+
     return {"success": True, "message": "Provider updated"}
 
 
@@ -193,17 +196,17 @@ async def delete_provider(
 ):
     """删除 Provider"""
     factory = get_provider_factory()
-    
+
     if provider_id not in factory._configs:
         raise HTTPException(status_code=404, detail="Provider not found")
-    
+
     # 移除配置和实例
     del factory._configs[provider_id]
     if provider_id in factory._instances:
         del factory._instances[provider_id]
     if provider_id in factory._key_rotators:
         del factory._key_rotators[provider_id]
-    
+
     return {"success": True, "message": "Provider deleted"}
 
 
@@ -216,10 +219,10 @@ async def apply_model_override(
     """应用模型覆盖配置"""
     factory = get_provider_factory()
     provider = factory.get(provider_id)
-    
+
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    
+
     # 创建覆盖配置
     override = ModelOverride(
         model=request.model,
@@ -228,7 +231,7 @@ async def apply_model_override(
         thinking_enabled=request.thinking_enabled,
         thinking_budget=request.thinking_budget,
     )
-    
+
     return {
         "success": True,
         "override": {
@@ -248,14 +251,22 @@ async def get_supported_types(
     """获取支持的 Provider 类型"""
     factory = get_provider_factory()
     types = factory.get_supported_types()
-    
+
     return {
         "types": [
             {"value": "openai", "label": "OpenAI", "supports_thinking": False},
-            {"value": "anthropic", "label": "Anthropic (Claude)", "supports_thinking": True},
+            {
+                "value": "anthropic",
+                "label": "Anthropic (Claude)",
+                "supports_thinking": True,
+            },
             {"value": "azure", "label": "Azure OpenAI", "supports_thinking": False},
             {"value": "google", "label": "Google AI", "supports_thinking": False},
-            {"value": "local", "label": "本地模型 (Ollama)", "supports_thinking": False},
+            {
+                "value": "local",
+                "label": "本地模型 (Ollama)",
+                "supports_thinking": False,
+            },
         ],
         "supported": types,
     }
@@ -289,29 +300,29 @@ async def test_provider(
     """测试 Provider 连接"""
     factory = get_provider_factory()
     provider = factory.get(provider_id)
-    
+
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    
+
     # 简单的测试消息
     try:
         from app.modules.providers.base import ChatMessage
-        
+
         messages = [ChatMessage(role="user", content="Hello")]
-        
+
         response = await provider.chat(
             messages=messages,
             max_tokens=50,
         )
-        
+
         if "error" in response:
             return {"success": False, "error": response["error"]}
-        
+
         return {
             "success": True,
             "message": "Provider connection successful",
             "model": response.get("model", provider.config.default_model),
         }
-        
+
     except Exception as e:
         return {"success": False, "error": str(e)}

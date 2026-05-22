@@ -6,7 +6,6 @@ Task Store — 后台任务共享状态与访问器
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +31,18 @@ _ALLOWED_TRANSITIONS = {
 }
 
 
-def get_task(task_id: str) -> Optional[dict]:
+def get_task(task_id: str) -> dict | None:
     """获取单个任务"""
     return _background_tasks.get(task_id)
 
 
-def create_task(task_id: str, label: str, tool_name: str = "spawn",
-                args: Optional[dict] = None, parent_task_id: str = "") -> dict:
+def create_task(
+    task_id: str,
+    label: str,
+    tool_name: str = "spawn",
+    args: dict | None = None,
+    parent_task_id: str = "",
+) -> dict:
     """创建任务条目，返回创建的 dict"""
     entry = {
         "task_id": task_id,
@@ -72,7 +76,9 @@ def update_task_status(task_id: str, status: str, **fields) -> bool:
 
     # 终态不可修改
     if old_status in _TERMINAL_STATUSES:
-        logger.warning(f"Task '{task_id}' is in terminal state '{old_status}', cannot update")
+        logger.warning(
+            f"Task '{task_id}' is in terminal state '{old_status}', cannot update"
+        )
         return False
 
     # 状态转换校验
@@ -101,7 +107,7 @@ def update_task_status(task_id: str, status: str, **fields) -> bool:
     return True
 
 
-def list_tasks(status: Optional[str] = None, tool_name: Optional[str] = None) -> list[dict]:
+def list_tasks(status: str | None = None, tool_name: str | None = None) -> list[dict]:
     """列出任务，支持过滤
 
     Args:
@@ -114,15 +120,17 @@ def list_tasks(status: Optional[str] = None, tool_name: Optional[str] = None) ->
             continue
         if tool_name and t.get("tool_name") != tool_name:
             continue
-        result.append({
-            "task_id": tid,
-            "label": t["label"],
-            "tool_name": t["tool_name"],
-            "status": t["status"],
-            "progress": t.get("progress", 0),
-            "created_at": t["created_at"],
-            "parent_task_id": t.get("parent_task_id"),
-        })
+        result.append(
+            {
+                "task_id": tid,
+                "label": t["label"],
+                "tool_name": t["tool_name"],
+                "status": t["status"],
+                "progress": t.get("progress", 0),
+                "created_at": t["created_at"],
+                "parent_task_id": t.get("parent_task_id"),
+            }
+        )
     # 按创建时间倒序
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return result

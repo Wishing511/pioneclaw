@@ -3,25 +3,26 @@ TaskBoard API 端点
 任务看板管理接口
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 
 from app.api.auth import get_current_active_user
 from app.models import User
+
 from ..core.database import get_db
 from ..modules.agent.task_board import (
     TaskBoardService,
     TaskHeartbeatService,
     TaskScope,
     TaskType,
+    run_task_heartbeat,
 )
-
 
 router = APIRouter(prefix="/task-board", tags=["TaskBoard"])
 
 
 # ==================== 任务 CRUD ====================
+
 
 @router.get("/stats")
 async def get_stats(
@@ -81,6 +82,7 @@ async def get_tasks_by_status(
 
 # ==================== 任务操作 ====================
 
+
 @router.post("/{task_id}/start")
 async def start_task(
     task_id: str,
@@ -90,10 +92,10 @@ async def start_task(
     """开始任务"""
     service = TaskBoardService(db)
     task = await service.start_task(task_id)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     return {"success": True, "task": task}
 
 
@@ -106,10 +108,10 @@ async def complete_task(
     """完成任务"""
     service = TaskBoardService(db)
     task = await service.complete_task(task_id)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     return {"success": True, "task": task}
 
 
@@ -123,10 +125,10 @@ async def fail_task(
     """标记任务失败"""
     service = TaskBoardService(db)
     task = await service.fail_task(task_id, error_message)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     return {"success": True, "task": task}
 
 
@@ -139,10 +141,10 @@ async def cancel_task(
     """取消任务"""
     service = TaskBoardService(db)
     task = await service.cancel_task(task_id)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     return {"success": True, "task": task}
 
 
@@ -156,14 +158,15 @@ async def update_progress(
     """更新任务进度"""
     service = TaskBoardService(db)
     task = await service.update_progress(task_id, progress)
-    
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     return {"success": True, "task": task}
 
 
 # ==================== 心跳检测 ====================
+
 
 @router.post("/heartbeat/scan")
 async def scan_timeout_tasks(
@@ -207,12 +210,13 @@ async def run_heartbeat(
 ):
     """运行完整心跳检测（供 Cron 调用）"""
     from ..core.database import AsyncSessionLocal
-    
+
     result = await run_task_heartbeat(AsyncSessionLocal)
     return {"success": True, **result}
 
 
 # ==================== 类型定义 ====================
+
 
 @router.get("/scopes")
 async def get_task_scopes(

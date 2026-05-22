@@ -1,22 +1,29 @@
 """
 组织管理 API
 """
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core.database import get_db
+
 from app.api.auth import get_current_active_user
-from app.models import User, Organization
+from app.core.database import get_db
+from app.models import Organization, User
 from app.schemas.organization import (
-    OrganizationCreate, OrganizationUpdate, OrganizationInDB,
-    OrganizationTree, OrganizationSimple, OrganizationListResponse,
+    OrganizationCreate,
+    OrganizationInDB,
+    OrganizationListResponse,
+    OrganizationSimple,
+    OrganizationTree,
+    OrganizationUpdate,
 )
 
 router = APIRouter(prefix="/organizations", tags=["组织管理"])
 
 
-def build_org_tree(orgs: List[Organization], parent_id: str = None) -> List[OrganizationTree]:
+def build_org_tree(
+    orgs: list[Organization], parent_id: str = None
+) -> list[OrganizationTree]:
     """构建组织树"""
     tree = []
     children = [o for o in orgs if o.parent_id == parent_id]
@@ -45,8 +52,8 @@ def build_org_tree(orgs: List[Organization], parent_id: str = None) -> List[Orga
 
 @router.get("/", response_model=OrganizationListResponse)
 async def list_organizations(
-    status_filter: Optional[str] = Query(None, alias="status"),
-    type: Optional[str] = None,
+    status_filter: str | None = Query(None, alias="status"),
+    type: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -66,7 +73,9 @@ async def list_organizations(
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
 
-    query = query.order_by(Organization.level, Organization.name).offset(skip).limit(limit)
+    query = (
+        query.order_by(Organization.level, Organization.name).offset(skip).limit(limit)
+    )
     result = await db.execute(query)
     orgs = result.scalars().all()
 
@@ -76,18 +85,20 @@ async def list_organizations(
     )
 
 
-@router.get("/tree", response_model=List[OrganizationTree])
+@router.get("/tree", response_model=list[OrganizationTree])
 async def get_organization_tree(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """获取组织树"""
-    result = await db.execute(select(Organization).order_by(Organization.level, Organization.name))
+    result = await db.execute(
+        select(Organization).order_by(Organization.level, Organization.name)
+    )
     orgs = result.scalars().all()
     return build_org_tree(list(orgs))
 
 
-@router.get("/simple", response_model=List[OrganizationSimple])
+@router.get("/simple", response_model=list[OrganizationSimple])
 async def list_organizations_simple(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -116,13 +127,19 @@ async def create_organization(
     # 限制：只能有一个 company（level=1 的顶级组织）
     if data.type == "company" or (not data.parent_id and data.type != "department"):
         result = await db.execute(
-            select(Organization).where(Organization.type == "company", Organization.level == 1)
+            select(Organization).where(
+                Organization.type == "company", Organization.level == 1
+            )
         )
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="已存在公司级组织，只能有一个 company")
+            raise HTTPException(
+                status_code=400, detail="已存在公司级组织，只能有一个 company"
+            )
 
     # 检查 code 唯一性
-    result = await db.execute(select(Organization).where(Organization.code == data.code))
+    result = await db.execute(
+        select(Organization).where(Organization.code == data.code)
+    )
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="组织代码已存在")
 
@@ -130,7 +147,9 @@ async def create_organization(
     level = 1
     parent_path = ""
     if data.parent_id:
-        result = await db.execute(select(Organization).where(Organization.id == data.parent_id))
+        result = await db.execute(
+            select(Organization).where(Organization.id == data.parent_id)
+        )
         parent = result.scalar_one_or_none()
         if not parent:
             raise HTTPException(status_code=400, detail="父组织不存在")
@@ -219,12 +238,16 @@ async def delete_organization(
         raise HTTPException(status_code=400, detail="公司级组织不可删除")
 
     # 检查是否有子组织
-    result = await db.execute(select(Organization).where(Organization.parent_id == org_id).limit(1))
+    result = await db.execute(
+        select(Organization).where(Organization.parent_id == org_id).limit(1)
+    )
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="存在子组织，不可删除")
 
     # 检查是否有关联用户
-    result = await db.execute(select(User).where(User.organization_id == org_id).limit(1))
+    result = await db.execute(
+        select(User).where(User.organization_id == org_id).limit(1)
+    )
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="组织下存在用户，不可删除")
 
@@ -242,10 +265,7 @@ async def get_organization_users(
 ):
     """获取组织下的用户"""
     result = await db.execute(
-        select(User)
-        .where(User.organization_id == org_id)
-        .offset(skip)
-        .limit(limit)
+        select(User).where(User.organization_id == org_id).offset(skip).limit(limit)
     )
     users = result.scalars().all()
 

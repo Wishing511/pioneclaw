@@ -9,21 +9,20 @@
 import asyncio
 import os
 import tempfile
-import pytest
-from unittest.mock import patch, MagicMock
 
-from app.modules.plugins.lifecycle import PluginLifecycle, StateTransition
+import pytest
+
+from app.modules.plugins.lifecycle import PluginLifecycle
 from app.modules.plugins.manager import (
-    PluginManager,
     PluginInfo,
+    PluginManager,
     PluginState,
 )
-from app.modules.plugins.event_bus import EventBus
-
 
 # ============================================================
 # PluginLifecycle 状态机测试
 # ============================================================
+
 
 class TestPluginStateMachine:
     """测试状态转换"""
@@ -54,14 +53,14 @@ class TestPluginStateMachine:
     def test_valid_transition_loading_to_error(self):
         """LOADING → ERROR 合法"""
         self.lifecycle.transition("loading")
-        t = self.lifecycle.transition("error", reason="import failed")
+        self.lifecycle.transition("error", reason="import failed")
         assert self.lifecycle.state == "error"
 
     def test_valid_transition_loaded_to_paused(self):
         """LOADED → PAUSED 合法"""
         self.lifecycle.transition("loading")
         self.lifecycle.transition("loaded")
-        t = self.lifecycle.transition("paused", reason="manual pause")
+        self.lifecycle.transition("paused", reason="manual pause")
         assert self.lifecycle.state == "paused"
 
     def test_valid_transition_paused_to_loaded(self):
@@ -69,14 +68,14 @@ class TestPluginStateMachine:
         self.lifecycle.transition("loading")
         self.lifecycle.transition("loaded")
         self.lifecycle.transition("paused")
-        t = self.lifecycle.transition("loaded", reason="resume")
+        self.lifecycle.transition("loaded", reason="resume")
         assert self.lifecycle.state == "loaded"
 
     def test_valid_transition_loaded_to_stopping(self):
         """LOADED → STOPPING 合法"""
         self.lifecycle.transition("loading")
         self.lifecycle.transition("loaded")
-        t = self.lifecycle.transition("stopping", reason="stop requested")
+        self.lifecycle.transition("stopping", reason="stop requested")
         assert self.lifecycle.state == "stopping"
 
     def test_valid_transition_stopping_to_stopped(self):
@@ -84,7 +83,7 @@ class TestPluginStateMachine:
         self.lifecycle.transition("loading")
         self.lifecycle.transition("loaded")
         self.lifecycle.transition("stopping")
-        t = self.lifecycle.transition("stopped", reason="stop complete")
+        self.lifecycle.transition("stopped", reason="stop complete")
         assert self.lifecycle.state == "stopped"
 
     def test_valid_transition_stopped_to_loading(self):
@@ -93,14 +92,14 @@ class TestPluginStateMachine:
         self.lifecycle.transition("loaded")
         self.lifecycle.transition("stopping")
         self.lifecycle.transition("stopped")
-        t = self.lifecycle.transition("loading", reason="restart")
+        self.lifecycle.transition("loading", reason="restart")
         assert self.lifecycle.state == "loading"
 
     def test_valid_transition_loaded_to_disabled(self):
         """LOADED → DISABLED 合法"""
         self.lifecycle.transition("loading")
         self.lifecycle.transition("loaded")
-        t = self.lifecycle.transition("disabled", reason="admin disabled")
+        self.lifecycle.transition("disabled", reason="admin disabled")
         assert self.lifecycle.state == "disabled"
 
     def test_valid_transition_disabled_to_unloaded(self):
@@ -108,7 +107,7 @@ class TestPluginStateMachine:
         self.lifecycle.transition("loading")
         self.lifecycle.transition("loaded")
         self.lifecycle.transition("disabled")
-        t = self.lifecycle.transition("unloaded", reason="enable")
+        self.lifecycle.transition("unloaded", reason="enable")
         assert self.lifecycle.state == "unloaded"
 
     def test_invalid_transition_raises(self):
@@ -154,6 +153,7 @@ class TestPluginStateMachine:
 # 健康检查测试
 # ============================================================
 
+
 class TestPluginHealthCheck:
     """测试健康检查"""
 
@@ -182,8 +182,10 @@ class TestPluginHealthCheck:
 
     def test_health_check_exception(self):
         """健康检查抛出异常时不崩溃"""
+
         def bad_check():
             raise RuntimeError("connection lost")
+
         lifecycle = PluginLifecycle(plugin_id="test", health_check_fn=bad_check)
         healthy = asyncio.run(lifecycle.run_health_check())
         assert healthy is False
@@ -221,6 +223,7 @@ class TestPluginHealthCheck:
 # ============================================================
 # 自动重试测试
 # ============================================================
+
 
 class TestPluginAutoRetry:
     """测试自动重试"""
@@ -294,6 +297,7 @@ class TestPluginAutoRetry:
 # PluginManager 生命周期方法测试
 # ============================================================
 
+
 class TestPluginManagerLifecycle:
     """测试 PluginManager 的 pause/resume/stop/restart/enable/disable"""
 
@@ -361,7 +365,9 @@ class TestPluginManagerLifecycle:
         # Force error by loading from non-existent dir
         with tempfile.TemporaryDirectory() as tmpdir:
             mgr = PluginManager(plugin_dir=tmpdir)
-            mgr._plugins["bad"] = PluginInfo(plugin_id="bad", name="bad", state=PluginState.ERROR)
+            mgr._plugins["bad"] = PluginInfo(
+                plugin_id="bad", name="bad", state=PluginState.ERROR
+            )
             result = mgr.stop_plugin("bad")
             assert result is True
             assert mgr._plugins["bad"].state == PluginState.STOPPED
@@ -423,6 +429,7 @@ class TestPluginManagerLifecycle:
 # ============================================================
 # 健康检查 API 测试（Manager 级别）
 # ============================================================
+
 
 class TestPluginHealthCheckManager:
     """测试 PluginManager 健康检查功能"""

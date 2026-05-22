@@ -7,9 +7,8 @@
 """
 
 import logging
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional
+from email.mime.text import MIMEText
 
 from app.core.config import settings
 
@@ -21,7 +20,7 @@ async def send_email(
     subject: str,
     html_body: str,
     *,
-    text_body: Optional[str] = None,
+    text_body: str | None = None,
 ) -> bool:
     """
     异步发送 HTML 邮件。
@@ -48,6 +47,7 @@ async def send_email(
 
     try:
         import aiosmtplib
+
         await aiosmtplib.send(
             msg,
             hostname=settings.SMTP_HOST,
@@ -84,7 +84,7 @@ def build_password_reset_email(reset_link: str, username: str = "") -> tuple[str
     <html>
     <body style="font-family: sans-serif; padding: 20px;">
         <h2>PioneClaw 密码重置</h2>
-        <p>您好{(' ' + username) if username else ''}，</p>
+        <p>您好{(" " + username) if username else ""}，</p>
         <p>我们收到了您的密码重置请求。请点击以下链接重置密码：</p>
         <p>
             <a href="{reset_link}" style="

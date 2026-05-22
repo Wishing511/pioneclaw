@@ -16,14 +16,12 @@ URI 命名规范:
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from loguru import logger
-from sqlalchemy import select, delete, and_
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.layered_memory import LayeredMemory, MemoryLayer
-
 
 # L0/L1 生成提示词
 L0_GENERATE_PROMPT = """请用一句话概括以下内容的核心要点，不超过50字：
@@ -56,13 +54,13 @@ class TierManager:
         name: str,
         user_id: int,
         context_type: str = "memory",
-        uri: Optional[str] = None,
-        parent_uri: Optional[str] = None,
-        tags: Optional[list] = None,
-        source: Optional[str] = None,
+        uri: str | None = None,
+        parent_uri: str | None = None,
+        tags: list | None = None,
+        source: str | None = None,
         importance: int = 3,
-        session_id: Optional[str] = None,
-        agent_id: Optional[int] = None,
+        session_id: str | None = None,
+        agent_id: int | None = None,
     ) -> LayeredMemory:
         """存储 L2 全文，并自动生成 L0 摘要和 L1 概述"""
 
@@ -139,7 +137,7 @@ class TierManager:
 
     # ==================== 获取 ====================
 
-    async def get(self, uri: str, layer: Optional[int] = None) -> Optional[LayeredMemory]:
+    async def get(self, uri: str, layer: int | None = None) -> LayeredMemory | None:
         """按 URI 获取记忆，可指定层级"""
         if layer is not None:
             # 获取特定层级
@@ -170,7 +168,7 @@ class TierManager:
             await self.db.flush()
         return memory
 
-    async def get_with_context(self, uri: str) -> Optional[LayeredMemory]:
+    async def get_with_context(self, uri: str) -> LayeredMemory | None:
         """获取 L2 记忆，并填充 L0/L1 内容"""
         l2 = await self.get(uri)
         if not l2:
@@ -190,7 +188,7 @@ class TierManager:
 
     # ==================== 更新 ====================
 
-    async def update_content(self, uri: str, new_content: str) -> Optional[LayeredMemory]:
+    async def update_content(self, uri: str, new_content: str) -> LayeredMemory | None:
         """更新 L2 内容并重新生成 L0/L1"""
         stmt = select(LayeredMemory).where(
             and_(LayeredMemory.uri == uri, LayeredMemory.layer == MemoryLayer.LONG_TERM)
@@ -239,7 +237,9 @@ class TierManager:
 
     # ==================== 提升 ====================
 
-    async def promote(self, uri: str, from_layer: int = 1, to_layer: int = 2) -> Optional[LayeredMemory]:
+    async def promote(
+        self, uri: str, from_layer: int = 1, to_layer: int = 2
+    ) -> LayeredMemory | None:
         """将记忆从低层级提升到高层级（默认 L1→L2）"""
         # 获取源层级记忆
         source_uri = uri
@@ -257,9 +257,14 @@ class TierManager:
         # 检查目标层级是否已存在
         if to_layer == 2:
             # L1→L2：将 L1 的概述作为 L2 的内容
-            target_uri = source.parent_uri or uri.replace("/.level_1", "").replace("/.level_0", "")
+            target_uri = source.parent_uri or uri.replace("/.level_1", "").replace(
+                "/.level_0", ""
+            )
             stmt_target = select(LayeredMemory).where(
-                and_(LayeredMemory.uri == target_uri, LayeredMemory.layer == MemoryLayer.LONG_TERM)
+                and_(
+                    LayeredMemory.uri == target_uri,
+                    LayeredMemory.layer == MemoryLayer.LONG_TERM,
+                )
             )
             result_target = await self.db.execute(stmt_target)
             target = result_target.scalar_one_or_none()

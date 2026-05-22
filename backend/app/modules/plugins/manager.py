@@ -11,6 +11,7 @@ PluginManager - 插件管理器
 """
 
 import asyncio
+import contextlib
 import importlib
 import importlib.util
 import inspect
@@ -19,10 +20,9 @@ import os
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
-from .event_bus import EventBus, EventHandler
+from .event_bus import EventBus
 from .lifecycle import PluginLifecycle
 
 logger = logging.getLogger(__name__)
@@ -34,35 +34,37 @@ class PluginState(Enum):
     原有：UNLOADED, LOADING, LOADED, ERROR, UNLOADING
     新增：RETRYING, PAUSED, STOPPING, STOPPED, DISABLED
     """
+
     UNLOADED = "unloaded"
     LOADING = "loading"
-    LOADED = "loaded"          # 加载成功（= active / running）
+    LOADED = "loaded"  # 加载成功（= active / running）
     ERROR = "error"
     UNLOADING = "unloading"
-    RETRYING = "retrying"       # 错误后自动重试中
-    PAUSED = "paused"           # 已暂停（事件订阅挂起）
-    STOPPING = "stopping"       # 正在停止
-    STOPPED = "stopped"         # 已停止
-    DISABLED = "disabled"       # 已禁用（保留元数据）
+    RETRYING = "retrying"  # 错误后自动重试中
+    PAUSED = "paused"  # 已暂停（事件订阅挂起）
+    STOPPING = "stopping"  # 正在停止
+    STOPPED = "stopped"  # 已停止
+    DISABLED = "disabled"  # 已禁用（保留元数据）
 
 
 @dataclass
 class PluginInfo:
     """插件信息"""
+
     plugin_id: str
     name: str
     version: str = "0.1.0"
     description: str = ""
     author: str = ""
-    dependencies: List[str] = field(default_factory=list)  # 依赖的其他插件 ID
-    config_schema: Optional[dict] = None  # 配置 schema
+    dependencies: list[str] = field(default_factory=list)  # 依赖的其他插件 ID
+    config_schema: dict | None = None  # 配置 schema
     state: PluginState = PluginState.UNLOADED
-    module: Optional[Any] = None  # 加载后的 Python 模块
-    error: Optional[str] = None
-    config: Dict[str, Any] = field(default_factory=dict)
-    subscriptions: List[str] = field(default_factory=list)  # 订阅 ID 列表
+    module: Any | None = None  # 加载后的 Python 模块
+    error: str | None = None
+    config: dict[str, Any] = field(default_factory=dict)
+    subscriptions: list[str] = field(default_factory=list)  # 订阅 ID 列表
     # 生命周期 (set after __init__ by PluginManager)
-    lifecycle: Optional[PluginLifecycle] = None
+    lifecycle: PluginLifecycle | None = None
 
 
 # 插件模块需实现的钩子函数名
@@ -94,8 +96,8 @@ class PluginManager:
 
     def __init__(
         self,
-        event_bus: Optional[EventBus] = None,
-        plugin_dir: Optional[str] = None,
+        event_bus: EventBus | None = None,
+        plugin_dir: str | None = None,
     ) -> None:
         """
         初始化 PluginManager
@@ -106,16 +108,16 @@ class PluginManager:
         """
         self._event_bus = event_bus or EventBus()
         self._plugin_dir = plugin_dir
-        self._plugins: Dict[str, PluginInfo] = {}
-        self._health_monitor_task: Optional[asyncio.Task] = None
-        self._retry_worker_task: Optional[asyncio.Task] = None
+        self._plugins: dict[str, PluginInfo] = {}
+        self._health_monitor_task: asyncio.Task | None = None
+        self._retry_worker_task: asyncio.Task | None = None
 
     @property
     def event_bus(self) -> EventBus:
         """获取事件总线"""
         return self._event_bus
 
-    def discover_plugins(self) -> List[str]:
+    def discover_plugins(self) -> list[str]:
         """
         发现插件目录中的所有插件
 
@@ -139,7 +141,7 @@ class PluginManager:
 
         return sorted(plugin_ids)
 
-    def load_plugin(self, plugin_id: str, config: Optional[dict] = None) -> PluginInfo:
+    def load_plugin(self, plugin_id: str, config: dict | None = None) -> PluginInfo:
         """
         加载插件
 
@@ -154,7 +156,8 @@ class PluginManager:
             ValueError: 插件未找到或依赖未满足
         """
         if plugin_id in self._plugins and self._plugins[plugin_id].state in (
-            PluginState.LOADED, PluginState.LOADING,
+            PluginState.LOADED,
+            PluginState.LOADING,
         ):
             logger.warning(f"[PluginManager] 插件 '{plugin_id}' 已加载/加载中")
             return self._plugins[plugin_id]
@@ -195,9 +198,7 @@ class PluginManager:
             # 检查依赖
             missing = self._check_dependencies(info)
             if missing:
-                raise ValueError(
-                    f"插件 '{plugin_id}' 依赖未满足: {', '.join(missing)}"
-                )
+                raise ValueError(f"插件 '{plugin_id}' 依赖未满足: {', '.join(missing)}")
 
             # 注册事件处理器
             self._register_event_handlers(info)
@@ -207,7 +208,9 @@ class PluginManager:
             if on_load and callable(on_load):
                 result = on_load(self._event_bus, info.config)
                 if inspect.isawaitable(result):
-                    logger.info(f"[PluginManager] 插件 '{plugin_id}' on_load 是异步函数，需在事件循环中调用")
+                    logger.info(
+                        f"[PluginManager] 插件 '{plugin_id}' on_load 是异步函数，需在事件循环中调用"
+                    )
 
             info.state = PluginState.LOADED
             info.lifecycle.transition("loaded", reason="load succeeded")
@@ -230,19 +233,18 @@ class PluginManager:
             if info.module:
                 on_error = getattr(info.module, "on_error", None)
                 if on_error and callable(on_error):
-                    try:
+                    with contextlib.suppress(Exception):
                         on_error(exc)
-                    except Exception:
-                        pass
 
             # 自动进入重试
             if info.lifecycle.should_auto_restart:
                 info.state = PluginState.RETRYING
                 info.lifecycle.retry_count += 1
-                try:
-                    info.lifecycle.transition("retrying", reason=f"auto-retry {info.lifecycle.retry_count}/{info.lifecycle.max_retries}")
-                except ValueError:
-                    pass
+                with contextlib.suppress(ValueError):
+                    info.lifecycle.transition(
+                        "retrying",
+                        reason=f"auto-retry {info.lifecycle.retry_count}/{info.lifecycle.max_retries}",
+                    )
                 logger.info(
                     f"[PluginManager] 插件 '{plugin_id}' 将在 "
                     f"{info.lifecycle.compute_retry_delay_ms()}ms 后自动重试 "
@@ -253,7 +255,7 @@ class PluginManager:
         return info
 
     async def load_plugin_async(
-        self, plugin_id: str, config: Optional[dict] = None
+        self, plugin_id: str, config: dict | None = None
     ) -> PluginInfo:
         """异步加载插件（支持异步 on_load）"""
         info = self.load_plugin(plugin_id, config)
@@ -268,7 +270,9 @@ class PluginManager:
                     except Exception as exc:
                         info.state = PluginState.ERROR
                         info.error = str(exc)
-                        logger.error(f"[PluginManager] 插件 '{plugin_id}' on_load 失败: {exc}")
+                        logger.error(
+                            f"[PluginManager] 插件 '{plugin_id}' on_load 失败: {exc}"
+                        )
 
         return info
 
@@ -287,19 +291,24 @@ class PluginManager:
             return False
 
         info = self._plugins[plugin_id]
-        unloadable = {PluginState.LOADED, PluginState.PAUSED, PluginState.ERROR,
-                      PluginState.STOPPED, PluginState.DISABLED, PluginState.RETRYING}
+        unloadable = {
+            PluginState.LOADED,
+            PluginState.PAUSED,
+            PluginState.ERROR,
+            PluginState.STOPPED,
+            PluginState.DISABLED,
+            PluginState.RETRYING,
+        }
         if info.state not in unloadable:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法卸载")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法卸载"
+            )
             return False
 
-        from_state = info.state
         info.state = PluginState.UNLOADING
         if info.lifecycle:
-            try:
+            with contextlib.suppress(ValueError):
                 info.lifecycle.transition("unloading", reason="unload_plugin called")
-            except ValueError:
-                pass
 
         try:
             # 取消事件订阅
@@ -371,28 +380,28 @@ class PluginManager:
 
         return await self.load_plugin_async(plugin_id, config=config)
 
-    def load_all(self) -> List[PluginInfo]:
+    def load_all(self) -> list[PluginInfo]:
         """加载所有已发现的插件"""
         results = []
         for plugin_id in self.discover_plugins():
             results.append(self.load_plugin(plugin_id))
         return results
 
-    async def load_all_async(self) -> List[PluginInfo]:
+    async def load_all_async(self) -> list[PluginInfo]:
         """异步加载所有已发现的插件"""
         results = []
         for plugin_id in self.discover_plugins():
             results.append(await self.load_plugin_async(plugin_id))
         return results
 
-    def get_plugin(self, plugin_id: str) -> Optional[PluginInfo]:
+    def get_plugin(self, plugin_id: str) -> PluginInfo | None:
         """获取插件信息"""
         return self._plugins.get(plugin_id)
 
     def list_plugins(
         self,
-        state: Optional[PluginState] = None,
-    ) -> List[PluginInfo]:
+        state: PluginState | None = None,
+    ) -> list[PluginInfo]:
         """列出插件"""
         plugins = list(self._plugins.values())
         if state:
@@ -423,7 +432,9 @@ class PluginManager:
             logger.warning(f"[PluginManager] 插件 '{plugin_id}' 不存在")
             return False
         if info.state != PluginState.LOADED:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法暂停")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法暂停"
+            )
             return False
 
         # 取消事件订阅
@@ -444,7 +455,9 @@ class PluginManager:
             logger.warning(f"[PluginManager] 插件 '{plugin_id}' 不存在")
             return False
         if info.state != PluginState.PAUSED:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法恢复")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法恢复"
+            )
             return False
 
         # 重新注册事件订阅
@@ -463,18 +476,22 @@ class PluginManager:
             logger.warning(f"[PluginManager] 插件 '{plugin_id}' 不存在")
             return False
 
-        stoppable = {PluginState.LOADED, PluginState.PAUSED,
-                     PluginState.ERROR, PluginState.RETRYING}
+        stoppable = {
+            PluginState.LOADED,
+            PluginState.PAUSED,
+            PluginState.ERROR,
+            PluginState.RETRYING,
+        }
         if info.state not in stoppable:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法停止")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法停止"
+            )
             return False
 
         info.state = PluginState.STOPPING
         if info.lifecycle:
-            try:
+            with contextlib.suppress(ValueError):
                 info.lifecycle.transition("stopping", reason="stop_plugin called")
-            except ValueError:
-                pass
 
         try:
             # 取消事件订阅
@@ -486,10 +503,8 @@ class PluginManager:
             if info.module:
                 on_unload = getattr(info.module, "on_unload", None)
                 if on_unload and callable(on_unload):
-                    try:
+                    with contextlib.suppress(Exception):
                         on_unload()
-                    except Exception:
-                        pass
 
             info.state = PluginState.STOPPED
             info.module = None
@@ -507,7 +522,7 @@ class PluginManager:
 
         return True
 
-    def restart_plugin(self, plugin_id: str) -> Optional[PluginInfo]:
+    def restart_plugin(self, plugin_id: str) -> PluginInfo | None:
         """重启插件：STOPPED/ERROR/DISABLED → LOADING → LOADED"""
         info = self._plugins.get(plugin_id)
         if not info:
@@ -516,7 +531,9 @@ class PluginManager:
 
         restartable = {PluginState.STOPPED, PluginState.ERROR, PluginState.DISABLED}
         if info.state not in restartable:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法重启")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法重启"
+            )
             return None
 
         config = info.config
@@ -536,10 +553,17 @@ class PluginManager:
         if info.state == PluginState.DISABLED:
             return True  # already disabled
 
-        disableable = {PluginState.UNLOADED, PluginState.LOADED,
-                       PluginState.STOPPED, PluginState.ERROR, PluginState.PAUSED}
+        disableable = {
+            PluginState.UNLOADED,
+            PluginState.LOADED,
+            PluginState.STOPPED,
+            PluginState.ERROR,
+            PluginState.PAUSED,
+        }
         if info.state not in disableable:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法禁用")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，无法禁用"
+            )
             return False
 
         # 如果已加载，先取消订阅
@@ -550,10 +574,8 @@ class PluginManager:
 
         info.state = PluginState.DISABLED
         if info.lifecycle:
-            try:
+            with contextlib.suppress(ValueError):
                 info.lifecycle.transition("disabled", reason="disable_plugin called")
-            except ValueError:
-                pass
         logger.info(f"[PluginManager] 插件 '{plugin_id}' 已禁用")
         return True
 
@@ -565,7 +587,9 @@ class PluginManager:
             return False
 
         if info.state != PluginState.DISABLED:
-            logger.warning(f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，非禁用状态")
+            logger.warning(
+                f"[PluginManager] 插件 '{plugin_id}' 状态为 {info.state}，非禁用状态"
+            )
             return False
 
         info.state = PluginState.UNLOADED
@@ -574,14 +598,14 @@ class PluginManager:
         logger.info(f"[PluginManager] 插件 '{plugin_id}' 已启用（可重新加载）")
         return True
 
-    def health_check(self, plugin_id: str) -> Optional[dict]:
+    def health_check(self, plugin_id: str) -> dict | None:
         """单个插件健康检查"""
         info = self._plugins.get(plugin_id)
         if not info:
             return None
         return self._do_health_check(info)
 
-    async def health_check_all(self) -> List[dict]:
+    async def health_check_all(self) -> list[dict]:
         """批量健康检查（所有已加载插件）"""
         results = []
         for info in self._plugins.values():
@@ -601,6 +625,7 @@ class PluginManager:
         }
         if info.lifecycle:
             import asyncio as _asyncio
+
             try:
                 loop = _asyncio.get_running_loop()
             except RuntimeError:
@@ -612,6 +637,7 @@ class PluginManager:
             else:
                 # 无事件循环，同步运行
                 import asyncio as _asyncio
+
                 try:
                     healthy = _asyncio.run(info.lifecycle.run_health_check())
                     result["healthy"] = healthy
@@ -620,7 +646,8 @@ class PluginManager:
 
             result["last_health_check"] = (
                 info.lifecycle.last_health_check.isoformat()
-                if info.lifecycle.last_health_check else None
+                if info.lifecycle.last_health_check
+                else None
             )
         return result
 
@@ -638,7 +665,8 @@ class PluginManager:
             result["healthy"] = await info.lifecycle.run_health_check()
             result["last_health_check"] = (
                 info.lifecycle.last_health_check.isoformat()
-                if info.lifecycle.last_health_check else None
+                if info.lifecycle.last_health_check
+                else None
             )
         return result
 
@@ -657,9 +685,7 @@ class PluginManager:
     def _ensure_retry_worker(self) -> None:
         """确保后台重试 worker 已启动"""
         if self._retry_worker_task is None or self._retry_worker_task.done():
-            self._retry_worker_task = asyncio.ensure_future(
-                self._auto_restart_worker()
-            )
+            self._retry_worker_task = asyncio.ensure_future(self._auto_restart_worker())
             logger.info("[PluginManager] 后台重试 worker 已启动")
 
     async def _background_health_monitor(self) -> None:
@@ -670,17 +696,17 @@ class PluginManager:
                 if info.state == PluginState.LOADED and info.lifecycle:
                     await info.lifecycle.run_health_check()
                     # 如果不健康且之前健康，记录并可选自动重启
-                    if (info.lifecycle.health_status is False
-                            and info.lifecycle.should_auto_restart):
+                    if (
+                        info.lifecycle.health_status is False
+                        and info.lifecycle.should_auto_restart
+                    ):
                         info.state = PluginState.RETRYING
                         info.lifecycle.retry_count += 1
-                        try:
+                        with contextlib.suppress(ValueError):
                             info.lifecycle.transition(
                                 "retrying",
-                                reason=f"health check failed, auto-retry {info.lifecycle.retry_count}/{info.lifecycle.max_retries}"
+                                reason=f"health check failed, auto-retry {info.lifecycle.retry_count}/{info.lifecycle.max_retries}",
                             )
-                        except ValueError:
-                            pass
                         self._ensure_retry_worker()
 
     async def _auto_restart_worker(self) -> None:
@@ -688,7 +714,8 @@ class PluginManager:
         while True:
             # 查找所有 RETRYING 状态的插件
             retrying = [
-                (pid, info) for pid, info in self._plugins.items()
+                (pid, info)
+                for pid, info in self._plugins.items()
                 if info.state == PluginState.RETRYING and info.lifecycle
             ]
             if not retrying:
@@ -700,13 +727,11 @@ class PluginManager:
                 if not lifecycle.should_auto_restart:
                     # 超过最大重试次数，设为 ERROR
                     info.state = PluginState.ERROR
-                    try:
+                    with contextlib.suppress(ValueError):
                         lifecycle.transition(
                             "error",
-                            reason=f"max_retries ({lifecycle.max_retries}) exceeded"
+                            reason=f"max_retries ({lifecycle.max_retries}) exceeded",
                         )
-                    except ValueError:
-                        pass
                     continue
 
                 delay_ms = lifecycle.compute_retry_delay_ms()
@@ -762,7 +787,8 @@ class PluginManager:
         init_path = os.path.join(plugin_path, "__init__.py")
         if os.path.isfile(init_path):
             spec = importlib.util.spec_from_file_location(
-                module_name, init_path,
+                module_name,
+                init_path,
                 submodule_search_locations=[plugin_path],
             )
             if spec and spec.loader:
@@ -793,10 +819,8 @@ class PluginManager:
         if os.path.isdir(pycache_dir):
             for fname in os.listdir(pycache_dir):
                 if fname.startswith(plugin_id) and fname.endswith(".pyc"):
-                    try:
+                    with contextlib.suppress(OSError):
                         os.remove(os.path.join(pycache_dir, fname))
-                    except OSError:
-                        pass
 
         # 清除包的 .pyc
         pkg_dir = os.path.join(self._plugin_dir, plugin_id)
@@ -805,12 +829,10 @@ class PluginManager:
             if os.path.isdir(pkg_cache):
                 for fname in os.listdir(pkg_cache):
                     if fname.endswith(".pyc"):
-                        try:
+                        with contextlib.suppress(OSError):
                             os.remove(os.path.join(pkg_cache, fname))
-                        except OSError:
-                            pass
 
-    def _check_dependencies(self, info: PluginInfo) -> List[str]:
+    def _check_dependencies(self, info: PluginInfo) -> list[str]:
         """检查插件依赖"""
         missing = []
         for dep_id in info.dependencies:
@@ -830,14 +852,17 @@ class PluginManager:
             # 订阅所有事件
             sub_id = self._event_bus.subscribe("*", on_event)
             info.subscriptions.append(sub_id)
-            logger.debug(
-                f"[PluginManager] 插件 '{info.plugin_id}' 订阅: *"
-            )
+            logger.debug(f"[PluginManager] 插件 '{info.plugin_id}' 订阅: *")
 
         # 查找命名约定的事件处理器: on_<topic>
         # 例如: on_tool_start, on_tool_complete
         for name in dir(info.module):
-            if name.startswith("on_") and name not in ("on_load", "on_unload", "on_error", "on_event"):
+            if name.startswith("on_") and name not in (
+                "on_load",
+                "on_unload",
+                "on_error",
+                "on_event",
+            ):
                 handler = getattr(info.module, name)
                 if callable(handler):
                     # on_tool_start -> tool.start

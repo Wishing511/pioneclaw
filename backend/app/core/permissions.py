@@ -13,13 +13,14 @@ PioneClaw 权限系统
 - org: 组织级资源，组织管理员 CRUD，用户只读
 - user: 用户级资源，创建者完全控制
 """
-from typing import List, Optional
+
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
 from app.core.database import get_db
-from app.models import User, Role, Permission
+from app.models import Role, User
 
 
 class PermissionChecker:
@@ -33,7 +34,7 @@ class PermissionChecker:
         @router.get("/", dependencies=[Depends(PermissionChecker(["task:read", "task:*"]))])
     """
 
-    def __init__(self, permissions: str | List[str]):
+    def __init__(self, permissions: str | list[str]):
         if isinstance(permissions, str):
             self.required_permissions = [permissions]
         else:
@@ -70,7 +71,7 @@ class PermissionCheckerAll:
         @router.post("/", dependencies=[Depends(PermissionCheckerAll(["task:create", "task:update"]))])
     """
 
-    def __init__(self, permissions: List[str]):
+    def __init__(self, permissions: list[str]):
         self.required_permissions = permissions
 
     async def __call__(
@@ -97,11 +98,12 @@ class PermissionCheckerAll:
 # 资源级权限检查
 # ------------------------------------------------------------------
 
+
 def can_access_resource(
     user: User,
     resource_scope: str,
-    resource_creator_id: Optional[int] = None,
-    resource_org_id: Optional[str] = None,
+    resource_creator_id: int | None = None,
+    resource_org_id: str | None = None,
     action: str = "read",
 ) -> bool:
     """
@@ -129,22 +131,24 @@ def can_access_resource(
         # 组织级资源：组织管理员可写，其他只读
         if action == "read":
             return True
-        if user.is_org_admin and user.organization_id == resource_org_id:
-            return True
-        return False
+        return bool(user.is_org_admin and user.organization_id == resource_org_id)
 
     if resource_scope == "user":
         # 用户级资源：创建者完全控制，组织管理员可读
         if resource_creator_id == user.id:
             return True
-        if action == "read" and user.is_org_admin and user.organization_id == resource_org_id:
-            return True
-        return False
+        return bool(
+            action == "read"
+            and user.is_org_admin
+            and user.organization_id == resource_org_id
+        )
 
     return False
 
 
-def can_manage_approval(user: User, target_scope: str, target_org_id: Optional[str] = None) -> bool:
+def can_manage_approval(
+    user: User, target_scope: str, target_org_id: str | None = None
+) -> bool:
     """
     检查用户是否能审批指定级别的请求
 
@@ -166,7 +170,8 @@ def can_manage_approval(user: User, target_scope: str, target_org_id: Optional[s
 # 权限代码相关
 # ------------------------------------------------------------------
 
-async def get_user_permission_codes(user: User, db: AsyncSession) -> List[str]:
+
+async def get_user_permission_codes(user: User, db: AsyncSession) -> list[str]:
     """获取用户所有权限代码列表"""
     # 超级管理员拥有所有权限
     if user.is_super_admin:
@@ -176,7 +181,9 @@ async def get_user_permission_codes(user: User, db: AsyncSession) -> List[str]:
 
     # 从角色权限中获取
     result = await db.execute(
-        select(Role).where(Role.code == user.role.value if hasattr(user.role, 'value') else user.role)
+        select(Role).where(
+            Role.code == user.role.value if hasattr(user.role, "value") else user.role
+        )
     )
     role = result.scalar_one_or_none()
 
@@ -201,7 +208,7 @@ async def get_user_permission_codes(user: User, db: AsyncSession) -> List[str]:
     return list(permission_codes)
 
 
-def check_permission(required: str, user_permissions: List[str]) -> bool:
+def check_permission(required: str, user_permissions: list[str]) -> bool:
     """
     检查用户是否拥有指定权限
 
@@ -226,11 +233,11 @@ def check_permission(required: str, user_permissions: List[str]) -> bool:
     return False
 
 
-def has_any_permission(user_permissions: List[str], required: List[str]) -> bool:
+def has_any_permission(user_permissions: list[str], required: list[str]) -> bool:
     """检查用户是否拥有任一权限"""
     return any(check_permission(p, user_permissions) for p in required)
 
 
-def has_all_permissions(user_permissions: List[str], required: List[str]) -> bool:
+def has_all_permissions(user_permissions: list[str], required: list[str]) -> bool:
     """检查用户是否拥有全部权限"""
     return all(check_permission(p, user_permissions) for p in required)

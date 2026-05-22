@@ -8,20 +8,18 @@
 - DELETE /graph-rag/clear 清空图谱
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from typing import Optional, List
 
-from app.core.database import get_db
 from app.api.auth import get_current_user
 from app.models import User
-from app.modules.graph_rag import GraphRAGClient, GraphRAGSettings
+from app.modules.graph_rag import GraphRAGClient
 
 router = APIRouter(prefix="/graph-rag", tags=["知识图谱"])
 
 
 # 全局客户端实例
-_graph_rag_client: Optional[GraphRAGClient] = None
+_graph_rag_client: GraphRAGClient | None = None
 
 
 def get_graph_rag_client() -> GraphRAGClient:
@@ -34,45 +32,53 @@ def get_graph_rag_client() -> GraphRAGClient:
 
 # ==================== 请求/响应模型 ====================
 
+
 class IndexRequest(BaseModel):
     """索引请求"""
+
     content: str
-    doc_id: Optional[str] = None
+    doc_id: str | None = None
 
 
 class BatchIndexRequest(BaseModel):
     """批量索引请求"""
-    documents: List[str]
+
+    documents: list[str]
 
 
 class QueryRequest(BaseModel):
     """查询请求"""
+
     query: str
     mode: str = "hybrid"  # local, global, hybrid, naive, mix
 
 
 class QueryResponse(BaseModel):
     """查询响应"""
+
     result: str
     mode: str
 
 
 class StatsResponse(BaseModel):
     """统计响应"""
+
     working_dir: str
     graph_exists: bool
     vector_exists: bool
-    nodes: Optional[int] = None
-    edges: Optional[int] = None
+    nodes: int | None = None
+    edges: int | None = None
 
 
 class MessageResponse(BaseModel):
     """消息响应"""
+
     success: bool
     message: str
 
 
 # ==================== 端点 ====================
+
 
 @router.post("/index", response_model=MessageResponse)
 async def index_document(

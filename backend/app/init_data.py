@@ -2,13 +2,23 @@
 数据库初始化脚本
 创建默认管理员用户、权限、角色
 """
+
 import asyncio
+
 from sqlalchemy import select
+
 from app.core.database import async_session_maker
 from app.core.security import get_password_hash
 from app.models import (
-    User, UserRole, Agent, Skill, Role,
-    Organization, Permission, DEFAULT_PERMISSIONS, Workspace
+    DEFAULT_PERMISSIONS,
+    Agent,
+    Organization,
+    Permission,
+    Role,
+    Skill,
+    User,
+    UserRole,
+    Workspace,
 )
 
 
@@ -89,12 +99,25 @@ async def init_default_data():
                 name="组织管理员",
                 code="org_admin",
                 description="组织级管理员，可管理本组织用户",
-                permissions={"codes": [
-                    "dashboard:view", "chat:*", "agent:*", "skill:*",
-                    "memory:*", "knowledge:*", "runner:read", "wiki:*",
-                    "task:*", "user:read", "user:create", "user:update", "user:delete",
-                    "role:read", "org:*",
-                ]},
+                permissions={
+                    "codes": [
+                        "dashboard:view",
+                        "chat:*",
+                        "agent:*",
+                        "skill:*",
+                        "memory:*",
+                        "knowledge:*",
+                        "runner:read",
+                        "wiki:*",
+                        "task:*",
+                        "user:read",
+                        "user:create",
+                        "user:update",
+                        "user:delete",
+                        "role:read",
+                        "org:*",
+                    ]
+                },
                 type="system",
                 level=1,
                 is_default=False,
@@ -105,12 +128,22 @@ async def init_default_data():
                 name="普通用户",
                 code="user",
                 description="普通用户，基础功能权限",
-                permissions={"codes": [
-                    "dashboard:view", "chat:view", "chat:create",
-                    "agent:read", "agent:execute", "skill:read",
-                    "memory:read", "memory:create", "knowledge:read",
-                    "wiki:read", "task:read", "task:create",
-                ]},
+                permissions={
+                    "codes": [
+                        "dashboard:view",
+                        "chat:view",
+                        "chat:create",
+                        "agent:read",
+                        "agent:execute",
+                        "skill:read",
+                        "memory:read",
+                        "memory:create",
+                        "knowledge:read",
+                        "wiki:read",
+                        "task:read",
+                        "task:create",
+                    ]
+                },
                 type="system",
                 level=0,
                 is_default=True,
@@ -182,6 +215,7 @@ async def init_default_data():
 
         await session.commit()
         import logging
+
         _logger = logging.getLogger(__name__)
         _logger.info("PioneClaw 初始化完成！")
         _logger.info("   默认管理员: admin / <请查看文档获取初始密码>")

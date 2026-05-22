@@ -1,19 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List, Optional
-from pydantic import BaseModel
-import httpx
+import asyncio
 import json
 import time
-import asyncio
-from datetime import datetime
 
-from app.core import get_db
-from app.models import AIModelConfig, ApiUsage
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
-from app.models import User
+from app.core import get_db
+from app.models import AIModelConfig, ApiUsage, User
+from app.modules.llm import SimpleLLMProvider
 
 router = APIRouter(prefix="/chat", tags=["对话"])
 
@@ -24,25 +23,25 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    model_config_id: Optional[int] = None
+    messages: list[ChatMessage]
+    model_config_id: int | None = None
     stream: bool = False
 
 
 class ChatResponse(BaseModel):
     success: bool
     message: str
-    response: Optional[str] = None
-    model: Optional[str] = None
-    usage: Optional[dict] = None
-    latency_ms: Optional[int] = None
+    response: str | None = None
+    model: str | None = None
+    usage: dict | None = None
+    latency_ms: int | None = None
 
 
 @router.post("/completions", response_model=ChatResponse)
 async def chat_completions(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """对话补全接口"""
     # 获取模型配置
@@ -56,31 +55,32 @@ async def chat_completions(
     else:
         # 使用默认配置
         result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.is_default == True, AIModelConfig.is_active == True)
+            select(AIModelConfig).where(
+                AIModelConfig.is_default, AIModelConfig.is_active
+            )
         )
         config = result.scalar_one_or_none()
         if not config:
             # 尝试获取任意一个激活的配置
             result = await db.execute(
-                select(AIModelConfig).where(AIModelConfig.is_active == True).limit(1)
+                select(AIModelConfig).where(AIModelConfig.is_active).limit(1)
             )
             config = result.scalar_one_or_none()
-    
+
     if not config:
         return ChatResponse(
             success=False,
-            message="没有可用的 AI 模型配置，请先在「AI 模型配置」中添加配置"
+            message="没有可用的 AI 模型配置，请先在「AI 模型配置」中添加配置",
         )
-    
+
     if not config.api_key:
         return ChatResponse(
-            success=False,
-            message=f"配置「{config.display_name}」未设置 API Key"
+            success=False, message=f"配置「{config.display_name}」未设置 API Key"
         )
-    
+
     # 构建请求
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
-    
+
     if config.provider == "anthropic":
         url = config.base_url or "https://api.anthropic.com/v1/messages"
         headers = {
@@ -109,16 +109,16 @@ async def chat_completions(
             "temperature": config.temperature,
             "messages": messages,
         }
-    
+
     try:
         start_time = time.time()
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(url, headers=headers, json=body)
         latency_ms = int((time.time() - start_time) * 1000)
-        
+
         if response.status_code == 200:
             data = response.json()
-            
+
             if config.provider == "anthropic":
                 content = data.get("content", [{}])[0].get("text", "")
                 usage = {
@@ -126,12 +126,14 @@ async def chat_completions(
                     "output_tokens": data.get("usage", {}).get("output_tokens", 0),
                 }
             else:
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                content = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                )
                 usage = {
                     "input_tokens": data.get("usage", {}).get("prompt_tokens", 0),
                     "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
                 }
-            
+
             # 记录 API 使用情况
             total_tokens = usage["input_tokens"] + usage["output_tokens"]
             api_usage = ApiUsage(
@@ -142,18 +144,18 @@ async def chat_completions(
                 output_tokens=usage["output_tokens"],
                 total_tokens=total_tokens,
                 duration_ms=latency_ms,
-                is_success=True
+                is_success=True,
             )
             db.add(api_usage)
             await db.commit()
-            
+
             return ChatResponse(
                 success=True,
                 message="成功",
                 response=content,
                 model=config.model_name,
                 usage=usage,
-                latency_ms=latency_ms
+                latency_ms=latency_ms,
             )
         else:
             error_detail = response.text
@@ -161,9 +163,9 @@ async def chat_completions(
                 error_json = response.json()
                 if "error" in error_json:
                     error_detail = error_json["error"].get("message", error_detail)
-            except:
+            except Exception:
                 pass
-            
+
             # 记录失败的 API 调用
             api_usage = ApiUsage(
                 user_id=current_user.id,
@@ -174,15 +176,15 @@ async def chat_completions(
                 total_tokens=0,
                 duration_ms=latency_ms,
                 is_success=False,
-                error_message=error_detail
+                error_message=error_detail,
             )
             db.add(api_usage)
             await db.commit()
-            
+
             return ChatResponse(
                 success=False,
                 message=f"API 错误 ({response.status_code}): {error_detail}",
-                latency_ms=latency_ms
+                latency_ms=latency_ms,
             )
     except httpx.TimeoutException:
         # 记录超时
@@ -195,7 +197,7 @@ async def chat_completions(
             total_tokens=0,
             duration_ms=0,
             is_success=False,
-            error_message="请求超时"
+            error_message="请求超时",
         )
         db.add(api_usage)
         await db.commit()
@@ -211,7 +213,7 @@ async def chat_completions(
             total_tokens=0,
             duration_ms=0,
             is_success=False,
-            error_message=str(e)
+            error_message=str(e),
         )
         db.add(api_usage)
         await db.commit()
@@ -221,11 +223,13 @@ async def chat_completions(
 @router.get("/models")
 async def list_available_models(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取可用的模型配置列表"""
     result = await db.execute(
-        select(AIModelConfig).where(AIModelConfig.is_active == True).order_by(AIModelConfig.is_default.desc())
+        select(AIModelConfig)
+        .where(AIModelConfig.is_active)
+        .order_by(AIModelConfig.is_default.desc())
     )
     configs = result.scalars().all()
     return [
@@ -235,7 +239,7 @@ async def list_available_models(
             "display_name": c.display_name,
             "model_name": c.model_name,
             "provider": c.provider,
-            "is_default": c.is_default
+            "is_default": c.is_default,
         }
         for c in configs
     ]
@@ -243,43 +247,48 @@ async def list_available_models(
 
 # ==================== ReAct 对话接口 ====================
 
+
 class ReActRequest(BaseModel):
     """ReAct 对话请求"""
+
     message: str
-    context: Optional[List[ChatMessage]] = None
-    model_config_id: Optional[int] = None
+    context: list[ChatMessage] | None = None
+    model_config_id: int | None = None
     max_iterations: int = 10
     enable_tools: bool = True
-    session_id: Optional[str] = None  # WebSocket 会话 ID
+    session_id: str | None = None  # WebSocket 会话 ID
     fast_mode: bool = False  # 快速模式：禁用思考/推理，直接回复
 
 
 class ReActResponse(BaseModel):
     """ReAct 对话响应"""
+
     success: bool
     message: str
-    response: Optional[str] = None
-    thinking_content: Optional[str] = None  # AI 推理/思考内容
+    response: str | None = None
+    thinking_content: str | None = None  # AI 推理/思考内容
     iterations: int = 0
-    tool_calls: List[dict] = []
-    latency_ms: Optional[int] = None
-    messages: List[dict] = []  # 分开的消息列表
-    input_tokens: Optional[int] = None
-    output_tokens: Optional[int] = None
-    approval_id: Optional[int] = None  # 安全网关审批ID
+    tool_calls: list[dict] = []
+    latency_ms: int | None = None
+    messages: list[dict] = []  # 分开的消息列表
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    approval_id: int | None = None  # 安全网关审批ID
     pending_approval: bool = False  # 是否等待审批
 
 
 class CompactRequest(BaseModel):
     """手动压缩请求"""
-    messages: List[dict]  # 当前会话消息列表
-    instruction: Optional[str] = None  # 自定义压缩指令
-    model_config_id: Optional[int] = None  # 用于选择 compactor 的 LLM
-    session_id: Optional[str] = None  # 若提供，后端会持久化压缩结果到该 session
+
+    messages: list[dict]  # 当前会话消息列表
+    instruction: str | None = None  # 自定义压缩指令
+    model_config_id: int | None = None  # 用于选择 compactor 的 LLM
+    session_id: str | None = None  # 若提供，后端会持久化压缩结果到该 session
 
 
 class CompactResponse(BaseModel):
     """手动压缩响应"""
+
     success: bool
     summary: str
     removed_messages: int = 0
@@ -288,24 +297,25 @@ class CompactResponse(BaseModel):
     before_tokens: int = 0
     after_tokens: int = 0
     message: str = ""
-    messages: List[dict] = []  # 压缩后的消息列表，前端用于替换当前会话
+    messages: list[dict] = []  # 压缩后的消息列表，前端用于替换当前会话
 
 
 @router.post("/react", response_model=ReActResponse)
 async def react_chat(
     request: ReActRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     ReAct 推理对话接口
-    
+
     使用 AgentLoop 进行多轮推理和工具调用
     """
     import logging
+
     logger = logging.getLogger(__name__)
     logger.info(f"ReAct chat request: {request.message[:50]}")
-    
+
     # 获取模型配置
     if request.model_config_id:
         result = await db.execute(
@@ -313,37 +323,37 @@ async def react_chat(
         )
         config = result.scalar_one_or_none()
     else:
-        result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.is_default == True)
-        )
+        result = await db.execute(select(AIModelConfig).where(AIModelConfig.is_default))
         config = result.scalar_one_or_none()
-    
+
     if not config:
         return ReActResponse(success=False, message="没有可用的 AI 模型配置")
-    
+
     # 导入 AgentLoop 和工具
+    from pathlib import Path
+
     from app.modules.agent import AgentLoop
-    from app.modules.tools import ToolRegistry, register_builtin_tools
+    from app.modules.agent.compactor import CompactionConfig, Compactor
+    from app.modules.agent.compression_service import ContextCompressionService
     from app.modules.agent.context import ContextBuilder, PersonaConfig
     from app.modules.agent.context_pruner import ContextPruner
-    from app.modules.agent.compactor import Compactor, CompactionConfig
     from app.modules.agent.token_budget import TokenBudget
-    from app.modules.agent.compression_service import ContextCompressionService
-    from pathlib import Path
+    from app.modules.tools import ToolRegistry, register_builtin_tools
 
     # 创建工具注册表
     tool_registry = ToolRegistry()
-    tools_list = []
     if request.enable_tools:
         register_builtin_tools(tool_registry)
         tool_definitions = tool_registry.get_definitions()
-        tools_list = tool_definitions
         logger.info(f"Tools enabled: {len(tool_definitions)} tools registered")
 
     # 用 ContextBuilder 构建完整系统提示词
     from app.models import Workspace
+
     ws_result = await db.execute(
-        select(Workspace).where(Workspace.owner_id == current_user.id, Workspace.is_default == True)
+        select(Workspace).where(
+            Workspace.owner_id == current_user.id, Workspace.is_default
+        )
     )
     workspace = ws_result.scalar_one_or_none()
     persona = PersonaConfig.from_workspace(workspace, current_user)
@@ -358,6 +368,7 @@ async def react_chat(
 
     # Context 压缩组件（Phase 1: 统一入口）
     from app.modules.agent.file_tracker import FileTracker
+
     token_budget = TokenBudget(context_window=config.context_window)
     context_pruner = ContextPruner()
     file_tracker = FileTracker(max_files=5, max_tokens=50_000)
@@ -375,7 +386,8 @@ async def react_chat(
     )
 
     # 安全网关：pre_input_call 输入过滤
-    from app.core.security_client import security_client, apply_input_filter
+    from app.core.security_client import apply_input_filter, security_client
+
     filtered_text, error = await apply_input_filter(
         security_client,
         request.message,
@@ -383,12 +395,13 @@ async def react_chat(
             "user_id": current_user.id,
             "username": current_user.username,
             "session_id": request.session_id,
-        }
+        },
     )
     if error:
         # 安全网关审批：创建审批记录
         if error.get("action") == "approve":
             from app.models.approval import Approval, ApprovalStatus, ApprovalType
+
             approval = Approval(
                 approval_type=ApprovalType.SECURITY_GATEWAY,
                 status=ApprovalStatus.PENDING,
@@ -468,9 +481,10 @@ async def react_chat(
 
         # 提取思考内容（<!--THINKING:...--> 标记）
         import re
+
         thinking_parts = []
         clean_response = response_text or ""
-        thinking_pattern = re.compile(r'<!--THINKING:(.*?)-->', re.DOTALL)
+        thinking_pattern = re.compile(r"<!--THINKING:(.*?)-->", re.DOTALL)
         for match in thinking_pattern.finditer(clean_response):
             thinking_parts.append(match.group(1))
         thinking_content = "".join(thinking_parts) if thinking_parts else None
@@ -478,7 +492,10 @@ async def react_chat(
         clean_response = thinking_pattern.sub("", clean_response).strip()
         clean_response = clean_response.replace("[思考中...]", "").strip()
         import re as re_mod
-        clean_response = re_mod.sub(r'\[达到最大迭代次数 \d+\]', '', clean_response).strip()
+
+        clean_response = re_mod.sub(
+            r"\[达到最大迭代次数 \d+\]", "", clean_response
+        ).strip()
 
         # 构建分开的消息列表
         messages = []
@@ -487,20 +504,15 @@ async def react_chat(
         if agent_loop.last_tool_results:
             logger.info(f"Tool results: {agent_loop.last_tool_results}")
             for name, result in agent_loop.last_tool_results.items():
-                messages.append({
-                    "type": "tool_call",
-                    "name": name,
-                    "result": result
-                })
+                messages.append({"type": "tool_call", "name": name, "result": result})
 
         # 添加 AI 回复消息
         if clean_response and clean_response.strip():
-            messages.append({
-                "type": "assistant",
-                "content": clean_response.strip()
-            })
+            messages.append({"type": "assistant", "content": clean_response.strip()})
 
-        logger.info(f"ReAct completed in {latency_ms}ms, messages: {len(messages)}, thinking: {len(thinking_content) if thinking_content else 0} chars")
+        logger.info(
+            f"ReAct completed in {latency_ms}ms, messages: {len(messages)}, thinking: {len(thinking_content) if thinking_content else 0} chars"
+        )
 
         # 获取 token 使用量
         input_tokens = provider.last_input_tokens
@@ -520,6 +532,7 @@ async def react_chat(
         )
     except Exception as e:
         import traceback
+
         logger.error(f"ReAct failed: {e}\n{traceback.format_exc()}")
         return ReActResponse(
             success=False,
@@ -532,7 +545,7 @@ async def react_chat(
 async def react_chat_stream(
     request: ReActRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     ReAct 推理流式对话接口（SSE）
@@ -541,6 +554,7 @@ async def react_chat_stream(
     """
     import logging
     import re
+
     logger = logging.getLogger(__name__)
 
     # 获取模型配置（同 react endpoint）
@@ -550,20 +564,21 @@ async def react_chat_stream(
         )
         config = result.scalar_one_or_none()
     else:
-        result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.is_default == True)
-        )
+        result = await db.execute(select(AIModelConfig).where(AIModelConfig.is_default))
         config = result.scalar_one_or_none()
 
     if not config:
+
         async def error_stream():
             yield f"data: {json.dumps({'type': 'error', 'message': '没有可用的 AI 模型配置'})}\n\n"
+
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-    from app.modules.agent import AgentLoop
-    from app.modules.tools import ToolRegistry, register_builtin_tools
-    from app.modules.agent.context import ContextBuilder, PersonaConfig
     from pathlib import Path
+
+    from app.modules.agent import AgentLoop
+    from app.modules.agent.context import ContextBuilder, PersonaConfig
+    from app.modules.tools import ToolRegistry, register_builtin_tools
 
     # 创建工具注册表
     tool_registry = ToolRegistry()
@@ -572,12 +587,16 @@ async def react_chat_stream(
 
     # 用 ContextBuilder 构建完整系统提示词
     from app.models import Workspace
-    from app.modules.agent.context_pruner import ContextPruner as CP
-    from app.modules.agent.compactor import Compactor as C, CompactionConfig as CC
-    from app.modules.agent.token_budget import TokenBudget
+    from app.modules.agent.compactor import CompactionConfig as CC
+    from app.modules.agent.compactor import Compactor as C
     from app.modules.agent.compression_service import ContextCompressionService
+    from app.modules.agent.context_pruner import ContextPruner as CP
+    from app.modules.agent.token_budget import TokenBudget
+
     ws_result = await db.execute(
-        select(Workspace).where(Workspace.owner_id == current_user.id, Workspace.is_default == True)
+        select(Workspace).where(
+            Workspace.owner_id == current_user.id, Workspace.is_default
+        )
     )
     workspace = ws_result.scalar_one_or_none()
     persona = PersonaConfig.from_workspace(workspace, current_user)
@@ -594,6 +613,7 @@ async def react_chat_stream(
     token_budget = TokenBudget(context_window=config.context_window)
     context_pruner = CP()
     from app.modules.agent.file_tracker import FileTracker
+
     file_tracker = FileTracker(max_files=5, max_tokens=50_000)
     compactor = C(
         config=CC(context_window=config.context_window),
@@ -624,14 +644,15 @@ async def react_chat_stream(
         file_tracker=file_tracker,
     )
 
-    thinking_pattern = re.compile(r'<!--THINKING:(.*?)-->', re.DOTALL)
-    tool_start_pattern = re.compile(r'<!--TOOL_START:(.*?)-->')
-    tool_result_pattern = re.compile(r'<!--TOOL_RESULT:(.*?)-->', re.DOTALL)
-    tool_error_pattern = re.compile(r'<!--TOOL_ERROR:(.*?)-->', re.DOTALL)
+    thinking_pattern = re.compile(r"<!--THINKING:(.*?)-->", re.DOTALL)
+    tool_start_pattern = re.compile(r"<!--TOOL_START:(.*?)-->")
+    tool_result_pattern = re.compile(r"<!--TOOL_RESULT:(.*?)-->", re.DOTALL)
+    tool_error_pattern = re.compile(r"<!--TOOL_ERROR:(.*?)-->", re.DOTALL)
 
     # 设执行上下文（Runner 工具需要知道当前用户）
     from app.core.execution_context import current_user_id
-    token = current_user_id.set(current_user.id)
+
+    current_user_id.set(current_user.id)
 
     async def generate():
         start_time = time.time()
@@ -640,10 +661,14 @@ async def react_chat_stream(
         thinking_buffer = ""
 
         # 并发控制
-        from app.core.concurrency import concurrency_manager
         import uuid as _uuid
+
+        from app.core.concurrency import concurrency_manager
+
         task_id = str(_uuid.uuid4())[:8]
-        result = await concurrency_manager.acquire(current_user.id, task_id, len(request.message))
+        result = await concurrency_manager.acquire(
+            current_user.id, task_id, len(request.message)
+        )
 
         if result.rejected:
             yield f"data: {json.dumps({'type': 'error', 'message': '当前排队人数过多，请稍后重试'})}\n\n"
@@ -652,7 +677,10 @@ async def react_chat_stream(
         if result.queued:
             yield f"data: {json.dumps({'type': 'queued', 'position': result.position, 'wait_ms': result.estimated_wait_ms})}\n\n"
             try:
-                await asyncio.wait_for(result.wait_future, timeout=concurrency_manager.queue_timeout_seconds)
+                await asyncio.wait_for(
+                    result.wait_future,
+                    timeout=concurrency_manager.queue_timeout_seconds,
+                )
             except asyncio.TimeoutError:
                 concurrency_manager.cancel_wait(current_user.id, task_id)
                 yield f"data: {json.dumps({'type': 'error', 'message': '排队超时，请稍后重试'})}\n\n"
@@ -665,7 +693,9 @@ async def react_chat_stream(
         try:
             context = None
             if request.context:
-                context = [{"role": m.role, "content": m.content} for m in request.context]
+                context = [
+                    {"role": m.role, "content": m.content} for m in request.context
+                ]
 
             async for chunk in agent_loop.process_message(
                 message=request.message,
@@ -684,19 +714,38 @@ async def react_chat_stream(
                 for match in tool_start_pattern.finditer(chunk):
                     try:
                         tool_data = json.loads(match.group(1))
-                        yield f"data: {json.dumps({'type': 'tool_start', 'name': tool_data.get('name', ''), 'tool_call_id': tool_data.get('tool_call_id', '')}, ensure_ascii=False)}\n\n"
+                        payload = {
+                            'type': 'tool_start',
+                            'name': tool_data.get('name', ''),
+                            'tool_call_id': tool_data.get('tool_call_id', ''),
+                        }
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     except json.JSONDecodeError:
                         pass
                 for match in tool_result_pattern.finditer(chunk):
                     try:
                         tool_data = json.loads(match.group(1))
-                        yield f"data: {json.dumps({'type': 'tool_result', 'name': tool_data.get('name', ''), 'tool_call_id': tool_data.get('tool_call_id', ''), 'result': tool_data.get('result', ''), 'duration_ms': tool_data.get('duration_ms')}, ensure_ascii=False)}\n\n"
+                        payload = {
+                            'type': 'tool_result',
+                            'name': tool_data.get('name', ''),
+                            'tool_call_id': tool_data.get('tool_call_id', ''),
+                            'result': tool_data.get('result', ''),
+                            'duration_ms': tool_data.get('duration_ms'),
+                        }
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     except json.JSONDecodeError:
                         pass
                 for match in tool_error_pattern.finditer(chunk):
                     try:
                         tool_data = json.loads(match.group(1))
-                        yield f"data: {json.dumps({'type': 'tool_error', 'name': tool_data.get('name', ''), 'tool_call_id': tool_data.get('tool_call_id', ''), 'error': tool_data.get('error', ''), 'duration_ms': tool_data.get('duration_ms')}, ensure_ascii=False)}\n\n"
+                        payload = {
+                            'type': 'tool_error',
+                            'name': tool_data.get('name', ''),
+                            'tool_call_id': tool_data.get('tool_call_id', ''),
+                            'error': tool_data.get('error', ''),
+                            'duration_ms': tool_data.get('duration_ms'),
+                        }
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
                     except json.JSONDecodeError:
                         pass
 
@@ -716,11 +765,11 @@ async def react_chat_stream(
 
                 # 移除标记
                 clean = clean.replace("[思考中...]", "")
-                clean = re.sub(r'\[达到最大迭代次数 \d+\]', '', clean)
+                clean = re.sub(r"\[达到最大迭代次数 \d+\]", "", clean)
                 if is_boundary:
-                    clean = clean.strip()       # 边界残余（\n）彻底丢弃
+                    clean = clean.strip()  # 边界残余（\n）彻底丢弃
                 else:
-                    clean = clean.strip(' \t\r')  # 保留 \n 用于 markdown 换行
+                    clean = clean.strip(" \t\r")  # 保留 \n 用于 markdown 换行
                 if clean:
                     content_buffer += clean
                     last_good_content = ""  # 本轮已有内容，后备已过期
@@ -734,7 +783,8 @@ async def react_chat_stream(
                     user_id=current_user.id,
                     model=config.model_name or "unknown",
                     provider=config.provider or "unknown",
-                    total_tokens=(provider.last_input_tokens or 0) + (provider.last_output_tokens or 0),
+                    total_tokens=(provider.last_input_tokens or 0)
+                    + (provider.last_output_tokens or 0),
                     input_tokens=provider.last_input_tokens or 0,
                     output_tokens=provider.last_output_tokens or 0,
                     duration_ms=latency_ms,
@@ -752,23 +802,26 @@ async def react_chat_stream(
             if not final_response and agent_loop.last_tool_results:
                 tool_names = list(agent_loop.last_tool_results.keys())
                 if tool_names:
-                    final_response = f"已执行 {len(tool_names)} 个工具，请查看上方工具结果。"
+                    final_response = (
+                        f"已执行 {len(tool_names)} 个工具，请查看上方工具结果。"
+                    )
 
             # 发送完成事件
             input_tokens = provider.last_input_tokens or 0
             done_event = {
-                'type': 'done',
-                'thinking_content': thinking_buffer if thinking_buffer else None,
-                'response': final_response or '(未获取到有效回复)',
-                'latency_ms': latency_ms,
-                'input_tokens': input_tokens,
-                'output_tokens': provider.last_output_tokens,
-                'context_usage': token_budget.to_dict(input_tokens),
+                "type": "done",
+                "thinking_content": thinking_buffer if thinking_buffer else None,
+                "response": final_response or "(未获取到有效回复)",
+                "latency_ms": latency_ms,
+                "input_tokens": input_tokens,
+                "output_tokens": provider.last_output_tokens,
+                "context_usage": token_budget.to_dict(input_tokens),
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             import traceback
+
             logger.error(f"Stream error: {e}\n{traceback.format_exc()}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
         finally:
@@ -781,7 +834,7 @@ async def react_chat_stream(
 async def compact_context(
     request: CompactRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     手动压缩上下文
@@ -790,6 +843,7 @@ async def compact_context(
     支持自定义压缩指令（如"重点保留 API 设计"）。
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     # 获取模型配置
@@ -801,9 +855,7 @@ async def compact_context(
         config = result.scalar_one_or_none()
 
     if not config:
-        result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.is_default == True)
-        )
+        result = await db.execute(select(AIModelConfig).where(AIModelConfig.is_default))
         config = result.scalar_one_or_none()
 
     if not config:
@@ -813,11 +865,11 @@ async def compact_context(
             summary="",
         )
 
-    from app.modules.llm import SimpleLLMProvider
-    from app.modules.agent.compactor import Compactor, CompactionConfig
+    from app.modules.agent.compactor import CompactionConfig, Compactor
+    from app.modules.agent.compression_service import ContextCompressionService
     from app.modules.agent.context_pruner import ContextPruner
     from app.modules.agent.token_budget import TokenBudget
-    from app.modules.agent.compression_service import ContextCompressionService
+    from app.modules.llm import SimpleLLMProvider
 
     provider = SimpleLLMProvider(config=config)
 
@@ -871,10 +923,11 @@ async def _persist_compacted_session(
     db: AsyncSession,
     session_id: str,
     user_id: int,
-    messages: List[dict],
+    messages: list[dict],
 ) -> None:
     """将压缩后的消息列表持久化到 session，替换原有消息。"""
     from sqlalchemy import delete
+
     from app.models import Session, SessionMessage
 
     result = await db.execute(
@@ -891,6 +944,7 @@ async def _persist_compacted_session(
 
     # 写入压缩后的新消息
     import json as _json
+
     for msg in messages:
         tool_calls = msg.get("tool_calls")
         db_msg = SessionMessage(
@@ -903,6 +957,3 @@ async def _persist_compacted_session(
 
     session.message_count = len(messages)
     await db.commit()
-
-
-from app.modules.llm import SimpleLLMProvider

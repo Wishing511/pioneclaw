@@ -5,17 +5,29 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.permissions import (
+    check_permission,
+    get_user_permission_codes,
+    has_all_permissions,
+    has_any_permission,
+)
+from app.core.security import get_password_hash
+from app.models import Role, User, UserRole
 from app.modules.tools.permissions import match_rule, resolve_permission
 from app.modules.tools.types import (
     PermissionBehavior,
-    PermissionMode,
     PermissionRequest,
     PermissionResult,
     PermissionRule,
     ToolContext,
 )
 
+# ==============================================================================
+# Legacy app.core.permissions tests（保留对原有权限函数的覆盖）
+# ==============================================================================
 
 class FakeTool:
     id = "read_file"
@@ -45,6 +57,7 @@ def ctx():
 # match_rule
 # ------------------------------------------------------------------
 
+
 class TestMatchRule:
     def test_exact_tool_match_no_pattern(self):
         rules = [PermissionRule(tool="read_file", behavior=PermissionBehavior.ALLOW)]
@@ -56,23 +69,38 @@ class TestMatchRule:
         assert match_rule("anything", {}, rules) is not None
 
     def test_pattern_exact_match(self):
-        rules = [PermissionRule(tool="read_file", pattern="/etc/passwd", behavior=PermissionBehavior.DENY)]
+        rules = [
+            PermissionRule(
+                tool="read_file",
+                pattern="/etc/passwd",
+                behavior=PermissionBehavior.DENY,
+            )
+        ]
         assert match_rule("read_file", {"file_path": "/etc/passwd"}, rules) is not None
         assert match_rule("read_file", {"file_path": "/tmp/test"}, rules) is None
 
     def test_pattern_prefix_match(self):
-        rules = [PermissionRule(tool="exec", pattern="rm *", behavior=PermissionBehavior.DENY)]
+        rules = [
+            PermissionRule(
+                tool="exec", pattern="rm *", behavior=PermissionBehavior.DENY
+            )
+        ]
         assert match_rule("exec", {"command": "rm -rf /"}, rules) is not None
         assert match_rule("exec", {"command": "ls -la"}, rules) is None
 
     def test_no_match_when_tool_differs(self):
-        rules = [PermissionRule(tool="read_file", pattern="/tmp/*", behavior=PermissionBehavior.ALLOW)]
+        rules = [
+            PermissionRule(
+                tool="read_file", pattern="/tmp/*", behavior=PermissionBehavior.ALLOW
+            )
+        ]
         assert match_rule("write_file", {"file_path": "/tmp/test"}, rules) is None
 
 
 # ------------------------------------------------------------------
 # resolve_permission
 # ------------------------------------------------------------------
+
 
 class TestResolvePermission:
     @pytest.mark.asyncio
@@ -110,7 +138,9 @@ class TestResolvePermission:
     @pytest.mark.asyncio
     async def test_layer4_ask_callback(self, ctx):
         async def ask_cb(req: PermissionRequest):
-            return PermissionResult(behavior=PermissionBehavior.ALLOW, reason="user_allowed")
+            return PermissionResult(
+                behavior=PermissionBehavior.ALLOW, reason="user_allowed"
+            )
 
         ctx.ask_callback = ask_cb
         result = await resolve_permission(FakeTool(), {}, ctx, [], "default")
@@ -128,23 +158,10 @@ class TestResolvePermission:
 # Legacy app.core.permissions tests（保留对原有权限函数的覆盖）
 # ==============================================================================
 
-import pytest
-from fastapi import HTTPException
-
-from app.core.permissions import (
-    check_permission,
-    has_any_permission,
-    has_all_permissions,
-    get_user_permission_codes,
-)
-from app.core.security import get_password_hash
-from app.models import User, UserRole, Role
-from sqlalchemy.ext.asyncio import AsyncSession
-
-
 # ────────────────────────────────────────────
 # check_permission — 通配符匹配
 # ────────────────────────────────────────────
+
 
 class TestCheckPermission:
     def test_global_wildcard_matches_everything(self):
@@ -186,6 +203,7 @@ class TestCheckPermission:
 # has_any_permission / has_all_permissions
 # ────────────────────────────────────────────
 
+
 class TestHasAnyPermission:
     def test_any_match(self):
         # user has task:* wildcard, needs task:create or agent:read
@@ -193,10 +211,15 @@ class TestHasAnyPermission:
 
     def test_any_exact_match(self):
         # user has task:create, needs task:create or agent:read
-        assert has_any_permission(["task:create"], ["task:create", "agent:read"]) is True
+        assert (
+            has_any_permission(["task:create"], ["task:create", "agent:read"]) is True
+        )
 
     def test_any_no_match(self):
-        assert has_any_permission(["task:create"], ["agent:read", "system:config"]) is False
+        assert (
+            has_any_permission(["task:create"], ["agent:read", "system:config"])
+            is False
+        )
 
     def test_any_empty(self):
         assert has_any_permission([], ["task:*"]) is False
@@ -218,21 +241,29 @@ class TestHasAllPermissions:
 
     def test_all_with_global_wildcard(self):
         # user has global *, needs everything
-        assert has_all_permissions(["*"], ["task:create", "agent:read", "system:config"]) is True
+        assert (
+            has_all_permissions(["*"], ["task:create", "agent:read", "system:config"])
+            is True
+        )
 
 
 # ────────────────────────────────────────────
 # get_user_permission_codes
 # ────────────────────────────────────────────
 
+
 class TestGetUserPermissionCodes:
     @pytest.mark.asyncio
-    async def test_super_admin_gets_wildcard(self, db_session: AsyncSession, test_admin: User):
+    async def test_super_admin_gets_wildcard(
+        self, db_session: AsyncSession, test_admin: User
+    ):
         codes = await get_user_permission_codes(test_admin, db_session)
         assert codes == ["*"]
 
     @pytest.mark.asyncio
-    async def test_org_admin_gets_extra_perms(self, db_session: AsyncSession, test_org_admin: User, test_role: Role):
+    async def test_org_admin_gets_extra_perms(
+        self, db_session: AsyncSession, test_org_admin: User, test_role: Role
+    ):
         # org_admin 角色码需要匹配 Role 表
         # 先创建 org_admin 角色
         org_admin_role = Role(
@@ -252,7 +283,9 @@ class TestGetUserPermissionCodes:
         assert "role:read" in codes
 
     @pytest.mark.asyncio
-    async def test_normal_user_gets_role_perms(self, db_session: AsyncSession, test_user: User, test_role: Role):
+    async def test_normal_user_gets_role_perms(
+        self, db_session: AsyncSession, test_user: User, test_role: Role
+    ):
         # test_user 的 role 是 UserRole.USER, value = "user"
         # test_role 的 code = "user"
         codes = await get_user_permission_codes(test_user, db_session)
@@ -278,6 +311,7 @@ class TestGetUserPermissionCodes:
 
         # 删除 test_role 避免冲突
         from sqlalchemy import select
+
         result = await db_session.execute(select(Role).where(Role.code == "user"))
         role = result.scalar_one_or_none()
         if role:
@@ -295,43 +329,59 @@ class TestGetUserPermissionCodes:
 # PermissionChecker 依赖注入行为
 # ────────────────────────────────────────────
 
+
 class TestPermissionCheckerBehavior:
     """测试 PermissionChecker 的逻辑，不通过 HTTP 请求"""
 
     @pytest.mark.asyncio
-    async def test_super_admin_bypasses_check(self, db_session: AsyncSession, test_admin: User):
+    async def test_super_admin_bypasses_check(
+        self, db_session: AsyncSession, test_admin: User
+    ):
         from app.core.permissions import PermissionChecker
+
         checker = PermissionChecker("task:create")
         # 超级管理员直接通过
         result = await checker(current_user=test_admin, db=db_session)
         assert result == test_admin
 
     @pytest.mark.asyncio
-    async def test_user_with_permission_passes(self, db_session: AsyncSession, test_user: User, test_role: Role):
+    async def test_user_with_permission_passes(
+        self, db_session: AsyncSession, test_user: User, test_role: Role
+    ):
         from app.core.permissions import PermissionChecker
+
         checker = PermissionChecker("task:read")
         result = await checker(current_user=test_user, db=db_session)
         assert result == test_user
 
     @pytest.mark.asyncio
-    async def test_user_without_permission_fails(self, db_session: AsyncSession, test_user: User, test_role: Role):
+    async def test_user_without_permission_fails(
+        self, db_session: AsyncSession, test_user: User, test_role: Role
+    ):
         from app.core.permissions import PermissionChecker
+
         checker = PermissionChecker("task:delete")
         with pytest.raises(HTTPException) as exc_info:
             await checker(current_user=test_user, db=db_session)
         assert exc_info.value.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_any_match_semantics(self, db_session: AsyncSession, test_user: User, test_role: Role):
+    async def test_any_match_semantics(
+        self, db_session: AsyncSession, test_user: User, test_role: Role
+    ):
         from app.core.permissions import PermissionChecker
+
         # test_role 有 task:read 但没有 task:delete
         checker = PermissionChecker(["task:delete", "task:read"])
         result = await checker(current_user=test_user, db=db_session)
         assert result == test_user  # 任一匹配即通过
 
     @pytest.mark.asyncio
-    async def test_single_string_permission(self, db_session: AsyncSession, test_admin: User):
+    async def test_single_string_permission(
+        self, db_session: AsyncSession, test_admin: User
+    ):
         from app.core.permissions import PermissionChecker
+
         checker = PermissionChecker("system:config")
         result = await checker(current_user=test_admin, db=db_session)
         assert result == test_admin
@@ -339,22 +389,31 @@ class TestPermissionCheckerBehavior:
 
 class TestPermissionCheckerAllBehavior:
     @pytest.mark.asyncio
-    async def test_super_admin_bypasses_all_check(self, db_session: AsyncSession, test_admin: User):
+    async def test_super_admin_bypasses_all_check(
+        self, db_session: AsyncSession, test_admin: User
+    ):
         from app.core.permissions import PermissionCheckerAll
+
         checker = PermissionCheckerAll(["task:create", "task:delete", "system:config"])
         result = await checker(current_user=test_admin, db=db_session)
         assert result == test_admin
 
     @pytest.mark.asyncio
-    async def test_user_with_all_permissions_passes(self, db_session: AsyncSession, test_user: User, test_role: Role):
+    async def test_user_with_all_permissions_passes(
+        self, db_session: AsyncSession, test_user: User, test_role: Role
+    ):
         from app.core.permissions import PermissionCheckerAll
+
         checker = PermissionCheckerAll(["task:read", "task:create"])
         result = await checker(current_user=test_user, db=db_session)
         assert result == test_user
 
     @pytest.mark.asyncio
-    async def test_user_missing_one_permission_fails(self, db_session: AsyncSession, test_user: User, test_role: Role):
+    async def test_user_missing_one_permission_fails(
+        self, db_session: AsyncSession, test_user: User, test_role: Role
+    ):
         from app.core.permissions import PermissionCheckerAll
+
         # test_role 有 task:read, task:create 但没有 task:delete
         checker = PermissionCheckerAll(["task:read", "task:delete"])
         with pytest.raises(HTTPException) as exc_info:

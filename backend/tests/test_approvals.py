@@ -9,15 +9,15 @@ import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Skill, Approval
-from app.models.approval import ApprovalStatus, ApprovalType
-from app.core.security import get_password_hash, create_access_token
+from app.core.security import create_access_token, get_password_hash
+from app.models import Skill, User
 
 
 @pytest_asyncio.fixture
 async def test_user_approval(db_session: AsyncSession, test_org) -> User:
     """创建测试用户（用于审批测试）"""
     from app.models import UserRole
+
     user = User(
         username="approval_user",
         email="approval_user@example.com",
@@ -130,7 +130,11 @@ class TestListApprovals:
 
     @pytest.mark.asyncio
     async def test_list_approvals_as_user(
-        self, client: AsyncClient, test_user_approval: User, test_skill: Skill, auth_headers_approval: dict
+        self,
+        client: AsyncClient,
+        test_user_approval: User,
+        test_skill: Skill,
+        auth_headers_approval: dict,
     ):
         """普通用户查看审批列表"""
         # 提交一个审批
@@ -172,7 +176,9 @@ class TestListApprovals:
             headers=auth_headers_approval,
         )
 
-        response = await client.get("/api/approvals/pending-count", headers=auth_headers_approval)
+        response = await client.get(
+            "/api/approvals/pending-count", headers=auth_headers_approval
+        )
         assert response.status_code == 200
         data = response.json()
         assert "pending_count" in data
@@ -311,7 +317,9 @@ class TestGetApproval:
         approval_id = create_resp.json()["id"]
 
         # 获取详情
-        response = await client.get(f"/api/approvals/{approval_id}", headers=auth_headers_approval)
+        response = await client.get(
+            f"/api/approvals/{approval_id}", headers=auth_headers_approval
+        )
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == approval_id

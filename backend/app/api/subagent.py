@@ -10,81 +10,87 @@ Subagent API - 子 Agent 任务管理接口
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core import get_db
-from app.models import AIModelConfig
 from app.api.auth import get_current_active_user
-from app.models import User
+from app.core import get_db
+from app.models import AIModelConfig, User
+from app.modules.agent.subagent import SubagentManager, SubagentTask
 
 router = APIRouter(prefix="/subagent", tags=["子智能体"])
 
 
 # ==================== 请求/响应模型 ====================
 
+
 class TaskCreateRequest(BaseModel):
     """创建任务请求"""
+
     label: str
     message: str
     task_type: str = "general"  # general, research, build
-    session_id: Optional[str] = None
-    system_prompt: Optional[str] = None
+    session_id: str | None = None
+    system_prompt: str | None = None
     enable_tools: bool = True
-    model_config_id: Optional[int] = None
+    model_config_id: int | None = None
     max_retries: int = 2
     # OpenClaw 借鉴：深度与角色
     depth: int = 0
-    parent_task_id: Optional[str] = None
-    agent_id: Optional[str] = None
+    parent_task_id: str | None = None
+    agent_id: str | None = None
     lane_type: str = "subagent"  # nested, subagent, cron
 
 
 class TaskResponse(BaseModel):
     """任务响应"""
+
     task_id: str
     label: str
     task_type: str
     status: str
     progress: int
-    result: Optional[str] = None
-    error: Optional[str] = None
+    result: str | None = None
+    error: str | None = None
     retry_count: int = 0
     created_at: str
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    started_at: str | None = None
+    completed_at: str | None = None
     # OpenClaw 借鉴：深度与角色
     depth: int = 0
     role: str = "main"
-    parent_task_id: Optional[str] = None
+    parent_task_id: str | None = None
     can_spawn: bool = True
 
 
 class TaskListResponse(BaseModel):
     """任务列表响应"""
-    tasks: List[TaskResponse]
+
+    tasks: list[TaskResponse]
     total: int
 
 
 class TaskStatsResponse(BaseModel):
     """任务统计响应"""
+
     total: int
     pending: int
     running: int
     completed: int
     failed: int
     cancelled: int
-    by_type: Optional[Dict[str, Dict[str, int]]] = None
+    by_type: dict[str, dict[str, int]] | None = None
 
 
 # ==================== 辅助函数 ====================
 
+
 def _task_to_response(task) -> TaskResponse:
     """将 SubagentTask 转换为 TaskResponse"""
     from app.modules.agent import resolve_subagent_capabilities
+
     capabilities = resolve_subagent_capabilities(task.role)
     return TaskResponse(
         task_id=task.task_id,
@@ -108,11 +114,11 @@ def _task_to_response(task) -> TaskResponse:
 # ==================== 全局 SubagentManager ====================
 
 # 全局任务存储（简化实现）
-_global_tasks: Dict[str, 'SubagentTask'] = {}
-_global_managers: Dict[str, 'SubagentManager'] = {}
+_global_tasks: dict[str, SubagentTask] = {}
+_global_managers: dict[str, SubagentManager] = {}
 
 
-def register_manager(manager_id: str, manager: 'SubagentManager'):
+def register_manager(manager_id: str, manager: SubagentManager):
     """注册 manager"""
     _global_managers[manager_id] = manager
 
@@ -122,7 +128,7 @@ def get_global_task(task_id: str):
     return _global_tasks.get(task_id)
 
 
-def register_task(task: 'SubagentTask'):
+def register_task(task: SubagentTask):
     """注册任务到全局存储"""
     _global_tasks[task.task_id] = task
 
@@ -134,13 +140,13 @@ def get_all_tasks():
 
 async def get_subagent_manager(
     db: AsyncSession,
-    model_config_id: Optional[int],
+    model_config_id: int | None,
     current_user: User,
 ):
     """获取或创建 SubagentManager"""
     from app.modules.agent import AgentLoop, SubagentManager
     from app.modules.tools import ToolRegistry, register_builtin_tools
-    
+
     # 获取模型配置
     if model_config_id:
         result = await db.execute(
@@ -148,22 +154,22 @@ async def get_subagent_manager(
         )
         config = result.scalar_one_or_none()
     else:
-        result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.is_default == True)
-        )
+        result = await db.execute(select(AIModelConfig).where(AIModelConfig.is_default))
         config = result.scalar_one_or_none()
-    
+
     if not config:
         raise HTTPException(status_code=400, detail="没有可用的 AI 模型配置")
-    
+
     # 创建 AgentLoop
     tool_registry = ToolRegistry()
     register_builtin_tools(tool_registry)
-    
+
     from app.api.chat import SimpleLLMProvider
+
     provider = SimpleLLMProvider(config=config)
-    
+
     from app.core.security_client import security_client
+
     agent_loop = AgentLoop(
         provider=provider,
         tools=tool_registry,
@@ -174,14 +180,15 @@ async def get_subagent_manager(
         user_role=current_user.role,
         security_client=security_client,
     )
-    
+
     # 创建 SubagentManager
     manager = SubagentManager(agent_loop=agent_loop)
-    
+
     return manager
 
 
 # ==================== API 端点 ====================
+
 
 @router.post("/tasks", response_model=TaskResponse)
 async def create_task(
@@ -198,7 +205,8 @@ async def create_task(
     manager = await get_subagent_manager(db, request.model_config_id, current_user)
 
     # 创建任务
-    from app.modules.agent import TaskType, LaneType
+    from app.modules.agent import LaneType, TaskType
+
     try:
         task_type = TaskType(request.task_type)
     except ValueError:
@@ -242,29 +250,29 @@ async def get_task(
     task = get_global_task(task_id)
     if task:
         return _task_to_response(task)
-    
+
     raise HTTPException(status_code=404, detail="任务不存在")
 
 
 @router.get("/tasks", response_model=TaskListResponse)
 async def list_tasks(
-    status: Optional[str] = None,
+    status: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """列出所有任务"""
     from app.modules.agent import TaskStatus
-    
+
     all_tasks = get_all_tasks()
-    
+
     # 按状态过滤
     if status:
         filter_status = TaskStatus(status)
         all_tasks = [t for t in all_tasks if t.status == filter_status]
-    
+
     # 按创建时间倒序
     all_tasks.sort(key=lambda t: t.created_at, reverse=True)
-    
+
     return TaskListResponse(
         tasks=[_task_to_response(t) for t in all_tasks],
         total=len(all_tasks),
@@ -282,12 +290,14 @@ async def cancel_task(
     if task:
         # 由于我们没有保存 manager，直接更新状态
         from app.modules.agent import TaskStatus
+
         task.status = TaskStatus.CANCELLED
         task.error = "用户取消"
         from datetime import datetime
+
         task.completed_at = datetime.now()
         return {"success": True, "message": "任务已取消"}
-    
+
     raise HTTPException(status_code=404, detail="任务不存在")
 
 
@@ -302,7 +312,7 @@ async def delete_task(
     if task_id in _global_tasks:
         del _global_tasks[task_id]
         return {"success": True, "message": "任务已删除"}
-    
+
     raise HTTPException(status_code=404, detail="任务不存在")
 
 
@@ -313,9 +323,9 @@ async def get_stats(
 ):
     """获取任务统计"""
     from app.modules.agent import TaskStatus
-    
+
     all_tasks = get_all_tasks()
-    
+
     return TaskStatsResponse(
         total=len(all_tasks),
         pending=len([t for t in all_tasks if t.status == TaskStatus.PENDING]),

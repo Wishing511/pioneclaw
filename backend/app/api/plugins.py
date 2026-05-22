@@ -2,17 +2,18 @@
 插件系统 API
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
 
 from app.api.auth import get_current_active_user
 from app.models import User
-from app.modules.plugins import PluginManager, PluginState, EventBus
+from app.modules.plugins import EventBus, PluginManager, PluginState
 
 # 全局单例（单 worker 模式安全；多 worker 需 Redis/DB 协调状态）
 _event_bus = EventBus()
-_plugin_manager: Optional[PluginManager] = None
+_plugin_manager: PluginManager | None = None
 
 
 def get_plugin_manager() -> PluginManager:
@@ -20,11 +21,14 @@ def get_plugin_manager() -> PluginManager:
     global _plugin_manager
     if _plugin_manager is None:
         import os
+
         # 默认插件目录: 项目根目录下的 plugins/
         # __file__ -> backend/app/api/plugins.py -> 向上4级到项目根目录
         default_plugin_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            "plugins"
+            os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            ),
+            "plugins",
         )
         _plugin_manager = PluginManager(
             event_bus=_event_bus,
@@ -43,9 +47,10 @@ router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 # ---- Schema ----
 
+
 class PluginLoadRequest(BaseModel):
     plugin_id: str
-    config: Optional[Dict[str, Any]] = None
+    config: dict[str, Any] | None = None
 
 
 class PluginResponse(BaseModel):
@@ -54,20 +59,20 @@ class PluginResponse(BaseModel):
     version: str
     description: str
     state: str
-    error: Optional[str] = None
-    dependencies: List[str] = []
-    subscriptions: List[str] = []
+    error: str | None = None
+    dependencies: list[str] = []
+    subscriptions: list[str] = []
 
 
 class PluginStatsResponse(BaseModel):
     total: int
-    by_state: Dict[str, int]
-    plugin_dir: Optional[str] = None
+    by_state: dict[str, int]
+    plugin_dir: str | None = None
 
 
 class EventPublishRequest(BaseModel):
     topic: str
-    data: Dict[str, Any] = {}
+    data: dict[str, Any] = {}
 
 
 class SubscriptionResponse(BaseModel):
@@ -80,7 +85,8 @@ class SubscriptionResponse(BaseModel):
 
 # ---- 端点 ----
 
-@router.get("/discover", response_model=List[str])
+
+@router.get("/discover", response_model=list[str])
 async def discover_plugins(
     current_user: User = Depends(get_current_active_user),
 ):
@@ -120,7 +126,9 @@ async def unload_plugin(
     manager = get_plugin_manager()
     success = manager.unload_plugin(plugin_id)
     if not success:
-        raise HTTPException(status_code=400, detail=f"Failed to unload plugin '{plugin_id}'")
+        raise HTTPException(
+            status_code=400, detail=f"Failed to unload plugin '{plugin_id}'"
+        )
     return {"success": True, "message": f"Plugin '{plugin_id}' unloaded"}
 
 
@@ -146,9 +154,9 @@ async def reload_plugin(
     )
 
 
-@router.get("/list", response_model=List[PluginResponse])
+@router.get("/list", response_model=list[PluginResponse])
 async def list_plugins(
-    state: Optional[str] = None,
+    state: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """列出已加载插件"""
@@ -203,18 +211,19 @@ async def get_plugin(
 
 # ---- 生命周期端点 (Stage PP) ----
 
+
 class LifecycleResponse(BaseModel):
     plugin_id: str
     name: str
     state: str
-    health_status: Optional[bool] = None
-    last_health_check: Optional[str] = None
-    retry_count: Optional[int] = None
-    max_retries: Optional[int] = None
-    error_history: List[Dict[str, Any]] = []
-    paused_at: Optional[str] = None
-    stopped_at: Optional[str] = None
-    last_transition: Optional[Dict[str, Any]] = None
+    health_status: bool | None = None
+    last_health_check: str | None = None
+    retry_count: int | None = None
+    max_retries: int | None = None
+    error_history: list[dict[str, Any]] = []
+    paused_at: str | None = None
+    stopped_at: str | None = None
+    last_transition: dict[str, Any] | None = None
 
 
 @router.post("/{plugin_id}/pause")
@@ -226,7 +235,9 @@ async def pause_plugin(
     manager = get_plugin_manager()
     success = manager.pause_plugin(plugin_id)
     if not success:
-        raise HTTPException(status_code=400, detail=f"Cannot pause plugin '{plugin_id}'")
+        raise HTTPException(
+            status_code=400, detail=f"Cannot pause plugin '{plugin_id}'"
+        )
     return {"success": True, "message": f"Plugin '{plugin_id}' paused"}
 
 
@@ -239,7 +250,9 @@ async def resume_plugin(
     manager = get_plugin_manager()
     success = manager.resume_plugin(plugin_id)
     if not success:
-        raise HTTPException(status_code=400, detail=f"Cannot resume plugin '{plugin_id}'")
+        raise HTTPException(
+            status_code=400, detail=f"Cannot resume plugin '{plugin_id}'"
+        )
     return {"success": True, "message": f"Plugin '{plugin_id}' resumed"}
 
 
@@ -265,7 +278,9 @@ async def restart_plugin(
     manager = get_plugin_manager()
     info = manager.restart_plugin(plugin_id)
     if info is None:
-        raise HTTPException(status_code=400, detail=f"Cannot restart plugin '{plugin_id}'")
+        raise HTTPException(
+            status_code=400, detail=f"Cannot restart plugin '{plugin_id}'"
+        )
     return {
         "success": True,
         "message": f"Plugin '{plugin_id}' restarted",
@@ -282,7 +297,9 @@ async def enable_plugin(
     manager = get_plugin_manager()
     success = manager.enable_plugin(plugin_id)
     if not success:
-        raise HTTPException(status_code=400, detail=f"Cannot enable plugin '{plugin_id}'")
+        raise HTTPException(
+            status_code=400, detail=f"Cannot enable plugin '{plugin_id}'"
+        )
     return {"success": True, "message": f"Plugin '{plugin_id}' enabled"}
 
 
@@ -295,7 +312,9 @@ async def disable_plugin(
     manager = get_plugin_manager()
     success = manager.disable_plugin(plugin_id)
     if not success:
-        raise HTTPException(status_code=400, detail=f"Cannot disable plugin '{plugin_id}'")
+        raise HTTPException(
+            status_code=400, detail=f"Cannot disable plugin '{plugin_id}'"
+        )
     return {"success": True, "message": f"Plugin '{plugin_id}' disabled"}
 
 
@@ -312,7 +331,7 @@ async def get_plugin_health(
     return result
 
 
-@router.get("/health", response_model=List[LifecycleResponse])
+@router.get("/health", response_model=list[LifecycleResponse])
 async def get_all_plugins_health(
     current_user: User = Depends(get_current_active_user),
 ):
@@ -322,6 +341,7 @@ async def get_all_plugins_health(
 
 
 # ---- 事件总线端点 ----
+
 
 @router.post("/events/publish")
 async def publish_event(
@@ -334,9 +354,9 @@ async def publish_event(
     return {"success": True, "handlers_fired": fired}
 
 
-@router.get("/events/subscriptions", response_model=List[SubscriptionResponse])
+@router.get("/events/subscriptions", response_model=list[SubscriptionResponse])
 async def list_subscriptions(
-    topic: Optional[str] = None,
+    topic: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """列出事件订阅"""

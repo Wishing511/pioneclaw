@@ -15,9 +15,8 @@ import json
 import logging
 import random
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +31,15 @@ HEARTBEAT_MESSAGE = "__heartbeat__"  # 特殊标记，executor 识别后交给 H
 
 # 默认配置
 DEFAULT_IDLE_THRESHOLD_HOURS = 4
-DEFAULT_ACTIVE_START = 8   # 北京时间
-DEFAULT_ACTIVE_END = 22    # 北京时间
+DEFAULT_ACTIVE_START = 8  # 北京时间
+DEFAULT_ACTIVE_END = 22  # 北京时间
 DEFAULT_MAX_GREETS_PER_DAY = 2  # 每天最多问候次数
 
 
 @dataclass(frozen=True)
 class HeartbeatDispatch:
     """一次已通过前置检查、等待真正投递的问候任务"""
+
     session_id: str
     channel: str
     account_id: str
@@ -54,14 +54,15 @@ class HeartbeatDispatch:
 @dataclass
 class HeartbeatConfig:
     """Heartbeat 配置"""
+
     enabled: bool = False
     idle_threshold_hours: int = DEFAULT_IDLE_THRESHOLD_HOURS
     quiet_start: int = 21  # 静默开始时间（北京时间）
-    quiet_end: int = 8     # 静默结束时间
+    quiet_end: int = 8  # 静默结束时间
     max_greets_per_day: int = DEFAULT_MAX_GREETS_PER_DAY
-    channel: Optional[str] = None
-    account_id: Optional[str] = None
-    chat_id: Optional[str] = None
+    channel: str | None = None
+    account_id: str | None = None
+    chat_id: str | None = None
     ai_name: str = "小助手"
     user_name: str = "用户"
     personality: str = "professional"
@@ -72,10 +73,10 @@ class HeartbeatConfig:
 class HeartbeatService:
     """
     主动问候服务
-    
+
     根据判断是否触发以及如何投递主动问候。
     """
-    
+
     def __init__(
         self,
         config: HeartbeatConfig,
@@ -89,25 +90,25 @@ class HeartbeatService:
         self.llm_client = llm_client
         self.memory_store = memory_store
         self.db_session_factory = db_session_factory
-        
+
         # 状态文件
         self._state_file = workspace / "memory" / "heartbeat_state.json"
-        
+
         logger.debug(
             f"HeartbeatService initialized: idle>{config.idle_threshold_hours}h, "
             f"quiet {config.quiet_start}:00-{config.quiet_end}:00, "
             f"max {config.max_greets_per_day} greets/day"
         )
-    
+
     @staticmethod
     def _now_shanghai() -> datetime:
         """获取当前北京时间"""
         return datetime.now(SHANGHAI_TZ)
-    
+
     def _is_quiet_hour(self, hour: int) -> bool:
         """
         判断当前小时是否在静默时段
-        
+
         支持跨越午夜时段，如 quiet_start=22, quiet_end=8 表示 22:00-08:00 静默。
         """
         if self.config.quiet_start <= self.config.quiet_end:
@@ -116,41 +117,41 @@ class HeartbeatService:
         else:
             # 跨越午夜，如 22:00-8:00
             return hour >= self.config.quiet_start or hour < self.config.quiet_end
-    
+
     def _load_state(self) -> dict:
         """从文件加载状态"""
         try:
             if self._state_file.exists():
-                with open(self._state_file, 'r', encoding='utf-8') as f:
+                with open(self._state_file, encoding="utf-8") as f:
                     return json.load(f)
         except Exception as e:
             logger.error(f"Failed to load heartbeat state: {e}")
         return {}
-    
+
     def _save_state(self, state: dict) -> None:
         """保存状态到文件"""
         try:
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._state_file, 'w', encoding='utf-8') as f:
+            with open(self._state_file, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Failed to save heartbeat state: {e}")
-    
+
     def _build_config_signature(self) -> str:
         """生成配置签名"""
         return f"{self.config.quiet_start}:{self.config.quiet_end}:{self.config.max_greets_per_day}"
-    
+
     def _prune_old_state(self, state: dict) -> None:
         """清理旧数据（保留最近7天）"""
         dates = sorted(state.keys())
         if len(dates) > 7:
             for old_date in dates[:-7]:
                 del state[old_date]
-    
-    def _generate_random_times(self, date: str) -> List[int]:
+
+    def _generate_random_times(self, date: str) -> list[int]:
         """
         为指定日期生成随机问候时间点
-        
+
         Returns:
             List[int]: 分钟数列表，如 [615, 780] 表示 10:15, 13:00
         """
@@ -161,12 +162,12 @@ class HeartbeatService:
         except Exception:
             seed = 0
         rng = random.Random(seed)
-        
+
         # 计算活跃时段
         qs = self.config.quiet_start
         qe = self.config.quiet_end
         total = 24 * 60
-        
+
         if qs > qe:
             # 跨越午夜静默，如 21:00-08:00，活跃时段 [qe*60, qs*60)
             active_segments = [(qe * 60, qs * 60)]
@@ -180,17 +181,17 @@ class HeartbeatService:
         else:
             # 无静默时段，全天活跃
             active_segments = [(0, total)]
-        
+
         # 计算总活跃分钟数
         active_total = sum(end - start for start, end in active_segments)
         if active_total <= 0 or self.config.max_greets_per_day <= 0:
             return []
-        
+
         # 分段均匀分布问候时间
         segment_size = active_total // self.config.max_greets_per_day
         if segment_size < 1:
             segment_size = 1
-        
+
         def virtual_to_real(v: int) -> int:
             """将虚拟分钟偏移映射到真实分钟"""
             for seg_start, seg_end in active_segments:
@@ -200,7 +201,7 @@ class HeartbeatService:
                 v -= seg_len
             last_start, last_end = active_segments[-1]
             return last_end - 1
-        
+
         times = []
         for i in range(self.config.max_greets_per_day):
             v_start = i * segment_size
@@ -209,10 +210,12 @@ class HeartbeatService:
                 v_end = active_total
             v = rng.randint(v_start, v_end - 1)
             times.append(virtual_to_real(v))
-        
+
         return sorted(times)
-    
-    def _build_today_entry(self, today: str, previous_entry: Optional[dict] = None) -> dict:
+
+    def _build_today_entry(
+        self, today: str, previous_entry: dict | None = None
+    ) -> dict:
         """构建当日状态条目"""
         previous_entry = previous_entry if isinstance(previous_entry, dict) else {}
         greeted_times = list(previous_entry.get("greeted_times") or [])
@@ -222,78 +225,78 @@ class HeartbeatService:
             "count": len(greeted_times),
             "config_signature": self._build_config_signature(),
         }
-    
+
     def _get_today_state(self, today: str) -> dict:
         """获取当日状态"""
         state = self._load_state()
         today_entry = state.get(today)
         expected_signature = self._build_config_signature()
-        
+
         needs_rebuild = (
             not isinstance(today_entry, dict)
             or today_entry.get("config_signature") != expected_signature
         )
-        
+
         if needs_rebuild:
             state[today] = self._build_today_entry(today, today_entry)
             self._prune_old_state(state)
             self._save_state(state)
             logger.info(
                 f"已生成今日随机问候时间 | 日期={today} | "
-                f"时间点={[f'{t//60}:{t%60:02d}' for t in state[today]['scheduled_times']]}"
+                f"时间点={[f'{t // 60}:{t % 60:02d}' for t in state[today]['scheduled_times']]}"
             )
-        
+
         return state[today]
-    
+
     def _mark_greeted(self, today: str, scheduled_time: int) -> None:
         """标记某计划时间点已问候"""
         state = self._load_state()
-        
+
         if today not in state or not isinstance(state[today], dict):
             state[today] = self._build_today_entry(today)
-        
+
         if scheduled_time not in state[today]["greeted_times"]:
             state[today]["greeted_times"].append(scheduled_time)
             state[today]["count"] = len(state[today]["greeted_times"])
-        
+
         state[today]["config_signature"] = self._build_config_signature()
         self._prune_old_state(state)
         self._save_state(state)
-    
-    def _should_greet_now(self, today: str, current_minute: int) -> Optional[int]:
+
+    def _should_greet_now(self, today: str, current_minute: int) -> int | None:
         """
         判断当前时间是否应该问候
-        
+
         Returns:
             匹配的计划时间点（分钟数），或 None
         """
         today_state = self._get_today_state(today)
         scheduled_times = today_state["scheduled_times"]
         greeted_times = today_state["greeted_times"]
-        
+
         # 检查是否已达到每日上限
         if today_state["count"] >= self.config.max_greets_per_day:
             return None
-        
+
         # 找到当前时间附近且未问候的计划时间点
         for scheduled_time in scheduled_times:
             if scheduled_time in greeted_times:
                 continue
             if abs(current_minute - scheduled_time) <= 30:  # 30分钟窗口
                 return scheduled_time
-        
+
         return None
-    
+
     async def prepare_dispatch(
         self,
         session_id: str,
         channel: str,
         account_id: str,
         chat_id: str,
-    ) -> Optional[HeartbeatDispatch]:
+    ) -> HeartbeatDispatch | None:
         """
         准备一次待投递的问候任务
-        
+
         流程：
         1. 静默时段检查
         2. 计划时间检查
@@ -304,22 +307,22 @@ class HeartbeatService:
         now = self._now_shanghai()
         today = now.strftime("%Y-%m-%d")
         current_minute = now.hour * 60 + now.minute
-        
+
         # 1. 静默时段检查
         if self._is_quiet_hour(now.hour):
             logger.debug(f"Heartbeat skipped: {now.hour}:00 is in quiet hours")
             return None
-        
+
         # 2. 计划时间检查
         matched_time = self._should_greet_now(today, current_minute)
         if matched_time is None:
-            logger.debug(f"Heartbeat skipped: not in scheduled time window")
+            logger.debug("Heartbeat skipped: not in scheduled time window")
             return None
-        
+
         # 3. 次数检查
         today_state = self._get_today_state(today)
         greet_num = today_state["count"] + 1
-        
+
         # 4. 用户空闲检查
         idle_hours = await self._get_user_idle_hours(session_id)
         if idle_hours is None or idle_hours < self.config.idle_threshold_hours:
@@ -327,17 +330,17 @@ class HeartbeatService:
                 f"Heartbeat skipped: idle {idle_hours}h < threshold {self.config.idle_threshold_hours}h"
             )
             return None
-        
+
         # 5. 生成问候语
         greeting = await self._generate_greeting(now, idle_hours)
         if not greeting:
             return None
-        
+
         logger.info(
             f"准备问候任务 | 会话={session_id} | "
             f"空闲={idle_hours:.1f}h | 第{greet_num}/{self.config.max_greets_per_day}次"
         )
-        
+
         return HeartbeatDispatch(
             session_id=session_id,
             channel=channel,
@@ -349,7 +352,7 @@ class HeartbeatService:
             greet_num=greet_num,
             greeting=greeting,
         )
-    
+
     def commit_dispatch(self, dispatch: HeartbeatDispatch) -> None:
         """确认投递成功，提交问候记录"""
         self._mark_greeted(dispatch.today, dispatch.matched_time)
@@ -357,17 +360,16 @@ class HeartbeatService:
             f"问候已成功发送 | 第{dispatch.greet_num}/{self.config.max_greets_per_day}次 | "
             f"内容={dispatch.greeting[:80]}"
         )
-    
-    async def _get_user_idle_hours(self, session_id: str) -> Optional[float]:
+
+    async def _get_user_idle_hours(self, session_id: str) -> float | None:
         """查询目标会话用户最后一次消息时间，返回空闲小时数"""
         if not self.db_session_factory:
             return None
-        
+
         try:
             # 这里需要根据实际的数据库模型调整
             # 假设有 Message 表
-            from sqlalchemy import select, func
-            async with self.db_session_factory() as db:
+            async with self.db_session_factory():
                 # 查询最后一条用户消息时间
                 # result = await db.execute(...)
                 # last_msg_time = result.scalar()
@@ -375,18 +377,18 @@ class HeartbeatService:
                 pass
         except Exception as e:
             logger.error(f"Failed to get user idle hours: {e}")
-        
+
         return None
-    
+
     async def _generate_greeting(self, now: datetime, idle_hours: float) -> str:
         """用 LLM 生成问候语"""
         if not self.llm_client:
             # 无 LLM，返回默认问候
             return self._get_default_greeting(now, idle_hours)
-        
-        from app.modules.agent.prompts import get_heartbeat_greeting_prompt
+
         from app.modules.agent.personalities import get_personality_prompt
-        
+        from app.modules.agent.prompts import get_heartbeat_greeting_prompt
+
         hour = now.hour
         if hour < 12:
             time_desc = f"上午{hour}点"
@@ -396,7 +398,7 @@ class HeartbeatService:
             time_desc = f"下午{hour}点"
         else:
             time_desc = f"晚上{hour}点"
-        
+
         # 获取记忆上下文
         memory_context = ""
         if self.memory_store:
@@ -406,13 +408,13 @@ class HeartbeatService:
                     memory_context = f"近期记忆（可参考但不必提及）:\n{recent}"
             except Exception:
                 pass
-        
+
         # 获取性格描述
         personality_desc = get_personality_prompt(
             self.config.personality,
             self.config.custom_personality,
         )
-        
+
         prompt = get_heartbeat_greeting_prompt(
             ai_name=self.config.ai_name,
             time_desc=time_desc,
@@ -421,10 +423,10 @@ class HeartbeatService:
             personality_desc=personality_desc,
             memory_context=memory_context,
         )
-        
+
         try:
             # 调用 LLM
-            if hasattr(self.llm_client, 'chat'):
+            if hasattr(self.llm_client, "chat"):
                 response = await self.llm_client.chat(
                     [{"role": "user", "content": prompt}],
                     temperature=0.8,
@@ -433,45 +435,46 @@ class HeartbeatService:
                 greeting = response.get("content", "").strip()
             else:
                 greeting = ""
-            
+
             # 过滤异常输出
             if not greeting or len(greeting) > 50:
                 return self._get_default_greeting(now, idle_hours)
-            
+
             return greeting
-            
+
         except Exception as e:
             logger.error(f"Failed to generate greeting: {e}")
             return self._get_default_greeting(now, idle_hours)
-    
+
     def _get_default_greeting(self, now: datetime, idle_hours: float) -> str:
         """获取默认问候语"""
         hour = now.hour
         if hour < 12:
-            return f"早上好！好久没见了，有什么需要帮忙的吗？"
+            return "早上好！好久没见了，有什么需要帮忙的吗？"
         elif hour < 18:
-            return f"下午好！看到你回来了，有什么想聊的吗？"
+            return "下午好！看到你回来了，有什么想聊的吗？"
         else:
-            return f"晚上好！今天过得怎么样？"
-    
+            return "晚上好！今天过得怎么样？"
+
     def refresh_today_schedule(self, reason: str = "") -> bool:
         """刷新今日问候计划"""
         today = self._now_shanghai().strftime("%Y-%m-%d")
         state = self._load_state()
         previous_entry = state.get(today)
-        
+
         if not isinstance(previous_entry, dict):
             return False
-        
+
         state[today] = self._build_today_entry(today, previous_entry)
         self._prune_old_state(state)
         self._save_state(state)
-        
+
         logger.info(f"已刷新今日问候计划 | 原因={reason}")
         return True
 
 
 # ==================== 便捷函数 ====================
+
 
 def create_heartbeat_service(
     config: HeartbeatConfig,

@@ -7,9 +7,8 @@ Agent Loop 增强测试
 """
 
 import pytest
-import asyncio
 
-from app.modules.agent.loop import AgentLoop, AgentStatus, ToolCall, AgentIteration
+from app.modules.agent.loop import AgentIteration, AgentLoop, AgentStatus, ToolCall
 
 
 class MockProvider:
@@ -21,7 +20,9 @@ class MockProvider:
         self.api_key = "test-key"
         self.api_base = "https://api.test.com"
 
-    async def chat_stream(self, messages, tools=None, model=None, temperature=None, max_tokens=None):
+    async def chat_stream(
+        self, messages, tools=None, model=None, temperature=None, max_tokens=None
+    ):
         if self._call_count < len(self.responses):
             response = self.responses[self._call_count]
             self._call_count += 1
@@ -39,7 +40,9 @@ class MockToolRegistry:
         self._call_log = []
 
     def get_definitions(self):
-        return [{"type": "function", "function": {"name": name}} for name in self._tools]
+        return [
+            {"type": "function", "function": {"name": name}} for name in self._tools
+        ]
 
     async def execute(self, tool_name, arguments):
         self._call_log.append({"name": tool_name, "args": arguments})
@@ -57,9 +60,11 @@ class TestRequestTraceId:
     @pytest.mark.asyncio
     async def test_trace_id_generated(self):
         """测试每次请求生成唯一追踪 ID"""
-        provider = MockProvider(responses=[
-            [{"content": "Hello", "finish_reason": "stop"}],
-        ])
+        provider = MockProvider(
+            responses=[
+                [{"content": "Hello", "finish_reason": "stop"}],
+            ]
+        )
         loop = AgentLoop(provider=provider)
 
         assert loop.request_trace_id is None
@@ -74,10 +79,12 @@ class TestRequestTraceId:
     @pytest.mark.asyncio
     async def test_trace_id_unique_per_request(self):
         """测试每次请求生成不同的追踪 ID"""
-        provider = MockProvider(responses=[
-            [{"content": "First", "finish_reason": "stop"}],
-            [{"content": "Second", "finish_reason": "stop"}],
-        ])
+        provider = MockProvider(
+            responses=[
+                [{"content": "First", "finish_reason": "stop"}],
+                [{"content": "Second", "finish_reason": "stop"}],
+            ]
+        )
         loop = AgentLoop(provider=provider)
 
         async for _ in loop.process_message("First"):
@@ -123,12 +130,14 @@ class TestPluginEventCallbacks:
         def on_tool_event(event_type, data):
             events.append({"type": event_type, "data": data})
 
-        provider = MockProvider(responses=[
-            [
-                {"tool_call": {"id": "tc-1", "name": "test_tool", "arguments": {}}},
-            ],
-            [{"content": "Done", "finish_reason": "stop"}],
-        ])
+        provider = MockProvider(
+            responses=[
+                [
+                    {"tool_call": {"id": "tc-1", "name": "test_tool", "arguments": {}}},
+                ],
+                [{"content": "Done", "finish_reason": "stop"}],
+            ]
+        )
 
         tools = MockToolRegistry(tools={"test_tool": "tool result"})
 
@@ -140,18 +149,25 @@ class TestPluginEventCallbacks:
             result.append(chunk)
 
         # 检查事件被触发
-        tool_events = [e for e in events if e["type"] in ("tool_start", "tool_complete", "tool_error")]
+        tool_events = [
+            e
+            for e in events
+            if e["type"] in ("tool_start", "tool_complete", "tool_error")
+        ]
         assert len(tool_events) >= 1
 
     @pytest.mark.asyncio
     async def test_event_handler_error_does_not_break_loop(self):
         """测试事件处理器报错不中断主循环"""
+
         def bad_handler(event_type, data):
             raise RuntimeError("Handler error!")
 
-        provider = MockProvider(responses=[
-            [{"content": "Hello", "finish_reason": "stop"}],
-        ])
+        provider = MockProvider(
+            responses=[
+                [{"content": "Hello", "finish_reason": "stop"}],
+            ]
+        )
 
         loop = AgentLoop(provider=provider)
         loop.tool_event_handler = bad_handler
@@ -170,9 +186,13 @@ class TestSessionModelOverride:
     def test_resolve_execution_runtime_no_override(self):
         """测试无覆盖时使用默认值"""
         provider = MockProvider()
-        loop = AgentLoop(provider=provider, model="gpt-4", temperature=0.5, max_tokens=2048)
+        loop = AgentLoop(
+            provider=provider, model="gpt-4", temperature=0.5, max_tokens=2048
+        )
 
-        runtime_provider, model, temp, max_tok, max_iter = loop._resolve_execution_runtime()
+        runtime_provider, model, temp, max_tok, max_iter = (
+            loop._resolve_execution_runtime()
+        )
 
         assert model == "gpt-4"
         assert temp == 0.5
@@ -181,7 +201,9 @@ class TestSessionModelOverride:
     def test_resolve_execution_runtime_with_override(self):
         """测试有覆盖时使用覆盖值"""
         provider = MockProvider()
-        loop = AgentLoop(provider=provider, model="gpt-4", temperature=0.5, max_tokens=2048)
+        loop = AgentLoop(
+            provider=provider, model="gpt-4", temperature=0.5, max_tokens=2048
+        )
 
         override = {
             "model": "gpt-3.5-turbo",
@@ -190,7 +212,9 @@ class TestSessionModelOverride:
             "max_iterations": 10,
         }
 
-        runtime_provider, model, temp, max_tok, max_iter = loop._resolve_execution_runtime(override)
+        runtime_provider, model, temp, max_tok, max_iter = (
+            loop._resolve_execution_runtime(override)
+        )
 
         assert model == "gpt-3.5-turbo"
         assert temp == 0.9
@@ -200,14 +224,18 @@ class TestSessionModelOverride:
     def test_resolve_execution_runtime_partial_override(self):
         """测试部分覆盖"""
         provider = MockProvider()
-        loop = AgentLoop(provider=provider, model="gpt-4", temperature=0.5, max_tokens=2048)
+        loop = AgentLoop(
+            provider=provider, model="gpt-4", temperature=0.5, max_tokens=2048
+        )
 
         override = {"temperature": 1.0}
 
-        runtime_provider, model, temp, max_tok, max_iter = loop._resolve_execution_runtime(override)
+        runtime_provider, model, temp, max_tok, max_iter = (
+            loop._resolve_execution_runtime(override)
+        )
 
         assert model == "gpt-4"  # 未覆盖，使用默认
-        assert temp == 1.0       # 已覆盖
+        assert temp == 1.0  # 已覆盖
 
 
 class TestToolRetry:
@@ -228,14 +256,18 @@ class TestToolRetry:
                 raise RuntimeError("Tool failed")
             return result
 
-        provider = MockProvider(responses=[
-            [{"tool_call": {"id": "tc-1", "name": "flaky_tool", "arguments": {}}}],
-            [{"content": "Done", "finish_reason": "stop"}],
-        ])
+        provider = MockProvider(
+            responses=[
+                [{"tool_call": {"id": "tc-1", "name": "flaky_tool", "arguments": {}}}],
+                [{"content": "Done", "finish_reason": "stop"}],
+            ]
+        )
 
         tools = MockToolRegistry(tools={"flaky_tool": flaky_tool})
 
-        loop = AgentLoop(provider=provider, tools=tools, max_retries=3, retry_delay=0.01)
+        loop = AgentLoop(
+            provider=provider, tools=tools, max_retries=3, retry_delay=0.01
+        )
 
         result = []
         async for chunk in loop.process_message("Use flaky tool"):

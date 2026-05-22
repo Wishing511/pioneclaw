@@ -9,25 +9,23 @@
 - ContextBuilder 集成（context_file_loader、prompt_cache 属性）
 """
 
-import os
 import tempfile
-import pytest
 from pathlib import Path
 
+from app.modules.agent.context import ContextBuilder
 from app.modules.agent.context_files import (
+    CONTEXT_FILE_ORDER,
+    DYNAMIC_FILES,
+    STABLE_FILES,
     ContextFileLoader,
     IdentityFile,
     PromptCacheStrategy,
-    parse_identity_md,
     merge_identity_content,
-    CONTEXT_FILE_ORDER,
-    STABLE_FILES,
-    DYNAMIC_FILES,
+    parse_identity_md,
 )
-from app.modules.agent.context import ContextBuilder, PersonaConfig
-
 
 # ==================== 上下文文件优先级 ====================
+
 
 class TestContextFileOrder:
     def test_order_keys(self):
@@ -60,6 +58,7 @@ class TestContextFileOrder:
 
 
 # ==================== IdentityFile 解析 ====================
+
 
 class TestParseIdentityMd:
     def test_parse_list_format(self):
@@ -132,6 +131,7 @@ class TestMergeIdentityContent:
 
 
 # ==================== ContextFileLoader ====================
+
 
 class TestContextFileLoader:
     def test_load_builtin_files(self):
@@ -243,16 +243,21 @@ class TestContextFileLoader:
     def test_build_system_prompt_persona_replaces_identity(self):
         """persona_prompt 替换 identity.md"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "identity.md").write_text("- Name: Builtin", encoding="utf-8")
+            (Path(tmpdir) / "identity.md").write_text(
+                "- Name: Builtin", encoding="utf-8"
+            )
 
             loader = ContextFileLoader(workspace_path=tmpdir)
-            prompt = loader.build_system_prompt(persona_prompt="Dynamic identity: Custom")
+            prompt = loader.build_system_prompt(
+                persona_prompt="Dynamic identity: Custom"
+            )
 
             # persona_prompt 应该替换 builtin identity.md
             assert "Dynamic identity: Custom" in prompt
 
 
 # ==================== PromptCacheStrategy ====================
+
 
 class TestPromptCacheStrategy:
     def test_compute_stable_prefix(self):
@@ -288,7 +293,10 @@ class TestPromptCacheStrategy:
     def test_has_stable_prefix_changed_first_call(self):
         """首次调用总是返回 True"""
         strategy = PromptCacheStrategy()
-        assert strategy.has_stable_prefix_changed("Stable\n\n## memory.md\nDynamic") is True
+        assert (
+            strategy.has_stable_prefix_changed("Stable\n\n## memory.md\nDynamic")
+            is True
+        )
 
     def test_has_stable_prefix_changed_same(self):
         """相同稳定层返回 False"""
@@ -303,7 +311,10 @@ class TestPromptCacheStrategy:
         """稳定层变化返回 True"""
         strategy = PromptCacheStrategy()
         strategy.has_stable_prefix_changed("Stable A\n\n## memory.md\nDynamic")
-        assert strategy.has_stable_prefix_changed("Stable B\n\n## memory.md\nDynamic") is True
+        assert (
+            strategy.has_stable_prefix_changed("Stable B\n\n## memory.md\nDynamic")
+            is True
+        )
 
     def test_format_for_llm_anthropic(self):
         """Anthropic provider 返回 content blocks"""
@@ -333,6 +344,7 @@ class TestPromptCacheStrategy:
 
 
 # ==================== ContextBuilder 集成 ====================
+
 
 class TestContextBuilderIntegration:
     def test_has_context_file_loader(self):

@@ -7,8 +7,8 @@
 - 统计信息
 """
 
-from app.modules.graph_rag.core import GraphRAGClient
 from app.modules.graph_rag.config import GraphRAGSettings
+from app.modules.graph_rag.core import GraphRAGClient
 
 __all__ = [
     "GraphRAGClient",

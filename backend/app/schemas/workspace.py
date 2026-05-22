@@ -3,14 +3,16 @@ Workspace Schema
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel
 
 
 class WorkspaceSettings(BaseModel):
     """工作空间设置"""
+
     output_language: str = "中文"
-    default_model_config_id: Optional[int] = None
+    default_model_config_id: int | None = None
     user_name: str = ""
     user_address: str = ""
     ai_name: str = "小助手"
@@ -21,40 +23,41 @@ class WorkspaceSettings(BaseModel):
 class WorkspaceCreate(BaseModel):
     name: str
     path: str = ""
-    description: Optional[str] = None
-    settings: Optional[Dict[str, Any]] = None
+    description: str | None = None
+    settings: dict[str, Any] | None = None
 
 
 class WorkspaceUpdate(BaseModel):
-    name: Optional[str] = None
-    path: Optional[str] = None
-    description: Optional[str] = None
-    settings: Optional[Dict[str, Any]] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    path: str | None = None
+    description: str | None = None
+    settings: dict[str, Any] | None = None
+    is_active: bool | None = None
 
 
 class WorkspaceSettingsUpdate(BaseModel):
     """工作空间设置更新"""
-    output_language: Optional[str] = None
-    default_model_config_id: Optional[int] = None
-    user_name: Optional[str] = None
-    user_address: Optional[str] = None
-    ai_name: Optional[str] = None
-    personality: Optional[str] = None
-    custom_personality: Optional[str] = None
+
+    output_language: str | None = None
+    default_model_config_id: int | None = None
+    user_name: str | None = None
+    user_address: str | None = None
+    ai_name: str | None = None
+    personality: str | None = None
+    custom_personality: str | None = None
 
 
 class WorkspaceResponse(BaseModel):
     id: int
     name: str
     path: str
-    description: Optional[str] = None
+    description: str | None = None
     owner_id: int
-    organization_id: Optional[str] = None
-    settings: Optional[Dict[str, Any]] = None
+    organization_id: str | None = None
+    settings: dict[str, Any] | None = None
     is_default: bool
     is_active: bool
-    last_active_at: Optional[datetime] = None
+    last_active_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -64,6 +67,7 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspaceBrief(BaseModel):
     """简要信息（用于下拉选择）"""
+
     id: int
     name: str
     is_default: bool

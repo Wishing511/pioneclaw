@@ -14,17 +14,16 @@ Web 工具 - 网络搜索和内容获取
 
 import html
 import json
+import logging
 import os
 import re
-import time
-import logging
 import warnings
-from typing import Any
 from urllib.parse import quote_plus, urlparse
 
 import httpx
 
-from app.core.ssrf_protection import validate_url_ssrf, SsrFBlockedError, SsrFPolicy
+from app.core.ssrf_protection import SsrFBlockedError, validate_url_ssrf
+from app.modules.tools.base import BaseTool, ToolParameter
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +71,18 @@ def _is_valid_brave_key(api_key: str) -> bool:
     if not api_key or not api_key.strip():
         return False
     try:
-        api_key.encode('ascii')
+        api_key.encode("ascii")
         # 排除明显的占位符
         lower = api_key.lower()
-        if 'your' in lower or 'api' in lower or 'key' in lower or '占位' in lower:
-            return False
-        return True
+        return not (
+            "your" in lower or "api" in lower or "key" in lower or "占位" in lower
+        )
     except UnicodeEncodeError:
         return False
 
 
-from app.modules.tools.base import BaseTool, ToolParameter
-
-
 # ==================== Brave Search（首选，需要 API Key）====================
+
 
 class BraveSearchTool(BaseTool):
     """Brave Search API 搜索工具（首选）"""
@@ -95,7 +92,9 @@ class BraveSearchTool(BaseTool):
     description = "使用 Brave Search API 搜索网络（需要 API Key）"
     parameters = {
         "query": ToolParameter(type="string", description="搜索关键词"),
-        "count": ToolParameter(type="integer", description="返回结果数量 (1-10)", default=5),
+        "count": ToolParameter(
+            type="integer", description="返回结果数量 (1-10)", default=5
+        ),
     }
     required = ["query"]
 
@@ -106,14 +105,14 @@ class BraveSearchTool(BaseTool):
         """执行 Brave 搜索"""
         if not query:
             return "错误: 搜索关键词不能为空"
-        
+
         if not _is_valid_brave_key(self.api_key):
             return "错误: Brave API Key 无效或未配置"
-        
+
         try:
             n = min(max(count, 1), 10)
             logger.info(f"[Brave] Searching: {query}")
-            
+
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
@@ -125,11 +124,11 @@ class BraveSearchTool(BaseTool):
                     timeout=10.0,
                 )
                 response.raise_for_status()
-            
+
             results = response.json().get("web", {}).get("results", [])
             if not results:
                 return f"未找到结果: {query}"
-            
+
             lines = [f"[Brave Search] 搜索结果: {query}\n"]
             for i, item in enumerate(results[:n], 1):
                 lines.append(f"{i}. {item.get('title', '无标题')}")
@@ -137,10 +136,10 @@ class BraveSearchTool(BaseTool):
                 if desc := item.get("description"):
                     lines.append(f"   摘要: {desc}")
                 lines.append("")
-            
+
             logger.info(f"[Brave] Search completed: {len(results)} results")
             return "\n".join(lines)
-            
+
         except httpx.HTTPStatusError as e:
             logger.error(f"[Brave] HTTP error: {e}")
             return f"Brave 搜索 HTTP 错误: {e.response.status_code}"
@@ -151,6 +150,7 @@ class BraveSearchTool(BaseTool):
 
 # ==================== DuckDuckGo Search（备选，免费无需 Key）====================
 
+
 class DuckDuckGoSearchTool(BaseTool):
     """DuckDuckGo 搜索工具（备选，免费无需 API Key）"""
 
@@ -159,7 +159,9 @@ class DuckDuckGoSearchTool(BaseTool):
     description = "使用 DuckDuckGo 搜索网络（免费，无需 API Key）"
     parameters = {
         "query": ToolParameter(type="string", description="搜索关键词"),
-        "count": ToolParameter(type="integer", description="返回结果数量 (1-10)", default=5),
+        "count": ToolParameter(
+            type="integer", description="返回结果数量 (1-10)", default=5
+        ),
     }
     required = ["query"]
 
@@ -170,14 +172,14 @@ class DuckDuckGoSearchTool(BaseTool):
         """执行 DuckDuckGo 搜索（通过 HTML 解析）"""
         if not query:
             return "错误: 搜索关键词不能为空"
-        
+
         try:
             n = min(max(count, 1), 10)
             logger.info(f"[DuckDuckGo] Searching: {query}")
-            
+
             # DuckDuckGo HTML 搜索
             url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
-            
+
             async with httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=30.0,
@@ -194,30 +196,30 @@ class DuckDuckGoSearchTool(BaseTool):
                     },
                 )
                 response.raise_for_status()
-            
+
             # 解析 HTML 提取结果
             results = self._parse_results(response.text, n)
-            
+
             if not results:
                 return f"未找到结果: {query}"
-            
+
             lines = [f"[DuckDuckGo] 搜索结果: {query}\n"]
             for i, item in enumerate(results[:n], 1):
                 lines.append(f"{i}. {item['title']}")
                 lines.append(f"   URL: {item['url']}")
-                if item.get('snippet'):
+                if item.get("snippet"):
                     lines.append(f"   摘要: {item['snippet']}")
                 lines.append("")
-            
+
             logger.info(f"[DuckDuckGo] Search completed: {len(results)} results")
             return "\n".join(lines)
-            
+
         except httpx.ConnectTimeout:
             logger.error("[DuckDuckGo] Connection timeout")
-            return f"网络搜索暂时不可用（连接超时）。建议配置 Brave API Key 获得更稳定的搜索服务：https://brave.com/search/api/"
+            return "网络搜索暂时不可用（连接超时）。建议配置 Brave API Key 获得更稳定的搜索服务：https://brave.com/search/api/"
         except httpx.ConnectError as e:
             logger.error(f"[DuckDuckGo] Connection error: {e}")
-            return f"网络搜索暂时不可用（网络连接失败）。建议配置 Brave API Key 获得更稳定的搜索服务：https://brave.com/search/api/"
+            return "网络搜索暂时不可用（网络连接失败）。建议配置 Brave API Key 获得更稳定的搜索服务：https://brave.com/search/api/"
         except Exception as e:
             logger.error(f"[DuckDuckGo] Search error: {e}")
             return f"DuckDuckGo 搜索错误: {e}"
@@ -235,8 +237,7 @@ class DuckDuckGoSearchTool(BaseTool):
 
             # 提取标题：h2.result__title > a.result__a
             title_match = re.search(
-                r'class="result__a"[^>]*>(.*?)</a>',
-                block, re.DOTALL | re.IGNORECASE
+                r'class="result__a"[^>]*>(.*?)</a>', block, re.DOTALL | re.IGNORECASE
             )
             if not title_match:
                 continue
@@ -247,8 +248,7 @@ class DuckDuckGoSearchTool(BaseTool):
 
             # 提取 URL：a.result__url 的 href 属性
             url_match = re.search(
-                r'class="result__url"\s+href="([^"]*)"',
-                block, re.IGNORECASE
+                r'class="result__url"\s+href="([^"]*)"', block, re.IGNORECASE
             )
             if not url_match:
                 continue
@@ -259,36 +259,42 @@ class DuckDuckGoSearchTool(BaseTool):
             snippet = ""
             snippet_match = re.search(
                 r'class="result__snippet"[^>]*>(.*?)</a>',
-                block, re.DOTALL | re.IGNORECASE
+                block,
+                re.DOTALL | re.IGNORECASE,
             )
             if snippet_match:
                 snippet = _strip_tags(snippet_match.group(1)).strip()
 
             # 处理 URL
-            if url.startswith('//'):
-                url = 'https:' + url
-            elif not url.startswith('http'):
+            if url.startswith("//"):
+                url = "https:" + url
+            elif not url.startswith("http"):
                 continue
 
             # 跳过 DuckDuckGo 内部链接
-            if 'duckduckgo.com/l/' in url and 'uddg=' in url:
-                from urllib.parse import unquote, parse_qs, urlparse as uparse
+            if "duckduckgo.com/l/" in url and "uddg=" in url:
+                from urllib.parse import parse_qs
+                from urllib.parse import urlparse as uparse
+
                 parsed = uparse(url)
                 qs = parse_qs(parsed.query)
-                uddg = qs.get('uddg', [''])[0]
+                uddg = qs.get("uddg", [""])[0]
                 if uddg:
                     url = uddg
 
-            results.append({
-                'title': title,
-                'url': url,
-                'snippet': snippet[:200] if snippet else "",
-            })
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet[:200] if snippet else "",
+                }
+            )
 
         return results
 
 
 # ==================== Bing Search（备选，全球可用）====================
+
 
 class BingSearchTool(BaseTool):
     """Bing 搜索工具（备选，全球可用）"""
@@ -298,7 +304,9 @@ class BingSearchTool(BaseTool):
     description = "使用 Bing 搜索网络"
     parameters = {
         "query": ToolParameter(type="string", description="搜索关键词"),
-        "count": ToolParameter(type="integer", description="返回结果数量 (1-10)", default=5),
+        "count": ToolParameter(
+            type="integer", description="返回结果数量 (1-10)", default=5
+        ),
     }
     required = ["query"]
 
@@ -314,7 +322,7 @@ class BingSearchTool(BaseTool):
             logger.info(f"[Bing] Searching: {query}")
 
             # 检测中文查询，设置中国市场参数以获取更好的中文结果
-            has_chinese = bool(re.search(r'[\u4e00-\u9fff]', query))
+            has_chinese = bool(re.search(r"[\u4e00-\u9fff]", query))
             mkt_param = "&mkt=zh-CN&setlang=zh-cn" if has_chinese else ""
 
             url = f"https://www.bing.com/search?q={quote_plus(query)}&count={n}{mkt_param}"
@@ -343,7 +351,7 @@ class BingSearchTool(BaseTool):
             for i, item in enumerate(results[:n], 1):
                 lines.append(f"{i}. {item['title']}")
                 lines.append(f"   URL: {item['url']}")
-                if item.get('snippet'):
+                if item.get("snippet"):
                     lines.append(f"   摘要: {item['snippet']}")
                 lines.append("")
 
@@ -365,7 +373,8 @@ class BingSearchTool(BaseTool):
 
             title_match = re.search(
                 r'<h2[^>]*>.*?<a[^>]+href="([^"]*)"[^>]*>(.*?)</a>',
-                block, re.DOTALL | re.IGNORECASE
+                block,
+                re.DOTALL | re.IGNORECASE,
             )
             if not title_match:
                 continue
@@ -379,31 +388,37 @@ class BingSearchTool(BaseTool):
             snippet = ""
             cap_match = re.search(
                 r'class="b_caption"[^>]*>.*?<p[^>]*>(.*?)</p>',
-                block, re.DOTALL | re.IGNORECASE
+                block,
+                re.DOTALL | re.IGNORECASE,
             )
             if cap_match:
                 snippet = _strip_tags(cap_match.group(1)).strip()
             else:
-                p_match = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL | re.IGNORECASE)
+                p_match = re.search(
+                    r"<p[^>]*>(.*?)</p>", block, re.DOTALL | re.IGNORECASE
+                )
                 if p_match:
                     snippet = _strip_tags(p_match.group(1)).strip()
 
-            if url and not url.startswith('http'):
-                if url.startswith('//'):
-                    url = 'https:' + url
+            if url and not url.startswith("http"):
+                if url.startswith("//"):
+                    url = "https:" + url
                 else:
                     continue
 
-            results.append({
-                'title': title,
-                'url': url,
-                'snippet': snippet[:200] if snippet else "",
-            })
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet[:200] if snippet else "",
+                }
+            )
 
         return results
 
 
 # ==================== Sogou Search（中文搜索首选，无需 API Key）====================
+
 
 class SogouSearchTool(BaseTool):
     """搜狗搜索工具（中文搜索首选，无需 API Key）"""
@@ -413,7 +428,9 @@ class SogouSearchTool(BaseTool):
     description = "使用搜狗搜索网络（中文搜索首选）"
     parameters = {
         "query": ToolParameter(type="string", description="搜索关键词"),
-        "count": ToolParameter(type="integer", description="返回结果数量 (1-10)", default=5),
+        "count": ToolParameter(
+            type="integer", description="返回结果数量 (1-10)", default=5
+        ),
     }
     required = ["query"]
 
@@ -455,7 +472,7 @@ class SogouSearchTool(BaseTool):
             for i, item in enumerate(results[:n], 1):
                 lines.append(f"{i}. {item['title']}")
                 lines.append(f"   URL: {item['url']}")
-                if item.get('snippet'):
+                if item.get("snippet"):
                     lines.append(f"   摘要: {item['snippet']}")
                 lines.append("")
 
@@ -483,13 +500,15 @@ class SogouSearchTool(BaseTool):
             # 提取标题和 URL: <h3 class="vrTitle">...<a href="...">Title</a>...</h3>
             title_match = re.search(
                 r'<h3[^>]*>.*?<a[^>]+href="([^"]*)"[^>]*>(.*?)</a>',
-                block, re.DOTALL | re.IGNORECASE
+                block,
+                re.DOTALL | re.IGNORECASE,
             )
             if not title_match:
                 # 备用：直接找 <a> 标签
                 title_match = re.search(
                     r'<a[^>]+href="([^"]*)"[^>]*>(.*?)</a>',
-                    block, re.DOTALL | re.IGNORECASE
+                    block,
+                    re.DOTALL | re.IGNORECASE,
                 )
 
             if not title_match:
@@ -502,12 +521,14 @@ class SogouSearchTool(BaseTool):
                 continue
 
             # 跳过搜狗内部链接和非网页结果
-            if 'sogou.com' in url and '/link?' in url:
+            if "sogou.com" in url and "/link?" in url:
                 # 搜狗跳转链接，需要提取真实 URL
-                from urllib.parse import parse_qs, urlparse as uparse
+                from urllib.parse import parse_qs
+                from urllib.parse import urlparse as uparse
+
                 parsed = uparse(url)
                 qs = parse_qs(parsed.query)
-                real_url = qs.get('url', [''])[0] or qs.get('aurl', [''])[0]
+                real_url = qs.get("url", [""])[0] or qs.get("aurl", [""])[0]
                 if real_url:
                     url = real_url
 
@@ -515,33 +536,36 @@ class SogouSearchTool(BaseTool):
             snippet = ""
             snip_match = re.search(
                 r'<p[^>]*class="[^"]*(?:star-wiki|str_info|str-text|space-txt|str_info_inner)[^"]*"[^>]*>(.*?)</p>',
-                block, re.DOTALL | re.IGNORECASE
+                block,
+                re.DOTALL | re.IGNORECASE,
             )
             if not snip_match:
                 # 更宽松的摘要匹配
                 snip_match = re.search(
-                    r'<p[^>]*>(.*?)</p>',
-                    block, re.DOTALL | re.IGNORECASE
+                    r"<p[^>]*>(.*?)</p>", block, re.DOTALL | re.IGNORECASE
                 )
             if snip_match:
                 snippet = _strip_tags(snip_match.group(1)).strip()
 
-            if url and not url.startswith('http'):
-                if url.startswith('//'):
-                    url = 'https:' + url
+            if url and not url.startswith("http"):
+                if url.startswith("//"):
+                    url = "https:" + url
                 else:
                     continue
 
-            results.append({
-                'title': title,
-                'url': url,
-                'snippet': snippet[:200] if snippet else "",
-            })
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet[:200] if snippet else "",
+                }
+            )
 
         return results
 
 
 # ==================== 智能搜索工具（自动选择引擎）====================
+
 
 class WebSearchTool(BaseTool):
     """
@@ -559,7 +583,11 @@ class WebSearchTool(BaseTool):
 
     name = "web_search"
     is_parallel_safe = True
-    description = "搜索网络获取最新信息。返回标题、URL 和摘要。搜索摘要通常已包含足够信息，直接基于摘要回答即可，无需额外调用 web_fetch。如需最新年份的数据，请在 query 中包含当前年份。回答时必须标注信息来源"
+    description = (
+        "搜索网络获取最新信息。返回标题、URL 和摘要。"
+        "搜索摘要通常已包含足够信息，直接基于摘要回答即可，无需额外调用 web_fetch。"
+        "如需最新年份的数据，请在 query 中包含当前年份。回答时必须标注信息来源"
+    )
     parameters = {
         "query": ToolParameter(
             type="string",
@@ -576,7 +604,9 @@ class WebSearchTool(BaseTool):
     def __init__(self, api_key: str | None = None, max_results: int = 5):
         self.api_key = api_key or os.environ.get("BRAVE_API_KEY", "")
         self.max_results = max_results
-        self._brave = BraveSearchTool(self.api_key) if _is_valid_brave_key(self.api_key) else None
+        self._brave = (
+            BraveSearchTool(self.api_key) if _is_valid_brave_key(self.api_key) else None
+        )
         self._sogou = SogouSearchTool()
         self._bing = BingSearchTool()
         self._duckduckgo = DuckDuckGoSearchTool()
@@ -585,15 +615,15 @@ class WebSearchTool(BaseTool):
         """执行 Web 搜索（智能选择引擎），兼容多种参数名"""
         # 兼容 LLM 可能使用的各种参数名
         query = (
-            kwargs.get("query") or
-            kwargs.get("q") or
-            kwargs.get("search") or
-            kwargs.get("keyword") or
-            kwargs.get("keywords") or
-            kwargs.get("search_term") or
-            kwargs.get("term") or
-            kwargs.get("question") or
-            ""
+            kwargs.get("query")
+            or kwargs.get("q")
+            or kwargs.get("search")
+            or kwargs.get("keyword")
+            or kwargs.get("keywords")
+            or kwargs.get("search_term")
+            or kwargs.get("term")
+            or kwargs.get("question")
+            or ""
         ).strip()
 
         # 如果所有别名都不匹配，尝试用 kwargs 中任意非空字符串值作为查询
@@ -603,10 +633,18 @@ class WebSearchTool(BaseTool):
                     continue
                 if val and isinstance(val, str) and val.strip():
                     query = val.strip()
-                    logger.info(f"[WebSearch] Using '{key}' as fallback query: {query[:50]}")
+                    logger.info(
+                        f"[WebSearch] Using '{key}' as fallback query: {query[:50]}"
+                    )
                     break
 
-        count = kwargs.get("count") or kwargs.get("n") or kwargs.get("num") or kwargs.get("limit") or 5
+        count = (
+            kwargs.get("count")
+            or kwargs.get("n")
+            or kwargs.get("num")
+            or kwargs.get("limit")
+            or 5
+        )
         if isinstance(count, str) and count.isdigit():
             count = int(count)
         elif not isinstance(count, int):
@@ -621,9 +659,9 @@ class WebSearchTool(BaseTool):
 
         # 清理搜索运算符（搜狗等引擎不支持 site:/OR 等高级语法）
         original_query = query
-        query = re.sub(r'\bOR\b', '', query)  # 移除 OR 运算符
-        query = re.sub(r'\bsite:\S+', '', query)  # 移除 site: 过滤
-        query = re.sub(r'\s{2,}', ' ', query).strip()  # 合并多余空格
+        query = re.sub(r"\bOR\b", "", query)  # 移除 OR 运算符
+        query = re.sub(r"\bsite:\S+", "", query)  # 移除 site: 过滤
+        query = re.sub(r"\s{2,}", " ", query).strip()  # 合并多余空格
         if query != original_query:
             logger.info(f"[WebSearch] Cleaned query: '{original_query}' -> '{query}'")
 
@@ -646,7 +684,7 @@ class WebSearchTool(BaseTool):
         logger.warning(f"Sogou failed or no results, falling back: {result[:100]}")
 
         # 检测中文查询也记录（搜狗已覆盖，但保留日志）
-        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', query))
+        bool(re.search(r"[\u4e00-\u9fff]", query))
 
         # 使用 Bing
         logger.info("Using Bing")
@@ -654,7 +692,9 @@ class WebSearchTool(BaseTool):
         if not result.startswith("错误") and not result.startswith("Bing 搜索"):
             if not result.startswith("未找到结果"):
                 return result
-        logger.warning(f"Bing failed or no results, falling back to DuckDuckGo: {result[:100]}")
+        logger.warning(
+            f"Bing failed or no results, falling back to DuckDuckGo: {result[:100]}"
+        )
 
         # 使用 DuckDuckGo
         logger.info("Using DuckDuckGo (last resort)")
@@ -663,12 +703,17 @@ class WebSearchTool(BaseTool):
 
 # ==================== Web 内容获取工具 ====================
 
+
 class WebFetchTool(BaseTool):
     """Web 内容获取工具（含安全防护 + 缓存）"""
 
     name = "web_fetch"
     is_parallel_safe = True
-    description = "获取指定网页内容并提取相关信息。仅在 web_search 摘要确实不足以回答问题时使用。需要提供 prompt 说明你想从页面中提取什么信息。注意：认证页面会失败；中国新闻/政府网站经常拦截"
+    description = (
+        "获取指定网页内容并提取相关信息。仅在 web_search 摘要确实不足以回答问题时使用。"
+        "需要提供 prompt 说明你想从页面中提取什么信息。"
+        "注意：认证页面会失败；中国新闻/政府网站经常拦截"
+    )
     parameters = {
         "url": ToolParameter(
             type="string",
@@ -701,12 +746,12 @@ class WebFetchTool(BaseTool):
     async def execute(self, **kwargs) -> str:
         """获取网页内容，兼容多种参数名"""
         url = (
-            kwargs.get("url") or
-            kwargs.get("link") or
-            kwargs.get("address") or
-            kwargs.get("href") or
-            kwargs.get("webpage") or
-            ""
+            kwargs.get("url")
+            or kwargs.get("link")
+            or kwargs.get("address")
+            or kwargs.get("href")
+            or kwargs.get("webpage")
+            or ""
         ).strip()
 
         # 如果所有别名都不匹配，尝试用 kwargs 中以 http 开头的值作为 URL
@@ -726,10 +771,17 @@ class WebFetchTool(BaseTool):
                     continue
                 if val and isinstance(val, str) and val.strip():
                     url = val.strip()
-                    logger.info(f"[WebFetch] Using '{key}' as fallback URL (non-http): {url[:80]}")
+                    logger.info(
+                        f"[WebFetch] Using '{key}' as fallback URL (non-http): {url[:80]}"
+                    )
                     break
 
-        max_chars = kwargs.get("max_chars") or kwargs.get("limit") or kwargs.get("max_length") or self.max_chars
+        max_chars = (
+            kwargs.get("max_chars")
+            or kwargs.get("limit")
+            or kwargs.get("max_length")
+            or self.max_chars
+        )
         if isinstance(max_chars, str) and max_chars.isdigit():
             max_chars = int(max_chars)
         elif not isinstance(max_chars, int):
@@ -765,14 +817,18 @@ class WebFetchTool(BaseTool):
             if "application/json" in ctype:
                 text = json.dumps(response.json(), indent=2, ensure_ascii=False)
             # HTML 响应
-            elif "text/html" in ctype or response.text[:256].strip().lower().startswith(("<!doctype", "<html")):
+            elif "text/html" in ctype or response.text[:256].strip().lower().startswith(
+                ("<!doctype", "<html")
+            ):
                 text = self._extract_text(response.text, url)
             else:
                 text = response.text
 
             # 如果提取结果太短（<100 字符），可能提取失败，返回更多原文
             if len(text.strip()) < 100:
-                logger.warning(f"[WebFetch] Extracted text too short ({len(text)} chars), returning raw text")
+                logger.warning(
+                    f"[WebFetch] Extracted text too short ({len(text)} chars), returning raw text"
+                )
                 # 回退：从全文提取
                 raw = _normalize(re.sub(r"<[^>]+>", " ", response.text))
                 raw = html.unescape(raw)
@@ -815,7 +871,7 @@ class WebFetchTool(BaseTool):
             # 微信公众号
             r'<div[^>]*id="js_content"[^>]*>([\s\S]*?)</div>',
             # HTML5 article
-            r'<article[^>]*>([\s\S]*?)</article>',
+            r"<article[^>]*>([\s\S]*?)</article>",
             # 常见文章容器 class
             r'<div[^>]*class="[^"]*article-content[^"]*"[^>]*>([\s\S]*?)</div>',
             r'<div[^>]*class="[^"]*article-body[^"]*"[^>]*>([\s\S]*?)</div>',
@@ -841,7 +897,7 @@ class WebFetchTool(BaseTool):
             r'<div[^>]*id="detail[^"]*"[^>]*>([\s\S]*?)</div>',
             r'<div[^>]*id="js_article[^"]*"[^>]*>([\s\S]*?)</div>',
             # 通用：section 标签
-            r'<section[^>]*>([\s\S]*?)</section>',
+            r"<section[^>]*>([\s\S]*?)</section>",
         ]
 
         for pattern in patterns:
@@ -851,7 +907,9 @@ class WebFetchTool(BaseTool):
                 # 至少 100 字符才算有效（比之前的 200 更宽松）
                 if len(re.sub(r"<[^>]+>", "", extracted).strip()) > 100:
                     content_html = extracted
-                    logger.info(f"[WebFetch] Found article content with pattern: {pattern[:60]}..., {len(content_html)} html chars")
+                    logger.info(
+                        f"[WebFetch] Found article content with pattern: {pattern[:60]}..., {len(content_html)} html chars"
+                    )
                     break
 
         # 如果没找到文章区域，用全文
@@ -869,38 +927,38 @@ class WebFetchTool(BaseTool):
 
         # 过滤微信/网页常见外壳文字和导航/页脚噪音
         junk_patterns = [
-            r'系统出错[，。\s]*',
-            r'视频\s*小程序\s*赞[，。\s]*',
-            r'轻点两下取消赞[，。\s]*',
-            r'在看[，。\s]*轻点两下取消在看[，。\s]*',
-            r'分享\s*留言\s*收藏\s*听过',
-            r'网页链接[：:]\s*\S*',
-            r'扫描二维码[，。\s]*',
-            r'关注公众号[，。\s]*',
-            r'阅读\s*\d+[，。\s]*',
-            r'投诉[，。\s]*',
-            r'写留言[，。\s]*',
-            r'Copyright\s*©.*?(?=\n|$)',
-            r'版权所有[，。：:\s]*\S*',
-            r'沪ICP备\S*',
-            r'京ICP备\S*',
-            r'粤ICP备\S*',
-            r'免责声明[：:]\s*\S*',
-            r'广告[：:\s]*',
-            r'点击上方\S*关注[，。\s]*',
-            r'点击蓝字\S*关注[，。\s]*',
-            r'↑?\s*点击\s*上方\s*\S*\s*关注\s*',
-            r'长按二维码\S*',
-            r'点击\s*上方\s*蓝字\s*关注',
-            r'收录于话题\S*',
-            r'阅读原文\s*$',
-            r'举报\s*$',
-            r'分享到\s*$',
-            r'赞\s*\d+\s*$',
-            r'在看\s*\d+\s*$',
+            r"系统出错[，。\s]*",
+            r"视频\s*小程序\s*赞[，。\s]*",
+            r"轻点两下取消赞[，。\s]*",
+            r"在看[，。\s]*轻点两下取消在看[，。\s]*",
+            r"分享\s*留言\s*收藏\s*听过",
+            r"网页链接[：:]\s*\S*",
+            r"扫描二维码[，。\s]*",
+            r"关注公众号[，。\s]*",
+            r"阅读\s*\d+[，。\s]*",
+            r"投诉[，。\s]*",
+            r"写留言[，。\s]*",
+            r"Copyright\s*©.*?(?=\n|$)",
+            r"版权所有[，。：:\s]*\S*",
+            r"沪ICP备\S*",
+            r"京ICP备\S*",
+            r"粤ICP备\S*",
+            r"免责声明[：:]\s*\S*",
+            r"广告[：:\s]*",
+            r"点击上方\S*关注[，。\s]*",
+            r"点击蓝字\S*关注[，。\s]*",
+            r"↑?\s*点击\s*上方\s*\S*\s*关注\s*",
+            r"长按二维码\S*",
+            r"点击\s*上方\s*蓝字\s*关注",
+            r"收录于话题\S*",
+            r"阅读原文\s*$",
+            r"举报\s*$",
+            r"分享到\s*$",
+            r"赞\s*\d+\s*$",
+            r"在看\s*\d+\s*$",
         ]
         for pat in junk_patterns:
-            text = re.sub(pat, '', text, flags=re.MULTILINE)
+            text = re.sub(pat, "", text, flags=re.MULTILINE)
 
         # 清理过多空行
         text = re.sub(r"\n{4,}", "\n\n\n", text)

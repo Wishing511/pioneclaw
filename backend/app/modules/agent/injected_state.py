@@ -23,12 +23,19 @@ Injected State 工具状态注入系统
 import asyncio
 import inspect
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, get_origin, get_args
+from typing import (
+    Any,
+    Generic,
+    TypeVar,
+    get_args,
+    get_origin,
+)
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class Injected(Generic[T]):
@@ -47,6 +54,7 @@ class Injected(Generic[T]):
         ) -> str:
             return f"Searching in session {session_id}: {query}"
     """
+
     pass
 
 
@@ -61,12 +69,14 @@ def is_injected_type(param_type: Any) -> bool:
             return False
     # 检查 origin 是否是 Injected
     try:
-        return origin is Injected or (isinstance(origin, type) and issubclass(origin, Injected))
+        return origin is Injected or (
+            isinstance(origin, type) and issubclass(origin, Injected)
+        )
     except TypeError:
         return False
 
 
-def get_injected_inner_type(param_type: Any) -> Optional[type]:
+def get_injected_inner_type(param_type: Any) -> type | None:
     """获取 Injected[T] 中的 T 类型"""
     args = get_args(param_type)
     if args:
@@ -80,38 +90,36 @@ class AgentState:
 
     借鉴 PraisonAI AgentState
     """
+
     agent_id: str
     agent_name: str
-    session_id: Optional[str] = None
-    user_id: Optional[int] = None
-    conversation_id: Optional[str] = None
+    session_id: str | None = None
+    user_id: int | None = None
+    conversation_id: str | None = None
 
     # 对话信息
-    last_user_message: Optional[str] = None
-    last_assistant_message: Optional[str] = None
+    last_user_message: str | None = None
+    last_assistant_message: str | None = None
     message_count: int = 0
 
     # 工具调用历史
-    tool_history: List[Dict[str, Any]] = field(default_factory=list)
+    tool_history: list[dict[str, Any]] = field(default_factory=list)
     tool_call_count: int = 0
 
     # 记忆引用
-    memory: Optional[Any] = None  # MemoryStore 或类似对象
+    memory: Any | None = None  # MemoryStore 或类似对象
 
     # 上下文信息
-    context: Optional[Dict[str, Any]] = None
+    context: dict[str, Any] | None = None
 
     # 自定义元数据
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def get_tool_history_by_name(self, tool_name: str) -> List[Dict[str, Any]]:
+    def get_tool_history_by_name(self, tool_name: str) -> list[dict[str, Any]]:
         """获取指定工具的调用历史"""
-        return [
-            h for h in self.tool_history
-            if h.get("tool_name") == tool_name
-        ]
+        return [h for h in self.tool_history if h.get("tool_name") == tool_name]
 
-    def get_last_tool_result(self, tool_name: Optional[str] = None) -> Optional[Any]:
+    def get_last_tool_result(self, tool_name: str | None = None) -> Any | None:
         """获取最后一次工具调用结果"""
         if not self.tool_history:
             return None
@@ -122,7 +130,7 @@ class AgentState:
             return None
         return self.tool_history[-1].get("result")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "agent_id": self.agent_id,
@@ -144,12 +152,13 @@ class InjectedContext:
 
     存储当前 Agent 状态，用于工具执行时注入
     """
+
     state: AgentState
-    tools_registry: Optional[Any] = None
-    provider: Optional[Any] = None
+    tools_registry: Any | None = None
+    provider: Any | None = None
 
     # 额外注入对象
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:
         """从 extra 中获取值"""
@@ -167,7 +176,7 @@ class StateInjector:
     """
 
     def __init__(self):
-        self._current_context: Optional[InjectedContext] = None
+        self._current_context: InjectedContext | None = None
 
     def set_context(self, context: InjectedContext) -> None:
         """设置当前注入上下文"""
@@ -177,11 +186,11 @@ class StateInjector:
         """清除当前上下文"""
         self._current_context = None
 
-    def get_context(self) -> Optional[InjectedContext]:
+    def get_context(self) -> InjectedContext | None:
         """获取当前上下文"""
         return self._current_context
 
-    def get_state(self) -> Optional[AgentState]:
+    def get_state(self) -> AgentState | None:
         """获取当前 Agent 状态"""
         if self._current_context:
             return self._current_context.state
@@ -190,8 +199,8 @@ class StateInjector:
     def inject_into_args(
         self,
         tool_func: Callable,
-        args: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
         """注入状态到工具参数
 
         扫描工具函数的参数，找出 Injected[T] 类型的参数，
@@ -233,7 +242,7 @@ class StateInjector:
 
     def _resolve_injection(
         self,
-        inner_type: Optional[type],
+        inner_type: type | None,
         param_name: str,
     ) -> Any:
         """解析注入值"""
@@ -269,12 +278,16 @@ class StateInjector:
                 return state.tool_call_count
 
         # list 类型
-        if inner_type is list or (hasattr(inner_type, '__origin__') and inner_type.__origin__ is list):
+        if inner_type is list or (
+            hasattr(inner_type, "__origin__") and inner_type.__origin__ is list
+        ):
             if param_name == "tool_history":
                 return state.tool_history
 
         # dict 类型
-        if inner_type is dict or (hasattr(inner_type, '__origin__') and inner_type.__origin__ is dict):
+        if inner_type is dict or (
+            hasattr(inner_type, "__origin__") and inner_type.__origin__ is dict
+        ):
             if param_name == "metadata":
                 return state.metadata
             elif param_name == "context":
@@ -292,6 +305,7 @@ class StateInjector:
         Returns:
             Callable: 包装后的函数
         """
+
         def wrapper(**kwargs):
             # 注入状态
             injected_kwargs = self.inject_into_args(tool_func, kwargs)
@@ -312,7 +326,7 @@ class StateInjector:
 
         return wrapper
 
-    def filter_schema_for_llm(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+    def filter_schema_for_llm(self, schema: dict[str, Any]) -> dict[str, Any]:
         """过滤 schema，移除 Injected 参数
 
         Injected 参数不应该出现在 LLM 可见的 schema 中
@@ -350,7 +364,7 @@ class StateInjector:
 
 
 # 全局注入器实例
-_global_injector: Optional[StateInjector] = None
+_global_injector: StateInjector | None = None
 
 
 def get_state_injector() -> StateInjector:
@@ -368,6 +382,7 @@ def reset_state_injector() -> None:
 
 
 # ==================== 装饰器 ====================
+
 
 def injectable(func: Callable) -> Callable:
     """标记函数为可注入
@@ -394,6 +409,7 @@ def with_state(**injections: Any) -> Callable:
         def my_tool(query: str, session_id: Injected[str]) -> str:
             return f"Session: {session_id}, Query: {query}"
     """
+
     def decorator(func: Callable) -> Callable:
         def wrapper(**kwargs):
             # 合并注入值
@@ -412,10 +428,11 @@ def with_state(**injections: Any) -> Callable:
 
 # ==================== 工具 Schema 辅助 ====================
 
+
 def mark_injected_in_schema(
-    schema: Dict[str, Any],
-    injected_params: List[str],
-) -> Dict[str, Any]:
+    schema: dict[str, Any],
+    injected_params: list[str],
+) -> dict[str, Any]:
     """在 schema 中标记 Injected 参数
 
     Args:

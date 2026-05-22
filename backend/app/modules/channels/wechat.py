@@ -9,12 +9,8 @@
 文档：https://developers.weixin.qq.com/doc/offiaccount/
 """
 
-import asyncio
-import json
 import logging
 import time
-import hashlib
-from typing import Optional
 from xml.etree import ElementTree
 
 import httpx
@@ -26,7 +22,6 @@ from .base import (
     ChannelStatus,
     ChannelType,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +35,11 @@ class WeChatChannel(BaseChannel):
         super().__init__(config)
         self.app_id = config.app_id
         self.app_secret = config.app_secret
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_expire: float = 0
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(self) -> str | None:
         """获取 access_token"""
         if self._access_token and time.time() < self._token_expire - 60:
             return self._access_token
@@ -65,7 +60,9 @@ class WeChatChannel(BaseChannel):
                 self._token_expire = time.time() + data.get("expires_in", 7200)
                 return self._access_token
             else:
-                logger.error(f"[{self.channel_id}] Get token failed: {data.get('errmsg')}")
+                logger.error(
+                    f"[{self.channel_id}] Get token failed: {data.get('errmsg')}"
+                )
                 return None
 
         except Exception as e:
@@ -115,7 +112,7 @@ class WeChatChannel(BaseChannel):
         chat_id: str,
         content: str,
         **kwargs,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """发送客服消息"""
         if not self._client or self.status != ChannelStatus.CONNECTED:
             return False, "Channel not connected"
@@ -136,11 +133,13 @@ class WeChatChannel(BaseChannel):
                 body["text"] = {"content": content}
             elif msg_type == "news":
                 body["news"] = {
-                    "articles": [{
-                        "title": kwargs.get("title", ""),
-                        "description": content[:120],
-                        "url": kwargs.get("url", ""),
-                    }]
+                    "articles": [
+                        {
+                            "title": kwargs.get("title", ""),
+                            "description": content[:120],
+                            "url": kwargs.get("url", ""),
+                        }
+                    ]
                 }
             else:
                 body["text"] = {"content": content}
@@ -165,16 +164,16 @@ class WeChatChannel(BaseChannel):
         """微信不支持输入状态"""
         pass
 
-    def parse_xml_message(self, xml_data: str) -> Optional[ChannelMessage]:
+    def parse_xml_message(self, xml_data: str) -> ChannelMessage | None:
         """解析微信 XML 消息格式"""
         try:
             root = ElementTree.fromstring(xml_data)
 
             msg_type = root.findtext("MsgType", "text")
             from_user = root.findtext("FromUserName", "")
-            to_user = root.findtext("ToUserName", "")
+            root.findtext("ToUserName", "")
             msg_id = root.findtext("MsgId", "")
-            create_time = root.findtext("CreateTime", "0")
+            root.findtext("CreateTime", "0")
 
             content = ""
             content_type = "text"
@@ -211,7 +210,7 @@ class WeChatChannel(BaseChannel):
             logger.error(f"[{self.channel_id}] Parse XML failed: {e}")
             return None
 
-    async def handle_webhook(self, xml_data: str) -> Optional[str]:
+    async def handle_webhook(self, xml_data: str) -> str | None:
         """处理 Webhook 消息，返回自动回复（如有）"""
         message = self.parse_xml_message(xml_data)
         if message:
@@ -220,5 +219,6 @@ class WeChatChannel(BaseChannel):
 
 
 # 注册适配器
-from .manager import register_channel
+from .manager import register_channel  # noqa: E402
+
 register_channel(ChannelType.WECHAT, WeChatChannel)

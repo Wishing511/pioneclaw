@@ -3,14 +3,14 @@ Bash 命令安全分析测试
 
 借鉴 claw-code BashTool 多层安全检查管线测试场景
 """
+
 import pytest
+
 from app.core.bash_safety import (
-    DangerLevel,
-    DangerRule,
-    CommandSafetyPolicy,
-    CommandAssessment,
     CommandBlockedError,
     CommandConfirmationRequired,
+    CommandSafetyPolicy,
+    DangerLevel,
     analyze_command,
     validate_command,
     validate_command_or_none,
@@ -28,8 +28,12 @@ class TestDangerLevel:
 
     def test_level_ordering(self):
         """BLOCKED > DANGEROUS > CAUTION > SAFE"""
-        order = {DangerLevel.BLOCKED: 0, DangerLevel.DANGEROUS: 1,
-                 DangerLevel.CAUTION: 2, DangerLevel.SAFE: 3}
+        order = {
+            DangerLevel.BLOCKED: 0,
+            DangerLevel.DANGEROUS: 1,
+            DangerLevel.CAUTION: 2,
+            DangerLevel.SAFE: 3,
+        }
         assert order[DangerLevel.BLOCKED] < order[DangerLevel.DANGEROUS]
         assert order[DangerLevel.DANGEROUS] < order[DangerLevel.CAUTION]
         assert order[DangerLevel.CAUTION] < order[DangerLevel.SAFE]

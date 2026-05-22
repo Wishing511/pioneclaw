@@ -12,26 +12,25 @@ Plan Mode 工具和状态管理
 
 import os
 import re
-import json
 from datetime import datetime
-from typing import Optional, Set
 
 from app.modules.tools.base import BaseTool, ToolParameter
 
 # ── Plan Mode 状态 ──────────────────────────────────────────────
 _plan_mode_active: bool = False
 _plan_content: str = ""  # 当前累积的计划内容
-_plan_session_start: Optional[str] = None  # 进入 plan mode 的时间戳
+_plan_session_start: str | None = None  # 进入 plan mode 的时间戳
 
 # Plan 文件存储目录
 _PLANS_DIR = os.path.join(os.getcwd(), ".claude", "plans")
 
 
-def _get_plan_mode_allowed_set() -> Set[str]:
+def _get_plan_mode_allowed_set() -> set[str]:
     """从 pool_filter PLAN 预设动态获取 plan mode 允许的工具"""
     try:
         from app.modules.tools.pool_filter import ToolPoolMode, get_pool_tool_policy
         from app.modules.tools.registry import get_tool_registry
+
         policy = get_pool_tool_policy(ToolPoolMode.PLAN)
         all_tools = get_tool_registry().list_tools()
         allowed = set(policy.get_allowed_tools(all_tools))
@@ -41,14 +40,24 @@ def _get_plan_mode_allowed_set() -> Set[str]:
         pass
     # 回退硬编码列表（避免循环导入、工具未注册等情况）
     return {
-        "read_file", "grep", "file_search", "list_dir",
-        "web_search", "web_fetch", "current_time", "calculator",
-        "ask_user_question", "exit_plan_mode", "image",
-        "knowledge_search", "vector_memory_recall", "file_memory_read",
+        "read_file",
+        "grep",
+        "file_search",
+        "list_dir",
+        "web_search",
+        "web_fetch",
+        "current_time",
+        "calculator",
+        "ask_user_question",
+        "exit_plan_mode",
+        "image",
+        "knowledge_search",
+        "vector_memory_recall",
+        "file_memory_read",
     }
 
 
-def get_plan_mode_allowed_tools() -> Set[str]:
+def get_plan_mode_allowed_tools() -> set[str]:
     """获取 plan mode 允许的工具（延迟计算，每次调用时刷新）
 
     优先从 pool preset 动态计算，回退到硬编码列表。
@@ -59,7 +68,9 @@ def get_plan_mode_allowed_tools() -> Set[str]:
 # Plan mode 下允许的只读工具
 # 延迟初始化：首次访问时从 pool preset 加载
 # 使用函数而非模块级变量，确保工具注册后调用
-PLAN_MODE_ALLOWED_TOOLS: Set[str] = set()  # 初始为空，由 get_plan_mode_allowed_tools() 动态获取
+PLAN_MODE_ALLOWED_TOOLS: set[str] = (
+    set()
+)  # 初始为空，由 get_plan_mode_allowed_tools() 动态获取
 
 
 def is_plan_mode_active() -> bool:
@@ -105,7 +116,9 @@ def exit_plan_mode(plan_text: str) -> str:
 
     # 验证计划非空
     if not plan_text or not plan_text.strip():
-        raise ValueError("计划内容不能为空。请写一个包含 Context、改动方案、验证方法的完整计划。")
+        raise ValueError(
+            "计划内容不能为空。请写一个包含 Context、改动方案、验证方法的完整计划。"
+        )
 
     # 验证最小长度
     stripped = plan_text.strip()
@@ -125,10 +138,10 @@ def exit_plan_mode(plan_text: str) -> str:
     # 写入 plan 文件（frontmatter + 内容）
     timestamp = datetime.now().isoformat()
     with open(plan_path, "w", encoding="utf-8") as f:
-        f.write(f"---\n")
+        f.write("---\n")
         f.write(f"created: {timestamp}\n")
         f.write(f"plan_started: {_plan_session_start or timestamp}\n")
-        f.write(f"---\n\n")
+        f.write("---\n\n")
         f.write(stripped)
 
     # 清除状态
@@ -178,6 +191,7 @@ def _generate_slug(text: str, max_length: int = 50) -> str:
 # ═══════════════════════════════════════════════════════════════
 # 工具类
 # ═══════════════════════════════════════════════════════════════
+
 
 class EnterPlanModeTool(BaseTool):
     """进入计划模式 — Agent 只能使用只读工具探索代码库"""

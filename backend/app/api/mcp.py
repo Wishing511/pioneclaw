@@ -5,16 +5,18 @@ MCP 服务器配置与管理 API
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.api.auth import get_current_active_user
-from app.models.models import User, MCPServerConfig
+from app.core.database import get_db
+from app.models.models import MCPServerConfig, User
 from app.schemas.schemas import (
-    MCPServerConfigCreate, MCPServerConfigUpdate, MCPServerConfigResponse,
-    MCPConnectionStatus, MessageResponse,
+    MCPConnectionStatus,
+    MCPServerConfigCreate,
+    MCPServerConfigResponse,
+    MCPServerConfigUpdate,
+    MessageResponse,
 )
 
 router = APIRouter(prefix="/mcp", tags=["MCP"])
@@ -63,7 +65,7 @@ def _config_to_response(config: MCPServerConfig) -> MCPServerConfigResponse:
 # ── 端点 ──────────────────────────────────────────────────────
 
 
-@router.get("/servers", response_model=List[MCPServerConfigResponse])
+@router.get("/servers", response_model=list[MCPServerConfigResponse])
 async def list_mcp_servers(
     skip: int = 0,
     limit: int = 50,
@@ -72,13 +74,20 @@ async def list_mcp_servers(
 ):
     """列出所有已配置的 MCP 服务器"""
     result = await db.execute(
-        select(MCPServerConfig).order_by(MCPServerConfig.created_at.desc()).offset(skip).limit(limit)
+        select(MCPServerConfig)
+        .order_by(MCPServerConfig.created_at.desc())
+        .offset(skip)
+        .limit(limit)
     )
     configs = result.scalars().all()
     return [_config_to_response(c) for c in configs]
 
 
-@router.post("/servers", response_model=MCPServerConfigResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/servers",
+    response_model=MCPServerConfigResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_mcp_server(
     config_data: MCPServerConfigCreate,
     db: AsyncSession = Depends(get_db),
@@ -162,6 +171,7 @@ async def update_mcp_server(
         await _register_to_tool_registry(config)
     else:
         from app.modules.tools.mcp_client import get_mcp_registry
+
         get_mcp_registry().unregister_server(config.name)
 
     return _config_to_response(config)
@@ -183,6 +193,7 @@ async def delete_mcp_server(
 
     # 从运行时注册表移除
     from app.modules.tools.mcp_client import get_mcp_registry
+
     get_mcp_registry().unregister_server(config.name)
 
     await db.delete(config)
@@ -209,6 +220,7 @@ async def connect_mcp_server(
 
     # 连接
     from app.modules.tools.mcp_client import get_mcp_registry
+
     registry = get_mcp_registry()
     conn = await registry.connect_server(config.name)
 
@@ -237,6 +249,7 @@ async def list_mcp_server_tools(
         raise HTTPException(status_code=404, detail="MCP 服务器配置不存在")
 
     from app.modules.tools.mcp_client import get_mcp_registry
+
     registry = get_mcp_registry()
     tools = await registry.list_tools(config.name)
     return {"server": config.name, "tools": tools, "count": len(tools)}
@@ -257,6 +270,7 @@ async def list_mcp_server_resources(
         raise HTTPException(status_code=404, detail="MCP 服务器配置不存在")
 
     from app.modules.tools.mcp_client import get_mcp_registry
+
     registry = get_mcp_registry()
     resources = await registry.list_resources(config.name)
     return resources
@@ -268,29 +282,32 @@ async def mcp_overall_status(
     current_user: User = Depends(get_current_active_user),
 ):
     """获取所有 MCP 服务器的总体状态"""
-    result = await db.execute(
-        select(MCPServerConfig).order_by(MCPServerConfig.name)
-    )
+    result = await db.execute(select(MCPServerConfig).order_by(MCPServerConfig.name))
     configs = result.scalars().all()
 
     from app.modules.tools.mcp_client import get_mcp_registry
+
     registry = get_mcp_registry()
 
     servers_status = []
     for c in configs:
         conn = registry.get_server(c.name)
-        servers_status.append({
-            "id": c.id,
-            "name": c.name,
-            "transport": c.transport,
-            "is_enabled": c.is_enabled,
-            "connection_status": conn.status if conn else "disconnected",
-            "tool_count": len(conn.tools) if conn else 0,
-            "resource_count": len(conn.resources) if conn else 0,
-        })
+        servers_status.append(
+            {
+                "id": c.id,
+                "name": c.name,
+                "transport": c.transport,
+                "is_enabled": c.is_enabled,
+                "connection_status": conn.status if conn else "disconnected",
+                "tool_count": len(conn.tools) if conn else 0,
+                "resource_count": len(conn.resources) if conn else 0,
+            }
+        )
 
     return {
         "total": len(servers_status),
-        "connected": sum(1 for s in servers_status if s["connection_status"] == "connected"),
+        "connected": sum(
+            1 for s in servers_status if s["connection_status"] == "connected"
+        ),
         "servers": servers_status,
     }

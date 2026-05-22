@@ -6,7 +6,7 @@ PioneClawPlugin 基类 + plugin_metadata 装饰器
 第三方插件开发者继承 PioneClawPlugin 并覆写生命周期钩子。
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .event_types import PluginEvent
 
@@ -32,7 +32,7 @@ class PioneClawPlugin:
     plugin_name: str = ""
     version: str = "1.0.0"
     description: str = ""
-    dependencies: List[str] = []
+    dependencies: list[str] = []
 
     # 生命周期钩子（子类覆写）
     async def on_load(self) -> None:
@@ -52,7 +52,7 @@ class PioneClawPlugin:
         """接收所有事件"""
         pass
 
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> dict[str, Any]:
         """获取插件信息"""
         return {
             "plugin_id": self.plugin_id,
@@ -79,6 +79,7 @@ def plugin_metadata(
         class MyPlugin(PioneClawPlugin):
             ...
     """
+
     def decorator(cls):
         cls.plugin_id = id
         cls.plugin_name = name
@@ -87,4 +88,5 @@ def plugin_metadata(
         for k, v in kwargs.items():
             setattr(cls, k, v)
         return cls
+
     return decorator

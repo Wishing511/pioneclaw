@@ -3,37 +3,50 @@
 
 覆盖：TierManager, RetrievalEngine, RerankModule, IntentAnalyzer, MemoryOrchestrator
 """
-import pytest
+
 import os
 import tempfile
 import uuid
 from datetime import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import Base
-from app.models import User, UserRole
-from app.models.layered_memory import LayeredMemory, MemoryLayer
 from app.core.security import get_password_hash
-from app.modules.agent.layered_memory.tier_manager import TierManager
-from app.modules.agent.layered_memory.retrieval_engine import RetrievalEngine, RetrievalResult
-from app.modules.agent.layered_memory.rerank_module import RerankModule, RerankConfig
-from app.modules.agent.layered_memory.intent_analyzer import IntentAnalyzer, IntentResult
+from app.models import User, UserRole
+from app.models.layered_memory import MemoryLayer
+from app.modules.agent.layered_memory.intent_analyzer import (
+    IntentAnalyzer,
+)
 from app.modules.agent.layered_memory.memory_orchestrator import MemoryOrchestrator
+from app.modules.agent.layered_memory.rerank_module import RerankConfig, RerankModule
+from app.modules.agent.layered_memory.retrieval_engine import (
+    RetrievalEngine,
+    RetrievalResult,
+)
+from app.modules.agent.layered_memory.tier_manager import TierManager
 
 
 @pytest.fixture
 async def service_db():
     """创建测试数据库"""
-    db_file = os.path.join(tempfile.gettempdir(), f"pioneclaw_lm_test_{uuid.uuid4().hex}.db")
+    db_file = os.path.join(
+        tempfile.gettempdir(), f"pioneclaw_lm_test_{uuid.uuid4().hex}.db"
+    )
     db_url = f"sqlite+aiosqlite:///{db_file}"
-    engine = create_async_engine(db_url, connect_args={"check_same_thread": False}, echo=False)
+    engine = create_async_engine(
+        db_url, connect_args={"check_same_thread": False}, echo=False
+    )
 
     import app.models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    session_maker = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with session_maker() as session:
         yield session
 
@@ -63,9 +76,12 @@ async def test_user_id(service_db: AsyncSession) -> int:
 
 # ==================== TierManager ====================
 
+
 class TestTierManager:
     @pytest.mark.asyncio
-    async def test_store_creates_l2_with_l0_l1(self, service_db: AsyncSession, test_user_id: int):
+    async def test_store_creates_l2_with_l0_l1(
+        self, service_db: AsyncSession, test_user_id: int
+    ):
         tm = TierManager(service_db, llm_caller=None)
         l2 = await tm.store(
             content="这是测试内容，用于验证 L0/L1/L2 自动生成",
@@ -105,7 +121,9 @@ class TestTierManager:
         assert result.overview is not None
 
     @pytest.mark.asyncio
-    async def test_update_content_regenerates_tiers(self, service_db: AsyncSession, test_user_id: int):
+    async def test_update_content_regenerates_tiers(
+        self, service_db: AsyncSession, test_user_id: int
+    ):
         tm = TierManager(service_db, llm_caller=None)
         l2 = await tm.store(
             content="原始内容",
@@ -114,7 +132,6 @@ class TestTierManager:
         )
         await service_db.commit()
 
-        old_abstract = l2.abstract
         updated = await tm.update_content(l2.uri, "这是更新后的内容，需要重新生成摘要")
         await service_db.commit()
 
@@ -124,7 +141,9 @@ class TestTierManager:
         assert updated.abstract is not None
 
     @pytest.mark.asyncio
-    async def test_delete_memory_tree(self, service_db: AsyncSession, test_user_id: int):
+    async def test_delete_memory_tree(
+        self, service_db: AsyncSession, test_user_id: int
+    ):
         tm = TierManager(service_db, llm_caller=None)
         l2 = await tm.store(
             content="待删除内容",
@@ -195,7 +214,9 @@ class TestTierManager:
         assert l0 is not None
 
     @pytest.mark.asyncio
-    async def test_access_count_increments(self, service_db: AsyncSession, test_user_id: int):
+    async def test_access_count_increments(
+        self, service_db: AsyncSession, test_user_id: int
+    ):
         tm = TierManager(service_db, llm_caller=None)
         l2 = await tm.store(
             content="访问计数测试",
@@ -215,6 +236,7 @@ class TestTierManager:
 
 
 # ==================== RetrievalEngine ====================
+
 
 class TestRetrievalEngine:
     @pytest.mark.asyncio
@@ -250,7 +272,9 @@ class TestRetrievalEngine:
         assert len(results) == 0
 
     @pytest.mark.asyncio
-    async def test_hierarchical_expansion(self, service_db: AsyncSession, test_user_id: int):
+    async def test_hierarchical_expansion(
+        self, service_db: AsyncSession, test_user_id: int
+    ):
         tm = TierManager(service_db, llm_caller=None)
         await tm.store(
             content="层级扩展测试内容",
@@ -261,26 +285,34 @@ class TestRetrievalEngine:
 
         re = RetrievalEngine(service_db, vector_store=None)
         # 构造一个候选结果，触发层级扩展
-        candidates = [RetrievalResult(
-            uri="viking://test/.level_1",
-            name="扩展测试",
-            layer=1,
-            context_type="memory",
-            text="测试",
-            score=0.8,
-            parent_uri=None,
-        )]
+        candidates = [
+            RetrievalResult(
+                uri="viking://test/.level_1",
+                name="扩展测试",
+                layer=1,
+                context_type="memory",
+                text="测试",
+                score=0.8,
+                parent_uri=None,
+            )
+        ]
         expanded = await re._hierarchical_expansion(candidates)
         # 即使没有 parent，也不应报错
         assert len(expanded) >= 1
 
     @pytest.mark.asyncio
     async def test_retrieve_dedup(self, service_db: AsyncSession, test_user_id: int):
-        re = RetrievalEngine(service_db, vector_store=None)
+        RetrievalEngine(service_db, vector_store=None)
         # 直接构造重复结果
-        r1 = RetrievalResult(uri="a", name="a", layer=2, context_type="memory", text="a", score=0.9)
-        r2 = RetrievalResult(uri="a", name="a", layer=2, context_type="memory", text="a", score=0.8)
-        r3 = RetrievalResult(uri="b", name="b", layer=2, context_type="memory", text="b", score=0.7)
+        r1 = RetrievalResult(
+            uri="a", name="a", layer=2, context_type="memory", text="a", score=0.9
+        )
+        r2 = RetrievalResult(
+            uri="a", name="a", layer=2, context_type="memory", text="a", score=0.8
+        )
+        r3 = RetrievalResult(
+            uri="b", name="b", layer=2, context_type="memory", text="b", score=0.7
+        )
 
         # 使用内部去重逻辑（在 retrieve 方法中）
         # 此处验证排序逻辑
@@ -290,12 +322,31 @@ class TestRetrievalEngine:
 
 # ==================== RerankModule ====================
 
+
 class TestRerankModule:
     def test_rerank_basic(self):
         rm = RerankModule()
         results = [
-            RetrievalResult(uri="a", name="a", layer=2, context_type="memory", text="a", score=0.5, access_count=0, updated_at=datetime.now().isoformat()),
-            RetrievalResult(uri="b", name="b", layer=1, context_type="memory", text="b", score=0.9, access_count=10, updated_at=datetime.now().isoformat()),
+            RetrievalResult(
+                uri="a",
+                name="a",
+                layer=2,
+                context_type="memory",
+                text="a",
+                score=0.5,
+                access_count=0,
+                updated_at=datetime.now().isoformat(),
+            ),
+            RetrievalResult(
+                uri="b",
+                name="b",
+                layer=1,
+                context_type="memory",
+                text="b",
+                score=0.9,
+                access_count=10,
+                updated_at=datetime.now().isoformat(),
+            ),
         ]
         reranked = rm.rerank(results, query_context_type="memory")
         assert len(reranked) == 2
@@ -344,7 +395,9 @@ class TestRerankModule:
 
     def test_explain_ranking(self):
         rm = RerankModule()
-        result = RetrievalResult(uri="a", name="a", layer=1, context_type="memory", text="a", score=0.8)
+        result = RetrievalResult(
+            uri="a", name="a", layer=1, context_type="memory", text="a", score=0.8
+        )
         explanation = rm.explain_ranking(result, query_context_type="memory")
         assert "semantic" in explanation
         assert "hotness" in explanation
@@ -354,11 +407,23 @@ class TestRerankModule:
         assert "combined" in explanation
 
     def test_custom_weights(self):
-        config = RerankConfig(weights={"semantic": 1.0, "hotness": 0.0, "recency": 0.0, "level": 0.0, "type_match": 0.0})
+        config = RerankConfig(
+            weights={
+                "semantic": 1.0,
+                "hotness": 0.0,
+                "recency": 0.0,
+                "level": 0.0,
+                "type_match": 0.0,
+            }
+        )
         rm = RerankModule(config)
         results = [
-            RetrievalResult(uri="a", name="a", layer=2, context_type="memory", text="a", score=0.5),
-            RetrievalResult(uri="b", name="b", layer=1, context_type="memory", text="b", score=0.9),
+            RetrievalResult(
+                uri="a", name="a", layer=2, context_type="memory", text="a", score=0.5
+            ),
+            RetrievalResult(
+                uri="b", name="b", layer=1, context_type="memory", text="b", score=0.9
+            ),
         ]
         reranked = rm.rerank(results)
         # 仅语义权重，b 应排第一
@@ -370,6 +435,7 @@ class TestRerankModule:
 
 
 # ==================== IntentAnalyzer ====================
+
 
 class TestIntentAnalyzer:
     @pytest.mark.asyncio
@@ -422,6 +488,7 @@ class TestIntentAnalyzer:
 
 
 # ==================== MemoryOrchestrator ====================
+
 
 class TestMemoryOrchestrator:
     @pytest.mark.asyncio
@@ -495,8 +562,18 @@ class TestMemoryOrchestrator:
     async def test_list_memories(self, service_db: AsyncSession, test_user_id: int):
         mo = MemoryOrchestrator(service_db, vector_store=None, llm_caller=None)
 
-        await mo.store(content="列表1", name="列表测试1", user_id=test_user_id, generate_vector=False)
-        await mo.store(content="列表2", name="列表测试2", user_id=test_user_id, generate_vector=False)
+        await mo.store(
+            content="列表1",
+            name="列表测试1",
+            user_id=test_user_id,
+            generate_vector=False,
+        )
+        await mo.store(
+            content="列表2",
+            name="列表测试2",
+            user_id=test_user_id,
+            generate_vector=False,
+        )
         await service_db.commit()
 
         result = await mo.list_memories(user_id=test_user_id)
@@ -507,7 +584,12 @@ class TestMemoryOrchestrator:
     async def test_stats(self, service_db: AsyncSession, test_user_id: int):
         mo = MemoryOrchestrator(service_db, vector_store=None, llm_caller=None)
 
-        await mo.store(content="统计1", name="统计测试1", user_id=test_user_id, generate_vector=False)
+        await mo.store(
+            content="统计1",
+            name="统计测试1",
+            user_id=test_user_id,
+            generate_vector=False,
+        )
         await service_db.commit()
 
         stats = await mo.stats(user_id=test_user_id)
@@ -547,11 +629,18 @@ class TestMemoryOrchestrator:
         assert count == 1  # 一个 L0
 
     @pytest.mark.asyncio
-    async def test_list_with_pagination(self, service_db: AsyncSession, test_user_id: int):
+    async def test_list_with_pagination(
+        self, service_db: AsyncSession, test_user_id: int
+    ):
         mo = MemoryOrchestrator(service_db, vector_store=None, llm_caller=None)
 
         for i in range(5):
-            await mo.store(content=f"分页{i}", name=f"分页测试{i}", user_id=test_user_id, generate_vector=False)
+            await mo.store(
+                content=f"分页{i}",
+                name=f"分页测试{i}",
+                user_id=test_user_id,
+                generate_vector=False,
+            )
         await service_db.commit()
 
         result = await mo.list_memories(user_id=test_user_id, page=1, page_size=2)
@@ -562,7 +651,12 @@ class TestMemoryOrchestrator:
     async def test_list_with_keyword(self, service_db: AsyncSession, test_user_id: int):
         mo = MemoryOrchestrator(service_db, vector_store=None, llm_caller=None)
 
-        await mo.store(content="关键词搜索测试内容", name="关键词测试", user_id=test_user_id, generate_vector=False)
+        await mo.store(
+            content="关键词搜索测试内容",
+            name="关键词测试",
+            user_id=test_user_id,
+            generate_vector=False,
+        )
         await service_db.commit()
 
         result = await mo.list_memories(user_id=test_user_id, keyword="关键词")

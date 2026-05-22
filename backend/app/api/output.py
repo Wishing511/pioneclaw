@@ -4,14 +4,12 @@
 提供图片生成的 REST API 端点。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
-from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
-from typing import Optional
 import base64
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from pydantic import BaseModel
+
 from app.api.auth import get_current_active_user
 from app.models import User
 from app.modules.output import ImageGenerator
@@ -24,25 +22,28 @@ router = APIRouter(prefix="/output", tags=["多模态输出"])
 # 图片生成 API
 # ------------------------------------------------------------------
 
+
 class ImageGenerateRequest(BaseModel):
     """图片生成请求"""
+
     prompt: str
     size: str = "1024x1024"
     quality: str = "standard"
     provider: str = "openai"
-    model: Optional[str] = None
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
-    group_id: Optional[str] = None  # MiniMax 需要
+    model: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    group_id: str | None = None  # MiniMax 需要
 
 
 class ImageGenerateResponse(BaseModel):
     """图片生成响应"""
+
     success: bool
-    image_url: Optional[str] = None
-    image_base64: Optional[str] = None
-    revised_prompt: Optional[str] = None
-    error: Optional[str] = None
+    image_url: str | None = None
+    image_base64: str | None = None
+    revised_prompt: str | None = None
+    error: str | None = None
 
 
 @router.post("/image", response_model=ImageGenerateResponse)
@@ -54,7 +55,9 @@ async def generate_image(
     try:
         provider = ImageProvider(request.provider)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unsupported provider: {request.provider}")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported provider: {request.provider}"
+        )
 
     generator = ImageGenerator(
         provider=provider,
@@ -92,7 +95,9 @@ async def generate_and_download_image(
     try:
         provider = ImageProvider(request.provider)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unsupported provider: {request.provider}")
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported provider: {request.provider}"
+        )
 
     generator = ImageGenerator(
         provider=provider,
@@ -119,14 +124,16 @@ async def generate_and_download_image(
         )
     elif result.image_url:
         import httpx
+
         async with httpx.AsyncClient() as client:
             response = await client.get(result.image_url)
             if response.status_code == 200:
                 return Response(
                     content=response.content,
                     media_type="image/png",
-                    headers={"Content-Disposition": "attachment; filename=generated_image.png"},
+                    headers={
+                        "Content-Disposition": "attachment; filename=generated_image.png"
+                    },
                 )
 
     raise HTTPException(status_code=500, detail="No image data available")
-

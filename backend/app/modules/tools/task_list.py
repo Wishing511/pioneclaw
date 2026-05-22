@@ -38,8 +38,9 @@ class TaskListTool(BaseTool):
     }
     required = []
 
-    async def execute(self, status: str = "all", tool_name: str = "",
-                      limit: int = 50, **kwargs) -> str:
+    async def execute(
+        self, status: str = "all", tool_name: str = "", limit: int = 50, **kwargs
+    ) -> str:
         try:
             tasks = _store_list_tasks(
                 status=status if status else "all",
@@ -50,11 +51,14 @@ class TaskListTool(BaseTool):
             if len(tasks) > limit:
                 tasks = tasks[:limit]
 
-            return json.dumps({
-                "success": True,
-                "total": len(tasks),
-                "tasks": tasks,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "total": len(tasks),
+                    "tasks": tasks,
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TaskListTool execution error: {e}")

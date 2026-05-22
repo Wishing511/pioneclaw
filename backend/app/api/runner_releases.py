@@ -1,19 +1,22 @@
-import os
 import hashlib
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status
+import os
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.core import get_db
-from app.models import User, RunnerRelease
-from app.schemas.runner_schemas import RunnerReleaseResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
+from app.models import RunnerRelease, User
+from app.schemas.runner_schemas import RunnerReleaseResponse
 
 router = APIRouter(prefix="/runner-releases", tags=["Runner版本管理"])
 
 # Storage directory for release files
-RELEASES_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "releases")
+RELEASES_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "..", "workspace", "releases"
+)
 
 
 def _ensure_releases_dir():
@@ -26,9 +29,7 @@ async def get_latest_releases(
     current_user: User = Depends(get_current_active_user),
 ):
     """获取各平台最新版本"""
-    result = await db.execute(
-        select(RunnerRelease).where(RunnerRelease.is_latest == True)
-    )
+    result = await db.execute(select(RunnerRelease).where(RunnerRelease.is_latest))
     releases = result.scalars().all()
 
     # Group by platform
@@ -49,9 +50,9 @@ async def get_latest_releases(
     return by_platform
 
 
-@router.get("/versions", response_model=List[RunnerReleaseResponse])
+@router.get("/versions", response_model=list[RunnerReleaseResponse])
 async def list_versions(
-    platform: Optional[str] = None,
+    platform: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -88,11 +89,13 @@ async def download_release(
     return FileResponse(file_path, filename=filename)
 
 
-@router.post("/upload", response_model=RunnerReleaseResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload", response_model=RunnerReleaseResponse, status_code=status.HTTP_201_CREATED
+)
 async def upload_release(
     version: str = Form(...),
     platform: str = Form(...),
-    release_notes: Optional[str] = Form(None),
+    release_notes: str | None = Form(None),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -173,7 +176,7 @@ async def set_latest_version(
     old_result = await db.execute(
         select(RunnerRelease).where(
             RunnerRelease.platform == platform,
-            RunnerRelease.is_latest == True,
+            RunnerRelease.is_latest,
         )
     )
     for old in old_result.scalars().all():

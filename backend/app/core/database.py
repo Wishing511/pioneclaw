@@ -1,6 +1,8 @@
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ async_session_maker = async_sessionmaker(
 
 class Base(DeclarativeBase):
     """所有模型的基类"""
+
     pass
 
 
@@ -47,6 +50,7 @@ async def init_db():
     """初始化数据库（创建表）"""
     # 确保所有模型已导入
     import app.models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # 兼容性：为已存在的表添加模型中新增但数据库中缺失的列（仅限 SQLite）
@@ -57,6 +61,7 @@ async def init_db():
 def _add_missing_columns(sync_conn):
     """SQLite 专用：检测并添加缺失的列"""
     from sqlalchemy import inspect, text
+
     inspector = inspect(sync_conn)
 
     # chat_messages 表：添加 reasoning_content 列（如果不存在）
@@ -67,5 +72,7 @@ def _add_missing_columns(sync_conn):
                 "[SQLite] Auto-adding missing column 'reasoning_content' to 'chat_messages'. "
                 "This is a dev convenience only; please write a proper Alembic migration for production."
             )
-            sync_conn.execute(text("ALTER TABLE chat_messages ADD COLUMN reasoning_content TEXT"))
+            sync_conn.execute(
+                text("ALTER TABLE chat_messages ADD COLUMN reasoning_content TEXT")
+            )
             sync_conn.commit()

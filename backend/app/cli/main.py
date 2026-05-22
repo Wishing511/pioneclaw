@@ -13,12 +13,11 @@ Usage:
     pioneclaw version               # 版本信息
 """
 
-import os
-import sys
-import typer
 import logging
-from typing import Optional
+import sys
 from pathlib import Path
+
+import typer
 
 # 在任何其他导入之前抑制所有第三方库的 INFO 日志
 # 这必须在导入 sqlalchemy 之前设置
@@ -28,7 +27,13 @@ logging.getLogger("sqlalchemy.pool").setLevel(logging.ERROR)
 logging.getLogger("sqlalchemy.dialects").setLevel(logging.ERROR)
 logging.getLogger("sqlalchemy.orm").setLevel(logging.ERROR)
 # 同时禁用传播
-for name in ["sqlalchemy", "sqlalchemy.engine", "sqlalchemy.pool", "sqlalchemy.dialects", "sqlalchemy.orm"]:
+for name in [
+    "sqlalchemy",
+    "sqlalchemy.engine",
+    "sqlalchemy.pool",
+    "sqlalchemy.dialects",
+    "sqlalchemy.orm",
+]:
     logger = logging.getLogger(name)
     logger.propagate = False
 
@@ -40,6 +45,7 @@ if str(_BACKEND_DIR) not in sys.path:
 # 加载 .env
 try:
     from dotenv import load_dotenv
+
     _env_file = _BACKEND_DIR / ".env"
     if _env_file.exists():
         load_dotenv(_env_file)
@@ -65,6 +71,7 @@ app.add_typer(skill_app, name="skill")
 
 # ==================== version ====================
 
+
 @app.command()
 def version():
     """显示版本信息"""
@@ -73,15 +80,19 @@ def version():
 
     console = Console()
     from app.core.config import settings
-    console.print(Panel(
-        f"[bold cyan]PioneClaw[/bold cyan] v{settings.VERSION}\n"
-        f"[dim]{settings.APP_NAME} - 企业级智能协作平台[/dim]",
-        title="Version",
-        border_style="cyan",
-    ))
+
+    console.print(
+        Panel(
+            f"[bold cyan]PioneClaw[/bold cyan] v{settings.VERSION}\n"
+            f"[dim]{settings.APP_NAME} - 企业级智能协作平台[/dim]",
+            title="Version",
+            border_style="cyan",
+        )
+    )
 
 
 # ==================== run ====================
+
 
 @app.command()
 def run(
@@ -95,7 +106,7 @@ def run(
     from rich.console import Console
 
     console = Console()
-    console.print(f"[bold cyan]Starting PioneClaw server...[/bold cyan]")
+    console.print("[bold cyan]Starting PioneClaw server...[/bold cyan]")
     console.print(f"  Host: [green]{host}[/green]")
     console.print(f"  Port: [green]{port}[/green]")
     console.print(f"  Reload: [yellow]{reload}[/yellow]")
@@ -103,6 +114,7 @@ def run(
     console.print()
 
     import asyncio
+
     try:
         uvicorn.run(
             "app.main:app",
@@ -119,59 +131,70 @@ def run(
 
 # ==================== chat ====================
 
+
 @chat_app.command("start")
 def chat_start(
-    message: Optional[str] = typer.Option(None, "--message", "-m", help="单次消息（非交互模式）"),
-    model_config_id: Optional[int] = typer.Option(None, "--model", help="模型配置 ID"),
-    temperature: Optional[float] = typer.Option(None, "--temperature", "-t", help="温度"),
-    max_tokens: Optional[int] = typer.Option(None, "--max-tokens", help="最大 token"),
+    message: str | None = typer.Option(
+        None, "--message", "-m", help="单次消息（非交互模式）"
+    ),
+    model_config_id: int | None = typer.Option(None, "--model", help="模型配置 ID"),
+    temperature: float | None = typer.Option(None, "--temperature", "-t", help="温度"),
+    max_tokens: int | None = typer.Option(None, "--max-tokens", help="最大 token"),
 ):
     """交互式对话"""
     import asyncio
+
     asyncio.run(_chat_interactive(message, model_config_id, temperature, max_tokens))
 
 
 async def _chat_interactive(
-    single_message: Optional[str] = None,
-    model_config_id: Optional[int] = None,
-    temperature: Optional[float] = None,
-    max_tokens: Optional[int] = None,
+    single_message: str | None = None,
+    model_config_id: int | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
 ):
     """交互式聊天实现"""
     from rich.console import Console
-    from rich.markdown import Markdown
     from rich.panel import Panel
-    from rich.live import Live
-    from rich.text import Text
 
     console = Console()
-    console.print(Panel(
-        "[bold cyan]PioneClaw Chat[/bold cyan]\n"
-        "[dim]输入消息开始对话，输入 /quit 退出，/clear 清空历史[/dim]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            "[bold cyan]PioneClaw Chat[/bold cyan]\n"
+            "[dim]输入消息开始对话，输入 /quit 退出，/clear 清空历史[/dim]",
+            border_style="cyan",
+        )
+    )
 
     # 初始化数据库和依赖
     from app.core.database import init_db
+
     await init_db()
+
+    from sqlalchemy import select
 
     from app.core.database import async_session_maker
     from app.models import AIModelConfig, User
-    from sqlalchemy import select
 
     # 获取默认模型配置
     async with async_session_maker() as db:
         if model_config_id:
-            result = await db.execute(select(AIModelConfig).where(AIModelConfig.id == model_config_id))
+            result = await db.execute(
+                select(AIModelConfig).where(AIModelConfig.id == model_config_id)
+            )
         else:
             result = await db.execute(
-                select(AIModelConfig).where(AIModelConfig.is_default == True, AIModelConfig.is_active == True)
+                select(AIModelConfig).where(
+                    AIModelConfig.is_default, AIModelConfig.is_active
+                )
             )
         config = result.scalar_one_or_none()
 
         if not config:
             # 尝试任意激活配置
-            result = await db.execute(select(AIModelConfig).where(AIModelConfig.is_active == True).limit(1))
+            result = await db.execute(
+                select(AIModelConfig).where(AIModelConfig.is_active).limit(1)
+            )
             config = result.scalar_one_or_none()
 
         if not config:
@@ -179,14 +202,17 @@ async def _chat_interactive(
             return
 
         # 获取 admin 用户（CLI 默认使用 admin）
-        result = await db.execute(select(User).where(User.is_super_admin == True).limit(1))
-        user = result.scalar_one_or_none()
+        result = await db.execute(select(User).where(User.is_super_admin).limit(1))
+        result.scalar_one_or_none()
 
-    console.print(f"[dim]模型: {config.display_name or config.model_name} | 提供商: {config.provider}[/dim]")
+    console.print(
+        f"[dim]模型: {config.display_name or config.model_name} | 提供商: {config.provider}[/dim]"
+    )
     console.print()
 
     # 构建聊天客户端
     from app.api.chat import SimpleLLMProvider
+
     provider = SimpleLLMProvider(config=config)
 
     if temperature is not None:
@@ -231,6 +257,7 @@ async def _chat_interactive(
 async def _send_message(provider, history: list, user_input: str, console):
     """发送消息并显示回复"""
     import time
+
     from rich.markdown import Markdown
     from rich.panel import Panel
 
@@ -252,11 +279,13 @@ async def _send_message(provider, history: list, user_input: str, console):
 
         if full_response.strip():
             history.append({"role": "assistant", "content": full_response})
-            console.print(Panel(
-                Markdown(full_response),
-                title=f"Assistant ({elapsed:.1f}s)",
-                border_style="blue",
-            ))
+            console.print(
+                Panel(
+                    Markdown(full_response),
+                    title=f"Assistant ({elapsed:.1f}s)",
+                    border_style="blue",
+                )
+            )
 
             # Token 信息
             if provider.last_input_tokens or provider.last_output_tokens:
@@ -275,27 +304,31 @@ async def _send_message(provider, history: list, user_input: str, console):
 
 # ==================== task ====================
 
+
 @task_app.command("list")
 def task_list(
-    status: Optional[str] = typer.Option(None, "--status", "-s", help="按状态筛选"),
+    status: str | None = typer.Option(None, "--status", "-s", help="按状态筛选"),
     limit: int = typer.Option(20, "--limit", "-n", help="显示数量"),
 ):
     """列出任务"""
     import asyncio
+
     asyncio.run(_task_list(status, limit))
 
 
-async def _task_list(status_filter: Optional[str], limit: int):
+async def _task_list(status_filter: str | None, limit: int):
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
     from app.core.database import init_db
+
     await init_db()
+
+    from sqlalchemy import select
 
     from app.core.database import async_session_maker
     from app.models import Task
-    from sqlalchemy import select
 
     async with async_session_maker() as db:
         query = select(Task).order_by(Task.created_at.desc()).limit(limit)
@@ -316,7 +349,13 @@ async def _task_list(status_filter: Optional[str], limit: int):
     table.add_column("Type", style="blue", width=8)
     table.add_column("Created", style="dim")
 
-    STATUS_COLORS = {"pending": "yellow", "running": "blue", "completed": "green", "failed": "red", "cancelled": "dim"}
+    STATUS_COLORS = {
+        "pending": "yellow",
+        "running": "blue",
+        "completed": "green",
+        "failed": "red",
+        "cancelled": "dim",
+    }
 
     for t in tasks:
         status_style = STATUS_COLORS.get(t.status, "white")
@@ -341,14 +380,17 @@ def task_create(
 ):
     """创建任务"""
     import asyncio
+
     asyncio.run(_task_create(title, description, priority, task_type))
 
 
 async def _task_create(title: str, description: str, priority: str, task_type: str):
     from rich.console import Console
+
     console = Console()
 
     from app.core.database import init_db
+
     await init_db()
 
     from app.core.database import async_session_maker
@@ -374,20 +416,25 @@ def task_complete(
 ):
     """完成任务"""
     import asyncio
+
     asyncio.run(_task_complete(task_id))
 
 
 async def _task_complete(task_id: int):
-    from rich.console import Console
     from datetime import datetime, timezone
+
+    from rich.console import Console
+
     console = Console()
 
     from app.core.database import init_db
+
     await init_db()
+
+    from sqlalchemy import select
 
     from app.core.database import async_session_maker
     from app.models import Task
-    from sqlalchemy import select
 
     async with async_session_maker() as db:
         result = await db.execute(select(Task).where(Task.id == task_id))
@@ -403,10 +450,12 @@ async def _task_complete(task_id: int):
 
 # ==================== skill ====================
 
+
 @skill_app.command("list")
 def skill_list():
     """列出技能"""
     import asyncio
+
     asyncio.run(_skill_list())
 
 
@@ -416,11 +465,13 @@ async def _skill_list():
 
     console = Console()
     from app.core.database import init_db
+
     await init_db()
+
+    from sqlalchemy import select
 
     from app.core.database import async_session_maker
     from app.models import Skill
-    from sqlalchemy import select
 
     async with async_session_maker() as db:
         result = await db.execute(select(Skill).order_by(Skill.created_at.desc()))
@@ -457,17 +508,21 @@ async def _skill_list():
 def skill_reload():
     """热重载技能"""
     import asyncio
+
     asyncio.run(_skill_reload())
 
 
 async def _skill_reload():
     from rich.console import Console
+
     console = Console()
 
     from app.core.database import init_db
+
     await init_db()
 
     from app.modules.agent.skills import get_skills_loader
+
     loader = get_skills_loader()
     if loader:
         await loader.reload()
@@ -478,6 +533,7 @@ async def _skill_reload():
 
 
 # ==================== entry point ====================
+
 
 def main():
     """CLI 入口"""

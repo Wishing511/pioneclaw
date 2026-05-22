@@ -13,9 +13,11 @@ CronScheduler - 基于 croniter 的精确定时调度器
 """
 
 import asyncio
+import contextlib
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from croniter import croniter
 
@@ -39,14 +41,15 @@ class CronScheduler:
         Args:
             timezone_offset: 时区偏移（小时），默认东八区
         """
-        self._jobs: Dict[str, Dict[str, Any]] = {}
+        self._jobs: dict[str, dict[str, Any]] = {}
         self._running = False
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._timezone_offset = timezone_offset
 
     def _now(self) -> datetime:
         """获取当前时间（本地时区）"""
         from datetime import timedelta
+
         return datetime.now(timezone(timedelta(hours=self._timezone_offset)))
 
     def add_job(
@@ -126,7 +129,7 @@ class CronScheduler:
             return True
         return False
 
-    def get_job(self, job_id: str) -> Optional[dict]:
+    def get_job(self, job_id: str) -> dict | None:
         """获取任务信息"""
         job = self._jobs.get(job_id)
         if not job:
@@ -140,11 +143,11 @@ class CronScheduler:
             "run_count": job["run_count"],
         }
 
-    def list_jobs(self) -> List[dict]:
+    def list_jobs(self) -> list[dict]:
         """列出所有任务"""
         return [self.get_job(jid) for jid in self._jobs]
 
-    def get_next_run(self, cron_expr: str) -> Optional[datetime]:
+    def get_next_run(self, cron_expr: str) -> datetime | None:
         """
         计算指定 cron 表达式的下次执行时间
 
@@ -191,14 +194,32 @@ class CronScheduler:
             return "每分钟"
         if minute != "*" and hour == "*":
             return f"每小时第 {minute} 分钟"
-        if minute == "0" and hour != "*" and day == "*" and month == "*" and weekday == "*":
+        if (
+            minute == "0"
+            and hour != "*"
+            and day == "*"
+            and month == "*"
+            and weekday == "*"
+        ):
             return f"每天 {hour}:00"
-        if minute != "*" and hour != "*" and day == "*" and month == "*" and weekday == "*":
+        if (
+            minute != "*"
+            and hour != "*"
+            and day == "*"
+            and month == "*"
+            and weekday == "*"
+        ):
             return f"每天 {hour}:{minute}"
         if weekday != "*" and hour != "*" and minute != "*":
             weekday_names = {
-                "0": "周日", "1": "周一", "2": "周二", "3": "周三",
-                "4": "周四", "5": "周五", "6": "周六", "7": "周日",
+                "0": "周日",
+                "1": "周一",
+                "2": "周二",
+                "3": "周三",
+                "4": "周四",
+                "5": "周五",
+                "6": "周六",
+                "7": "周日",
             }
             day_name = weekday_names.get(weekday, f"周{weekday}")
             return f"每{day_name} {hour}:{minute}"
@@ -219,10 +240,8 @@ class CronScheduler:
         self._running = False
         if self._task:
             self._task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._task
-            except asyncio.CancelledError:
-                pass
             self._task = None
         logger.info("[CronScheduler] 调度器已停止")
 
@@ -232,17 +251,18 @@ class CronScheduler:
         started_at: datetime,
         finished_at: datetime,
         status: str,
-        result: Optional[str],
-        error_message: Optional[str],
+        result: str | None,
+        error_message: str | None,
         duration_ms: int,
         last_run: datetime,
         run_count: int,
     ) -> None:
         """将执行日志写入 DB，并同步 CronJob 的 last_run/run_count"""
         try:
-            from app.core.database import async_session_maker
-            from app.models.models import CronJob, CronExecutionLog
             from sqlalchemy import select
+
+            from app.core.database import async_session_maker
+            from app.models.models import CronExecutionLog, CronJob
 
             async with async_session_maker() as session:
                 db_result = await session.execute(
@@ -304,7 +324,9 @@ class CronScheduler:
                             )
 
                         finished_at = datetime.now(timezone.utc)
-                        duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+                        duration_ms = int(
+                            (finished_at - started_at).total_seconds() * 1000
+                        )
 
                         # 持久化执行日志
                         await self._persist_execution(
@@ -376,12 +398,16 @@ class CronScheduler:
             run_count=job["run_count"],
         )
 
-        return {"success": status == "completed", "status": status, "duration_ms": duration_ms}
+        return {
+            "success": status == "completed",
+            "status": status,
+            "duration_ms": duration_ms,
+        }
 
     def ensure_heartbeat_job(
         self,
         schedule: str = "0 9,12,18 * * *",
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
     ) -> str:
         """
         确保 Heartbeat 任务已注册
@@ -400,14 +426,17 @@ class CronScheduler:
                 callback = self._default_heartbeat_callback
 
             self.add_job(job_id, schedule, callback, enabled=True)
-            logger.info(
-                f"[CronScheduler] Heartbeat 任务已注册: {schedule}"
-            )
+            logger.info(f"[CronScheduler] Heartbeat 任务已注册: {schedule}")
         else:
             existing = self._jobs[job_id]
             if existing["cron_expr"] != schedule:
                 self.remove_job(job_id)
-                self.add_job(job_id, schedule, callback or self._default_heartbeat_callback, enabled=True)
+                self.add_job(
+                    job_id,
+                    schedule,
+                    callback or self._default_heartbeat_callback,
+                    enabled=True,
+                )
                 logger.info(f"[CronScheduler] Heartbeat 调度已更新: {schedule}")
 
         return job_id
@@ -425,10 +454,12 @@ def _make_cron_callback(job_name: str, config: dict):
         job_name: 任务名称
         config: 任务配置，包含 prompt 和/或 agent_id
     """
+
     async def _execute_agent():
+        from sqlalchemy import select
+
         from app.core.database import async_session_maker
         from app.models.models import AIModelConfig
-        from sqlalchemy import select
 
         prompt = config.get("prompt") or config.get("input_data", {}).get("message", "")
 
@@ -437,34 +468,39 @@ def _make_cron_callback(job_name: str, config: dict):
             return "No prompt configured"
 
         try:
-            from app.modules.agent.providers.simple import SimpleLLMProvider
             from app.modules.agent.loop import AgentLoop
+            from app.modules.agent.providers.simple import SimpleLLMProvider
             from app.modules.tools import ToolRegistry, register_builtin_tools
 
             # 获取默认 AI 模型配置
             async with async_session_maker() as session:
                 result = await session.execute(
-                    select(AIModelConfig).where(AIModelConfig.is_default == True).limit(1)
+                    select(AIModelConfig).where(AIModelConfig.is_default).limit(1)
                 )
                 ai_config = result.scalar_one_or_none()
 
             if not ai_config:
-                logger.warning(f"[Cron] 未找到默认 AIModelConfig，跳过执行")
+                logger.warning("[Cron] 未找到默认 AIModelConfig，跳过执行")
                 return "No AI model configured"
 
-            provider_config = type("Config", (), {
-                "api_key": ai_config.api_key or "",
-                "base_url": ai_config.base_url or "",
-                "model_name": ai_config.model_name or "gpt-4o",
-                "temperature": ai_config.temperature,
-                "max_tokens": ai_config.max_tokens,
-            })()
+            provider_config = type(
+                "Config",
+                (),
+                {
+                    "api_key": ai_config.api_key or "",
+                    "base_url": ai_config.base_url or "",
+                    "model_name": ai_config.model_name or "gpt-4o",
+                    "temperature": ai_config.temperature,
+                    "max_tokens": ai_config.max_tokens,
+                },
+            )()
             provider = SimpleLLMProvider(config=provider_config)
 
             tool_registry = ToolRegistry()
             register_builtin_tools(tool_registry)
 
             from app.core.security_client import security_client
+
             agent_loop = AgentLoop(
                 provider=provider,
                 tools=tool_registry,
@@ -490,18 +526,17 @@ async def reconcile_cron_jobs() -> dict:
     Returns:
         {"registered": int, "skipped": int}
     """
+    from sqlalchemy import select
+
     from app.core.database import async_session_maker
     from app.models.models import CronJob
-    from sqlalchemy import select
 
     scheduler = get_cron_scheduler()
     summary: dict = {"registered": 0, "skipped": 0}
 
     try:
         async with async_session_maker() as session:
-            result = await session.execute(
-                select(CronJob).where(CronJob.is_enabled == True)
-            )
+            result = await session.execute(select(CronJob).where(CronJob.is_enabled))
             jobs = result.scalars().all()
     except Exception as e:
         logger.warning(f"[Cron] 启动恢复查询 DB 失败: {e}")
@@ -534,7 +569,7 @@ async def reconcile_cron_jobs() -> dict:
 
 
 # 全局调度器实例
-_scheduler: Optional[CronScheduler] = None
+_scheduler: CronScheduler | None = None
 
 
 def get_cron_scheduler() -> CronScheduler:

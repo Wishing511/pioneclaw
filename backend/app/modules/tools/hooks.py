@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Callable
+from typing import Any
 
 from app.modules.tools.types import HookContext, HookResult, HookType, ToolHook
 
@@ -98,6 +99,7 @@ class HookManager:
 # ------------------------------------------------------------------
 # Legacy adapter: wrap old ToolHookRunner events into HookManager
 # ------------------------------------------------------------------
+
 
 def adapt_legacy_hook(
     event: str,

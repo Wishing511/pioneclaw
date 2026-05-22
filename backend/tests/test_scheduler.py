@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -60,6 +59,7 @@ class FakeRegistry:
 # get_max_concurrency
 # ------------------------------------------------------------------
 
+
 class TestGetMaxConcurrency:
     def test_default(self, monkeypatch):
         monkeypatch.delenv("PIONECLAW_MAX_CONCURRENCY", raising=False)
@@ -73,6 +73,7 @@ class TestGetMaxConcurrency:
 # ------------------------------------------------------------------
 # partition_tool_calls
 # ------------------------------------------------------------------
+
 
 class TestPartitionToolCalls:
     def test_all_readonly_safe(self):
@@ -140,6 +141,7 @@ class TestPartitionToolCalls:
 # run_concurrent_batch
 # ------------------------------------------------------------------
 
+
 class TestRunConcurrentBatch:
     @pytest.mark.asyncio
     async def test_basic(self):
@@ -173,13 +175,18 @@ class TestRunConcurrentBatch:
 
         results = await run_concurrent_batch([1, 2, 3], executor)
         assert results[0] == 1
-        assert results[1] == {"_scheduler_error": True, "type": "ValueError", "message": "boom"}
+        assert results[1] == {
+            "_scheduler_error": True,
+            "type": "ValueError",
+            "message": "boom",
+        }
         assert results[2] == 3
 
 
 # ------------------------------------------------------------------
 # run_serial_batch
 # ------------------------------------------------------------------
+
 
 class TestRunSerialBatch:
     @pytest.mark.asyncio
@@ -199,5 +206,9 @@ class TestRunSerialBatch:
 
         results = await run_serial_batch([1, 2, 3], executor)
         assert results[0] == 1
-        assert results[1] == {"_scheduler_error": True, "type": "RuntimeError", "message": "fail"}
+        assert results[1] == {
+            "_scheduler_error": True,
+            "type": "RuntimeError",
+            "message": "fail",
+        }
         assert results[2] == 3

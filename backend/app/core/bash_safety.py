@@ -18,11 +18,10 @@ Bash 命令安全分析
         print(f"Blocked: {assessment.risk_summary}")
 """
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +31,11 @@ logger = logging.getLogger(__name__)
 
 class DangerLevel(Enum):
     """命令危险等级 —— 借鉴 claw-code destructiveCommandWarning 的分级概念"""
-    SAFE = "safe"           # 无害命令，自动执行
-    CAUTION = "caution"      # 需用户确认
+
+    SAFE = "safe"  # 无害命令，自动执行
+    CAUTION = "caution"  # 需用户确认
     DANGEROUS = "dangerous"  # 高危，需输入确认短语
-    BLOCKED = "blocked"      # 禁止执行
+    BLOCKED = "blocked"  # 禁止执行
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,7 @@ class DangerRule:
                   network_dangerous, obfuscation)
         description: 人类可读的风险说明
     """
+
     pattern: str
     level: DangerLevel
     category: str
@@ -68,9 +69,10 @@ class CommandSafetyPolicy:
         allowed_commands: 精确白名单，这些命令永远放行
         blocked_commands: 额外黑名单，追加到内置规则之外
     """
+
     allow_destructive_commands: bool = False
-    allowed_commands: List[str] = field(default_factory=list)
-    blocked_commands: List[str] = field(default_factory=list)
+    allowed_commands: list[str] = field(default_factory=list)
+    blocked_commands: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -84,11 +86,12 @@ class CommandAssessment:
         risk_summary: 风险摘要（给用户看）
         confirmation_phrase: DANGEROUS 级别时生成的确认短语
     """
+
     level: DangerLevel
     command: str
-    matched_rules: List[DangerRule] = field(default_factory=list)
+    matched_rules: list[DangerRule] = field(default_factory=list)
     risk_summary: str = ""
-    confirmation_phrase: Optional[str] = None
+    confirmation_phrase: str | None = None
 
 
 # ==================== Exceptions ====================
@@ -97,7 +100,7 @@ class CommandAssessment:
 class CommandBlockedError(ValueError):
     """命令被阻止 —— 借鉴 OpenClaw SsrFBlockedError"""
 
-    def __init__(self, message: str, assessment: Optional[CommandAssessment] = None):
+    def __init__(self, message: str, assessment: CommandAssessment | None = None):
         super().__init__(message)
         self.assessment = assessment
 
@@ -115,7 +118,7 @@ class CommandConfirmationRequired(Exception):
 # 借鉴 claw-code destructiveCommandWarning + commandSemantics 的分类规则
 # 从现有 _DANGEROUS_PATTERNS 升级：每个规则现在有 DangerLevel 分级 + category + description
 
-_DANGER_RULES: List[DangerRule] = [
+_DANGER_RULES: list[DangerRule] = [
     # ===== BLOCKED: 破坏性文件系统操作 =====
     DangerRule(
         pattern=r"\brm\s+-[rf]{1,2}\b",
@@ -147,7 +150,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="destructive_fs",
         description="直接写入块设备",
     ),
-
     # ===== BLOCKED: 关机/重启 =====
     DangerRule(
         pattern=r"\b(shutdown|reboot|poweroff|halt)\b",
@@ -167,7 +169,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="shutdown",
         description="systemctl 关机/重启",
     ),
-
     # ===== BLOCKED: Fork 炸弹 =====
     DangerRule(
         pattern=r":\(\)\s*\{.*\};\s*:",
@@ -175,7 +176,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="fork_bomb",
         description="Fork 炸弹攻击",
     ),
-
     # ===== BLOCKED: 格式化磁盘 =====
     DangerRule(
         pattern=r"\b(format|mkfs|diskpart)\b",
@@ -183,7 +183,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="format_disk",
         description="格式化磁盘",
     ),
-
     # ===== BLOCKED: 下载并执行 =====
     DangerRule(
         pattern=r"\b(wget|curl)\s+.*\|\s*(ba)?sh\b",
@@ -204,7 +203,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="obfuscation",
         description="base64 解码后管道到 shell",
     ),
-
     # ===== DANGEROUS: 批量杀进程 =====
     DangerRule(
         pattern=r"\b(pkill|killall)\b",
@@ -218,7 +216,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="kill",
         description="强制终止进程 (SIGKILL)",
     ),
-
     # ===== DANGEROUS: 危险的权限设置 =====
     DangerRule(
         pattern=r"\bchmod\s+777\b",
@@ -238,7 +235,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="perm_dangerous",
         description="修改系统目录权限",
     ),
-
     # ===== DANGEROUS: Git 危险操作 =====
     DangerRule(
         pattern=r"\bgit\s+reset\s+--hard\b",
@@ -258,7 +254,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="git_dangerous",
         description="Git 清理未跟踪文件 (git clean -fd)",
     ),
-
     # ===== DANGEROUS: 网络危险操作 =====
     DangerRule(
         pattern=r"\bnc\s+.*-(e|l)\b",
@@ -272,7 +267,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="network_dangerous",
         description="ncat 远程执行",
     ),
-
     # ===== CAUTION: Git 需注意操作 =====
     DangerRule(
         pattern=r"\bgit\s+commit\s+--amend\b",
@@ -298,7 +292,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="git_caution",
         description="强制删除 Git 分支",
     ),
-
     # ===== CAUTION: 环境变量注入检测 =====
     DangerRule(
         pattern=r"\$\([^)]*\)",
@@ -324,7 +317,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="env_injection",
         description="环境变量展开 —— 可能用于混淆命令",
     ),
-
     # ===== CAUTION: sudo =====
     DangerRule(
         pattern=r"\bsudo\b",
@@ -338,7 +330,6 @@ _DANGER_RULES: List[DangerRule] = [
         category="sudo",
         description="切换用户 (su)",
     ),
-
     # ===== CAUTION: 写入重定向（非追加） =====
     DangerRule(
         pattern=r"[^>]\s*>\s*/[a-z]",
@@ -351,24 +342,50 @@ _DANGER_RULES: List[DangerRule] = [
 
 # 敏感路径 —— 借鉴 claw-code pathValidation
 _SENSITIVE_PATHS = [
-    "/etc/", "/proc/", "/sys/", "/boot/", "/root/",
-    "~/.ssh", "~/.gnupg", "/var/log/",
-    ".env", ".git/config", ".gitcredentials",
-    "/Windows/System32", "C:\\Windows\\System32",
-    "/Library/", "/System/",
+    "/etc/",
+    "/proc/",
+    "/sys/",
+    "/boot/",
+    "/root/",
+    "~/.ssh",
+    "~/.gnupg",
+    "/var/log/",
+    ".env",
+    ".git/config",
+    ".gitcredentials",
+    "/Windows/System32",
+    "C:\\Windows\\System32",
+    "/Library/",
+    "/System/",
 ]
 
 
 # 危险命令前缀（用于精确匹配白名单检查）
 _DANGEROUS_COMMAND_PREFIXES = [
-    "rm ", "del ", "rmdir ", "dd ", "shutdown", "reboot",
-    "poweroff", "halt", "mkfs", "format", "diskpart",
-    "kill", "pkill", "killall", "chmod", "chown",
-    "sudo", "su ", "nc ", "ncat ",
+    "rm ",
+    "del ",
+    "rmdir ",
+    "dd ",
+    "shutdown",
+    "reboot",
+    "poweroff",
+    "halt",
+    "mkfs",
+    "format",
+    "diskpart",
+    "kill",
+    "pkill",
+    "killall",
+    "chmod",
+    "chown",
+    "sudo",
+    "su ",
+    "nc ",
+    "ncat ",
 ]
 
 
-def _check_sensitive_paths(command: str) -> List[DangerRule]:
+def _check_sensitive_paths(command: str) -> list[DangerRule]:
     """检查命令是否访问敏感路径 —— 借鉴 claw-code pathValidation
 
     结合命令动词判断危险程度：
@@ -389,10 +406,30 @@ def _check_sensitive_paths(command: str) -> List[DangerRule]:
         return matched
 
     # 判断操作类型
-    destructive_ops = [r"\brm\b", r"\bmv\b", r"\bcp\b", r">", r">>", r"\bdel\b",
-                       r"\bchmod\b", r"\bchown\b", r"\bdd\b", r"\btee\b"]
-    read_ops = [r"\bcat\b", r"\bhead\b", r"\btail\b", r"\bless\b", r"\bmore\b",
-                r"\bls\b", r"\bdir\b", r"\bfind\b", r"\bgrep\b", r"\becho\b"]
+    destructive_ops = [
+        r"\brm\b",
+        r"\bmv\b",
+        r"\bcp\b",
+        r">",
+        r">>",
+        r"\bdel\b",
+        r"\bchmod\b",
+        r"\bchown\b",
+        r"\bdd\b",
+        r"\btee\b",
+    ]
+    read_ops = [
+        r"\bcat\b",
+        r"\bhead\b",
+        r"\btail\b",
+        r"\bless\b",
+        r"\bmore\b",
+        r"\bls\b",
+        r"\bdir\b",
+        r"\bfind\b",
+        r"\bgrep\b",
+        r"\becho\b",
+    ]
 
     is_destructive = any(re.search(op, command_lower) for op in destructive_ops)
     is_read = any(re.search(op, command_lower) for op in read_ops)
@@ -400,48 +437,64 @@ def _check_sensitive_paths(command: str) -> List[DangerRule]:
     for sp in touched_paths:
         if is_destructive:
             # 特殊：rm -rf /etc → BLOCKED
-            if re.search(r"\brm\s+-[rf]", command_lower) and sp in ("/etc/", "/proc/", "/sys/", "/boot/", "/root/"):
-                matched.append(DangerRule(
-                    pattern=re.escape(sp),
-                    level=DangerLevel.BLOCKED,
-                    category="path_sensitive",
-                    description=f"删除敏感路径: {sp}",
-                ))
+            if re.search(r"\brm\s+-[rf]", command_lower) and sp in (
+                "/etc/",
+                "/proc/",
+                "/sys/",
+                "/boot/",
+                "/root/",
+            ):
+                matched.append(
+                    DangerRule(
+                        pattern=re.escape(sp),
+                        level=DangerLevel.BLOCKED,
+                        category="path_sensitive",
+                        description=f"删除敏感路径: {sp}",
+                    )
+                )
             else:
-                matched.append(DangerRule(
-                    pattern=re.escape(sp),
-                    level=DangerLevel.DANGEROUS,
-                    category="path_sensitive",
-                    description=f"修改敏感路径: {sp}",
-                ))
+                matched.append(
+                    DangerRule(
+                        pattern=re.escape(sp),
+                        level=DangerLevel.DANGEROUS,
+                        category="path_sensitive",
+                        description=f"修改敏感路径: {sp}",
+                    )
+                )
         elif is_read:
             # .env / .gitcredentials 读取也需要确认
             if any(s in sp for s in (".env", ".gitcredentials", "~/.ssh", "~/.gnupg")):
-                matched.append(DangerRule(
-                    pattern=re.escape(sp),
-                    level=DangerLevel.DANGEROUS,
-                    category="path_sensitive",
-                    description=f"读取敏感文件: {sp}",
-                ))
+                matched.append(
+                    DangerRule(
+                        pattern=re.escape(sp),
+                        level=DangerLevel.DANGEROUS,
+                        category="path_sensitive",
+                        description=f"读取敏感文件: {sp}",
+                    )
+                )
             else:
-                matched.append(DangerRule(
+                matched.append(
+                    DangerRule(
+                        pattern=re.escape(sp),
+                        level=DangerLevel.CAUTION,
+                        category="path_sensitive",
+                        description=f"访问敏感路径: {sp}",
+                    )
+                )
+        else:
+            matched.append(
+                DangerRule(
                     pattern=re.escape(sp),
                     level=DangerLevel.CAUTION,
                     category="path_sensitive",
-                    description=f"访问敏感路径: {sp}",
-                ))
-        else:
-            matched.append(DangerRule(
-                pattern=re.escape(sp),
-                level=DangerLevel.CAUTION,
-                category="path_sensitive",
-                description=f"涉及敏感路径: {sp}",
-            ))
+                    description=f"涉及敏感路径: {sp}",
+                )
+            )
 
     return matched
 
 
-def _check_chained_danger(command: str) -> List[DangerRule]:
+def _check_chained_danger(command: str) -> list[DangerRule]:
     """检查命令链（&&, ;, ||）中是否包含危险操作
 
     命令链中只要有一段是危险的，整个命令就算危险。
@@ -466,6 +519,7 @@ def _check_chained_danger(command: str) -> List[DangerRule]:
 def _generate_confirmation_phrase(command: str) -> str:
     """为 DANGEROUS 级别命令生成确认短语"""
     import hashlib
+
     digest = hashlib.sha256(command.encode()).hexdigest()[:8]
     return f"I-understand-{digest}"
 
@@ -475,7 +529,7 @@ def _generate_confirmation_phrase(command: str) -> str:
 
 def analyze_command(
     command: str,
-    policy: Optional[CommandSafetyPolicy] = None,
+    policy: CommandSafetyPolicy | None = None,
 ) -> CommandAssessment:
     """分析命令的安全性 —— 借鉴 claw-code 多层检查管线
 
@@ -537,7 +591,7 @@ def analyze_command(
         )
 
     # 4. 内置规则库匹配
-    all_matched: List[DangerRule] = []
+    all_matched: list[DangerRule] = []
     command_lower = command.lower()
 
     for rule in _DANGER_RULES:
@@ -567,7 +621,11 @@ def analyze_command(
         )
 
     # 优先级: BLOCKED > DANGEROUS > CAUTION > SAFE
-    level_order = {DangerLevel.BLOCKED: 0, DangerLevel.DANGEROUS: 1, DangerLevel.CAUTION: 2}
+    level_order = {
+        DangerLevel.BLOCKED: 0,
+        DangerLevel.DANGEROUS: 1,
+        DangerLevel.CAUTION: 2,
+    }
     final_level = DangerLevel.SAFE
     for rule in all_matched:
         if level_order.get(rule.level, 99) < level_order.get(final_level, 99):
@@ -595,7 +653,7 @@ def analyze_command(
 
 def validate_command(
     command: str,
-    policy: Optional[CommandSafetyPolicy] = None,
+    policy: CommandSafetyPolicy | None = None,
 ) -> CommandAssessment:
     """验证命令安全性 —— 借鉴 OpenClaw validateUrlSsrF
 
@@ -623,8 +681,8 @@ def validate_command(
 
 def validate_command_or_none(
     command: str,
-    policy: Optional[CommandSafetyPolicy] = None,
-) -> Optional[str]:
+    policy: CommandSafetyPolicy | None = None,
+) -> str | None:
     """便捷方法: 验证命令，安全返回 None，被阻止返回错误消息
 
     借鉴 OpenClaw validate_url_ssrf_or_none 模式。

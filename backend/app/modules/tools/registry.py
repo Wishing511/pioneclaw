@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional, Type
+from typing import Any
 
-from app.modules.tools.base import BaseTool, ToolDefinition
 from app.core.recovery_recipes import RecoverableToolError
+from app.modules.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,8 @@ class ToolRegistry:
         self._toolsets: dict[str, ToolSet] = {}
         self._enabled_toolsets: set[str] = {"default"}
 
-        self._session_id: Optional[str] = None
-        self._channel: Optional[str] = None
+        self._session_id: str | None = None
+        self._channel: str | None = None
         self._cancel_token = None
 
         logger.debug("ToolRegistry initialized")
@@ -51,7 +51,7 @@ class ToolRegistry:
         self._tools[tool.id] = tool
         logger.debug(f"Tool registered: {tool.id}")
 
-    def register_class(self, tool_class: Type[BaseTool]) -> None:
+    def register_class(self, tool_class: type[BaseTool]) -> None:
         tool = tool_class()
         self.register(tool)
 
@@ -83,7 +83,7 @@ class ToolRegistry:
     # 查询（兼容旧接口 + 新增）
     # ------------------------------------------------------------------
 
-    def get_tool(self, name: str) -> Optional[BaseTool]:
+    def get_tool(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
     def has_tool(self, name: str) -> bool:
@@ -95,8 +95,7 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """获取所有已注册工具的定义（旧格式，OpenAI Function Calling）"""
         return [
-            tool.get_definition().to_openai_format()
-            for tool in self._tools.values()
+            tool.get_definition().to_openai_format() for tool in self._tools.values()
         ]
 
     def get_available_tools(self) -> list[BaseTool]:
@@ -167,7 +166,11 @@ class ToolRegistry:
 
         try:
             result = await tool.execute(**arguments)
-            display = result[:100] if isinstance(result, str) and len(result) > 100 else result
+            display = (
+                result[:100]
+                if isinstance(result, str) and len(result) > 100
+                else result
+            )
             logger.debug(f"Tool {name} result: {display}")
             return result
         except RecoverableToolError:
@@ -184,7 +187,7 @@ class ToolRegistry:
     def set_session_id(self, session_id: str) -> None:
         self._session_id = session_id
 
-    def set_channel(self, channel: Optional[str]) -> None:
+    def set_channel(self, channel: str | None) -> None:
         self._channel = channel
 
     def set_cancel_token(self, cancel_token) -> None:
@@ -198,7 +201,7 @@ class ToolRegistry:
 
 
 # 全局工具注册表实例
-_global_registry: Optional[ToolRegistry] = None
+_global_registry: ToolRegistry | None = None
 
 
 def get_tool_registry() -> ToolRegistry:
@@ -212,5 +215,5 @@ def register_tool(tool: BaseTool) -> None:
     get_tool_registry().register(tool)
 
 
-def register_tool_class(tool_class: Type[BaseTool]) -> None:
+def register_tool_class(tool_class: type[BaseTool]) -> None:
     get_tool_registry().register_class(tool_class)

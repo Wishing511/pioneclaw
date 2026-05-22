@@ -12,8 +12,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from app.modules.tools.types import ToolUse
 
@@ -30,13 +31,11 @@ class Batch:
 # Minimal registry interface needed by the scheduler
 # ------------------------------------------------------------------
 
+
 class ToolLookup:
     """调度器所需的最小工具查询接口（避免对完整 ToolRegistry 的依赖）"""
 
-    def get_tool(
-        self, id: str
-    ) -> Any | None:
-        ...
+    def get_tool(self, id: str) -> Any | None: ...
 
 
 def get_max_concurrency() -> int:
@@ -143,9 +142,11 @@ async def run_serial_batch(
         try:
             results.append(await executor(item))
         except Exception as e:
-            results.append({
-                "_scheduler_error": True,
-                "type": type(e).__name__,
-                "message": str(e) or "(无详细错误信息)",
-            })
+            results.append(
+                {
+                    "_scheduler_error": True,
+                    "type": type(e).__name__,
+                    "message": str(e) or "(无详细错误信息)",
+                }
+            )
     return results

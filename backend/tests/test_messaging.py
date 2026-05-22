@@ -2,15 +2,15 @@
 消息队列模块测试
 """
 
-import pytest
 import asyncio
-import time
+
+import pytest
 
 from app.modules.messaging import (
-    MessageQueue,
-    MessagePriority,
-    Message,
     DeadLetter,
+    Message,
+    MessagePriority,
+    MessageQueue,
     RateLimiter,
     TokenBucket,
 )
@@ -159,7 +159,7 @@ class TestMessageQueue:
         """测试标记成功"""
         queue = MessageQueue()
 
-        msg_id = await queue.enqueue("test")
+        await queue.enqueue("test")
         msg = await queue.dequeue()
 
         # 标记成功
@@ -174,7 +174,7 @@ class TestMessageQueue:
         """测试失败重试"""
         queue = MessageQueue(default_max_retries=3)
 
-        msg_id = await queue.enqueue("test")
+        await queue.enqueue("test")
         msg = await queue.dequeue()
 
         # 第一次失败
@@ -193,7 +193,7 @@ class TestMessageQueue:
         """测试死信队列"""
         queue = MessageQueue(default_max_retries=2)
 
-        msg_id = await queue.enqueue("test", max_retries=2)
+        await queue.enqueue("test", max_retries=2)
 
         # 模拟多次失败 (max_retries=2, 所以第2次失败后进入死信)
         for i in range(3):
@@ -230,7 +230,7 @@ class TestMessageQueue:
         """测试清空死信队列"""
         queue = MessageQueue(default_max_retries=1)
 
-        msg_id = await queue.enqueue("test", max_retries=1)
+        await queue.enqueue("test", max_retries=1)
         msg = await queue.dequeue()
         await queue.mark_failed(msg.id, "Error")
 

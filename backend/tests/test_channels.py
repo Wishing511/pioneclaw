@@ -13,10 +13,9 @@ from app.modules.channels.base import (
 )
 from app.modules.channels.manager import (
     ChannelManager,
-    get_channel_manager,
-    register_channel,
-    get_channel_class,
     _channel_registry,
+    get_channel_class,
+    register_channel,
 )
 
 
@@ -205,10 +204,17 @@ class TestChannelRegistry:
         original = dict(_channel_registry)
 
         class MockChannel(BaseChannel):
-            async def connect(self): return True
-            async def disconnect(self): pass
-            async def send_message(self, chat_id, content, **kwargs): return True, "ok"
-            async def send_typing(self, chat_id): pass
+            async def connect(self):
+                return True
+
+            async def disconnect(self):
+                pass
+
+            async def send_message(self, chat_id, content, **kwargs):
+                return True, "ok"
+
+            async def send_typing(self, chat_id):
+                pass
 
         register_channel(ChannelType.WEB, MockChannel)
         cls = get_channel_class(ChannelType.WEB)
@@ -229,30 +235,25 @@ class TestAdapterRegistration:
 
     def test_feishu_registered(self):
         """测试飞书适配器已注册"""
-        from app.modules.channels import feishu
         cls = get_channel_class(ChannelType.FEISHU)
         assert cls is not None
 
     def test_dingtalk_registered(self):
         """测试钉钉适配器已注册"""
-        from app.modules.channels import dingtalk
         cls = get_channel_class(ChannelType.DINGTALK)
         assert cls is not None
 
     def test_qq_registered(self):
         """测试 QQ 适配器已注册"""
-        from app.modules.channels import qq
         cls = get_channel_class(ChannelType.QQ)
         assert cls is not None
 
     def test_wechat_registered(self):
         """测试微信适配器已注册"""
-        from app.modules.channels import wechat
         cls = get_channel_class(ChannelType.WECHAT)
         assert cls is not None
 
     def test_wecom_registered(self):
         """测试企微适配器已注册"""
-        from app.modules.channels import wecom
         cls = get_channel_class(ChannelType.WECOM)
         assert cls is not None

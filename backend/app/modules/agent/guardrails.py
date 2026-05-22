@@ -17,14 +17,16 @@ Guardrails 输出验证系统
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Union
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class GuardrailFailedError(Exception):
     """Guardrail 验证失败"""
+
     pass
 
 
@@ -34,7 +36,8 @@ class GuardrailConfig:
 
     借鉴 CrewAI GuardrailConfig
     """
-    validator: Union[str, Callable]  # 字符串=LLM验证，Callable=函数验证
+
+    validator: str | Callable  # 字符串=LLM验证，Callable=函数验证
     max_retries: int = 3
     on_failure: str = "retry"  # retry, fail, default_value
     default_value: Any = None
@@ -44,9 +47,10 @@ class GuardrailConfig:
 @dataclass
 class ValidationResult:
     """验证结果"""
+
     valid: bool
     reason: str = ""
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
 
 
 class Guardrail:
@@ -122,12 +126,18 @@ class Guardrail:
             if response_upper.startswith("PASS"):
                 return ValidationResult(valid=True, reason="LLM validation passed")
             elif response_upper.startswith("FAIL"):
-                reason = response[5:].strip() if ":" in response else "LLM validation failed"
+                reason = (
+                    response[5:].strip() if ":" in response else "LLM validation failed"
+                )
                 return ValidationResult(valid=False, reason=reason)
             else:
                 # 无法解析，假设通过
-                logger.warning(f"Could not parse LLM validation response: {response[:100]}")
-                return ValidationResult(valid=True, reason="Could not parse LLM response")
+                logger.warning(
+                    f"Could not parse LLM validation response: {response[:100]}"
+                )
+                return ValidationResult(
+                    valid=True, reason="Could not parse LLM response"
+                )
 
         except Exception as e:
             logger.error(f"LLM validation error: {e}")
@@ -154,7 +164,9 @@ class Guardrail:
             if isinstance(result, bool):
                 return ValidationResult(
                     valid=result,
-                    reason="Function validation passed" if result else "Function validation failed",
+                    reason="Function validation passed"
+                    if result
+                    else "Function validation failed",
                 )
             elif isinstance(result, tuple):
                 valid, reason = result
@@ -169,25 +181,29 @@ class Guardrail:
                 return ValidationResult(valid=bool(result), reason=str(result))
 
         except Exception as e:
-            return ValidationResult(valid=False, reason=f"Validation function error: {e}")
+            return ValidationResult(
+                valid=False, reason=f"Validation function error: {e}"
+            )
 
     async def _call_llm(self, prompt: str) -> str:
         """调用 LLM"""
-        if hasattr(self.llm, 'generate'):
+        if hasattr(self.llm, "generate"):
             result = self.llm.generate(prompt)
             if asyncio.iscoroutine(result):
                 result = await result
             return str(result)
-        elif hasattr(self.llm, 'chat'):
+        elif hasattr(self.llm, "chat"):
             result = self.llm.chat([{"role": "user", "content": prompt}])
             if asyncio.iscoroutine(result):
                 result = await result
             return str(result)
-        elif hasattr(self.llm, 'process_direct'):
+        elif hasattr(self.llm, "process_direct"):
             result = await self.llm.process_direct(message=prompt)
             return str(result)
         else:
-            raise ValueError("LLM has no callable method (generate, chat, or process_direct)")
+            raise ValueError(
+                "LLM has no callable method (generate, chat, or process_direct)"
+            )
 
 
 class GuardrailExecutor:
@@ -198,7 +214,7 @@ class GuardrailExecutor:
 
     def __init__(
         self,
-        guardrails: List[Guardrail],
+        guardrails: list[Guardrail],
         max_retries: int = 3,
     ):
         """
@@ -213,7 +229,7 @@ class GuardrailExecutor:
         self,
         func: Callable,
         *args,
-        context: Optional[str] = None,
+        context: str | None = None,
         **kwargs,
     ) -> Any:
         """执行函数并验证输出，失败则重试
@@ -262,7 +278,9 @@ class GuardrailExecutor:
 
                     # 注入失败原因到下次执行的上下文
                     if context and attempt < max_attempts:
-                        kwargs['context'] = context + f"\n\n[上次失败原因: {validation.reason}]"
+                        kwargs["context"] = (
+                            context + f"\n\n[上次失败原因: {validation.reason}]"
+                        )
                     break
 
             if all_valid:
@@ -271,7 +289,10 @@ class GuardrailExecutor:
         # 所有重试失败
         # 检查是否有 guardrail 配置了 default_value
         for g in self.guardrails:
-            if g.config.on_failure == "default_value" and g.config.default_value is not None:
+            if (
+                g.config.on_failure == "default_value"
+                and g.config.default_value is not None
+            ):
                 logger.info(f"Returning default value after {attempt} failed attempts")
                 return g.config.default_value
 
@@ -297,6 +318,7 @@ class GuardrailExecutor:
 
 
 # ==================== 预置验证器 ====================
+
 
 class builtin_validators:
     """预置验证函数"""
@@ -325,6 +347,7 @@ class builtin_validators:
         Returns:
             验证函数
         """
+
         def validator(output: Any) -> tuple:
             try:
                 if isinstance(output, str):
@@ -364,6 +387,7 @@ class builtin_validators:
         Returns:
             验证函数
         """
+
         def validator(output: Any) -> tuple:
             output_str = str(output)
             if len(output_str) > max_len:
@@ -402,6 +426,7 @@ class builtin_validators:
         Returns:
             验证函数
         """
+
         def validator(output: Any) -> tuple:
             output_str = str(output)
             missing = [s for s in substrings if s not in output_str]

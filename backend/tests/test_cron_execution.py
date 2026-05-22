@@ -8,18 +8,21 @@ P2: Cron 执行日志持久化 + 启动恢复测试
 - CronExecutionLog API 端点 (GET /executions, GET /executions/latest, POST /run)
 """
 
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timedelta, timezone
 
 from app.core.cron_scheduler import (
-    CronScheduler, _make_cron_callback, reconcile_cron_jobs,
+    CronScheduler,
+    _make_cron_callback,
+    reconcile_cron_jobs,
 )
-
 
 # ============================================================
 # CronScheduler.run_job_now 测试
 # ============================================================
+
 
 class TestCronRunJobNow:
     """测试手动触发任务执行"""
@@ -86,6 +89,7 @@ class TestCronRunJobNow:
 # _make_cron_callback 测试
 # ============================================================
 
+
 class TestMakeCronCallback:
     """测试回调工厂函数"""
 
@@ -98,15 +102,16 @@ class TestMakeCronCallback:
         assert callable(callback)
 
     def test_make_callback_with_input_data(self):
-        callback = _make_cron_callback("test_job", {
-            "input_data": {"message": "run this"}
-        })
+        callback = _make_cron_callback(
+            "test_job", {"input_data": {"message": "run this"}}
+        )
         assert callable(callback)
 
 
 # ============================================================
 # reconcile_cron_jobs 测试
 # ============================================================
+
 
 class TestReconcileCronJobs:
     """测试启动恢复"""
@@ -161,6 +166,7 @@ class TestReconcileCronJobs:
 
         # 验证任务已注册到调度器
         from app.core.cron_scheduler import get_cron_scheduler
+
         scheduler = get_cron_scheduler()
         job = scheduler.get_job("recovered_job")
         assert job is not None
@@ -171,8 +177,8 @@ class TestReconcileCronJobs:
 
     @pytest.mark.asyncio
     async def test_reconcile_skips_already_registered(self):
-        from app.models.models import CronJob
         from app.core.cron_scheduler import get_cron_scheduler
+        from app.models.models import CronJob
 
         scheduler = get_cron_scheduler()
         scheduler.add_job("existing_job", "*/5 * * * *", lambda: None, enabled=True)
@@ -202,6 +208,7 @@ class TestReconcileCronJobs:
 # CronExecutionLog HTTP API 测试
 # ============================================================
 
+
 class TestCronExecutionAPI:
     """测试执行日志 API 端点"""
 
@@ -218,8 +225,8 @@ class TestCronExecutionAPI:
     @pytest.mark.asyncio
     async def test_list_executions_with_job(self, client, test_user, db_session):
         """创建 job 后查询执行历史"""
-        from app.models.models import CronJob
         from app.models import CronExecutionLog
+        from app.models.models import CronJob
 
         # 创建 CronJob
         db_job = CronJob(
@@ -259,8 +266,8 @@ class TestCronExecutionAPI:
     @pytest.mark.asyncio
     async def test_get_latest_execution(self, client, test_user, db_session):
         """获取最近一次执行结果"""
-        from app.models.models import CronJob
         from app.models import CronExecutionLog
+        from app.models.models import CronJob
 
         db_job = CronJob(
             name="latest_test_job",
@@ -346,17 +353,13 @@ class TestCronExecutionAPI:
         headers = {"Authorization": f"Bearer {_make_token(test_user.id)}"}
 
         # 禁用
-        response = await client.post(
-            f"/api/cron/{db_job.id}/toggle", headers=headers
-        )
+        response = await client.post(f"/api/cron/{db_job.id}/toggle", headers=headers)
         assert response.status_code == 200
         data = response.json()
         assert data["is_active"] is False
 
         # 重新启用
-        response = await client.post(
-            f"/api/cron/{db_job.id}/toggle", headers=headers
-        )
+        response = await client.post(f"/api/cron/{db_job.id}/toggle", headers=headers)
         assert response.status_code == 200
         data = response.json()
         assert data["is_active"] is True
@@ -364,4 +367,5 @@ class TestCronExecutionAPI:
 
 def _make_token(user_id: int) -> str:
     from app.core.security import create_access_token
+
     return create_access_token(data={"sub": str(user_id)})

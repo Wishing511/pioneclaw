@@ -6,23 +6,33 @@ URI 格式: viking://user/{user_id}/session/{session_id}/{name}
 L0 URI:   {parent_uri}/.level_0
 L1 URI:   {parent_uri}/.level_1
 """
-from datetime import datetime, timezone
-from typing import Optional, List
-from sqlalchemy import String, Text, Boolean, DateTime, Integer, ForeignKey, JSON, Index
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+
+from __future__ import annotations
+
 import enum
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models import Agent, User
 
 
 class MemoryLayer(int, enum.Enum):
     """记忆层级"""
-    WORKING = 0   # L0 工作记忆 — 一句话摘要
-    SESSION = 1   # L1 会话记忆 — 段落概述
+
+    WORKING = 0  # L0 工作记忆 — 一句话摘要
+    SESSION = 1  # L1 会话记忆 — 段落概述
     LONG_TERM = 2  # L2 长期记忆 — 完整内容
 
 
 class ContextType(str, enum.Enum):
     """上下文类型"""
+
     MEMORY = "memory"
     RESOURCE = "resource"
     SKILL = "skill"
@@ -33,32 +43,42 @@ class LayeredMemory(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     uri: Mapped[str] = mapped_column(String(500), unique=True, index=True)
-    parent_uri: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, index=True)
+    parent_uri: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, index=True
+    )
     layer: Mapped[int] = mapped_column(Integer, index=True)  # 0/1/2
     context_type: Mapped[str] = mapped_column(String(20), default="memory")
     name: Mapped[str] = mapped_column(String(200))
 
     # 三级内容
-    abstract: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # L0 摘要
-    overview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)   # L1 概述
-    content: Mapped[str] = mapped_column(Text)                             # L2 全文
+    abstract: Mapped[str | None] = mapped_column(Text, nullable=True)  # L0 摘要
+    overview: Mapped[str | None] = mapped_column(Text, nullable=True)  # L1 概述
+    content: Mapped[str] = mapped_column(Text)  # L2 全文
 
-    tags: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
-    source: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    tags: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=list)
+    source: Mapped[str | None] = mapped_column(String(100), nullable=True)
     importance: Mapped[int] = mapped_column(Integer, default=3)
     access_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    session_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    session_id: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    agent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("agents.id"), nullable=True)
-    vector_id: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id"), nullable=True)
+    vector_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
-    user: Mapped["User"] = relationship(foreign_keys=[user_id])
-    agent: Mapped[Optional["Agent"]] = relationship(foreign_keys=[agent_id])
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
+    agent: Mapped[Agent | None] = relationship(foreign_keys=[agent_id])
 
     __table_args__ = (
         Index("ix_layered_memories_layer_user", "layer", "user_id"),

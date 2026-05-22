@@ -15,18 +15,26 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # 密钥 CLI 标志后缀模式（借鉴 OpenClaw io.audit.ts SECRET_FLAG_SUFFIX_PATTERN）
 SECRET_KEY_PATTERNS = re.compile(
-    r'(?:password|passwd|secret|token|api[-_]?key|auth|credential|private[-_]?key|access[-_]?key)',
-    re.IGNORECASE
+    r"(?:password|passwd|secret|token|api[-_]?key|auth|credential|private[-_]?key|access[-_]?key)",
+    re.IGNORECASE,
 )
 
 # 完全脱敏的关键词（值替换为 [REDACTED]）
-FULL_REDACT_KEYWORDS = {"password", "secret", "token", "api_key", "credential", "private_key", "access_key"}
+FULL_REDACT_KEYWORDS = {
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "credential",
+    "private_key",
+    "access_key",
+}
 
 
 class AuditLogger:
@@ -54,8 +62,8 @@ class AuditLogger:
         action: str,
         actor: str,
         resource: str = "",
-        details: Optional[Dict[str, Any]] = None,
-        sensitive_args: Optional[Dict[str, Any]] = None,
+        details: dict[str, Any] | None = None,
+        sensitive_args: dict[str, Any] | None = None,
     ) -> None:
         """记录审计条目
 
@@ -92,7 +100,9 @@ class AuditLogger:
             details={"success": success, "ip": ip},
         )
 
-    def log_config_change(self, actor: str, config_key: str, old_value: Any = None, new_value: Any = None) -> None:
+    def log_config_change(
+        self, actor: str, config_key: str, old_value: Any = None, new_value: Any = None
+    ) -> None:
         """记录配置变更"""
         self.log(
             action="config_change",
@@ -101,7 +111,9 @@ class AuditLogger:
             sensitive_args={"old_value": old_value, "new_value": new_value},
         )
 
-    def log_agent_action(self, action: str, actor: str, agent_id: str, details: Optional[Dict] = None) -> None:
+    def log_agent_action(
+        self, action: str, actor: str, agent_id: str, details: dict | None = None
+    ) -> None:
         """记录 Agent 操作"""
         self.log(
             action=f"agent_{action}",
@@ -110,7 +122,9 @@ class AuditLogger:
             details=details,
         )
 
-    def log_tool_execute(self, actor: str, tool_name: str, allowed: bool, agent_id: str = "") -> None:
+    def log_tool_execute(
+        self, actor: str, tool_name: str, allowed: bool, agent_id: str = ""
+    ) -> None:
         """记录工具调用"""
         self.log(
             action="tool_execute" if allowed else "tool_blocked",
@@ -119,7 +133,7 @@ class AuditLogger:
             details={"allowed": allowed, "agent_id": agent_id},
         )
 
-    def _redact_secrets(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _redact_secrets(self, data: dict[str, Any]) -> dict[str, Any]:
         """自动脱敏密钥字段"""
         redacted = {}
         for key, value in data.items():
@@ -140,7 +154,9 @@ class AuditLogger:
         # 模式匹配
         return bool(SECRET_KEY_PATTERNS.search(key_lower))
 
-    def read_logs(self, date: Optional[str] = None, action: Optional[str] = None, limit: int = 100) -> List[Dict]:
+    def read_logs(
+        self, date: str | None = None, action: str | None = None, limit: int = 100
+    ) -> list[dict]:
         """读取审计日志
 
         Args:
@@ -158,7 +174,7 @@ class AuditLogger:
 
         entries = []
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:

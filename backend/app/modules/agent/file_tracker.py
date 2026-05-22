@@ -6,9 +6,8 @@ FileTracker — 压缩后关键文件恢复
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FileAccessRecord:
     """文件访问记录"""
+
     path: str
     content_hash: str
     estimated_tokens: int
@@ -41,7 +41,7 @@ class FileTracker:
         self.max_files = max_files
         self.max_tokens = max_tokens
         # path -> FileAccessRecord
-        self._records: Dict[str, FileAccessRecord] = {}
+        self._records: dict[str, FileAccessRecord] = {}
 
     def record_access(
         self,
@@ -63,6 +63,7 @@ class FileTracker:
 
         # 估算 token 数（复用 context_pruner 的估算逻辑）
         from app.modules.agent.context_pruner import _rough_char_tokens
+
         estimated_tokens = _rough_char_tokens(content)
 
         # 计算内容 hash（用于后续比对）
@@ -90,9 +91,9 @@ class FileTracker:
 
     def get_recent(
         self,
-        max_tokens: Optional[int] = None,
-        max_files: Optional[int] = None,
-    ) -> List[FileAccessRecord]:
+        max_tokens: int | None = None,
+        max_files: int | None = None,
+    ) -> list[FileAccessRecord]:
         """在预算内返回最近访问的文件记录。
 
         优先级：编辑过的文件 > 最近读取的 > 其他

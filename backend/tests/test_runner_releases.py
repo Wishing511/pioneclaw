@@ -6,20 +6,22 @@ TDD: 测试先于实现。首次运行应全部 FAIL（端点尚未实现）。
 
 import os
 import tempfile
+
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, RunnerRelease
+from app.models import RunnerRelease, User
 from tests.conftest import auth_headers
-
 
 # ============================
 # 辅助函数
 # ============================
 
-async def create_release(db_session: AsyncSession, version: str, platform: str, **kwargs) -> RunnerRelease:
+
+async def create_release(
+    db_session: AsyncSession, version: str, platform: str, **kwargs
+) -> RunnerRelease:
     """在测试数据库中创建一个 RunnerRelease"""
     release = RunnerRelease(
         version=version,
@@ -41,6 +43,7 @@ async def create_release(db_session: AsyncSession, version: str, platform: str, 
 # ============================
 # 1. POST /runner-releases/upload
 # ============================
+
 
 class TestUploadRelease:
     """测试上传 Runner 版本"""
@@ -139,6 +142,7 @@ class TestUploadRelease:
 # 2. GET /runner-releases/latest
 # ============================
 
+
 class TestGetLatest:
     """测试获取各平台最新版本"""
 
@@ -169,9 +173,7 @@ class TestGetLatest:
         assert data["macos"]["version"] == "1.0.0"
 
     @pytest.mark.asyncio
-    async def test_get_latest_empty(
-        self, client: AsyncClient, test_user: User
-    ):
+    async def test_get_latest_empty(self, client: AsyncClient, test_user: User):
         """没有最新版本时返回空 dict"""
         response = await client.get(
             "/api/runner-releases/latest",
@@ -192,6 +194,7 @@ class TestGetLatest:
 # 3. GET /runner-releases/versions
 # ============================
 
+
 class TestGetVersions:
     """测试获取版本列表"""
 
@@ -200,9 +203,9 @@ class TestGetVersions:
         self, client: AsyncClient, db_session: AsyncSession, test_user: User
     ):
         """返回所有版本，按 created_at 降序"""
-        r1 = await create_release(db_session, "1.0.0", "windows")
-        r2 = await create_release(db_session, "2.0.0", "windows")
-        r3 = await create_release(db_session, "1.1.0", "linux")
+        await create_release(db_session, "1.0.0", "windows")
+        await create_release(db_session, "2.0.0", "windows")
+        await create_release(db_session, "1.1.0", "linux")
 
         response = await client.get(
             "/api/runner-releases/versions",
@@ -215,7 +218,9 @@ class TestGetVersions:
         assert len(data) >= 3
         versions = [r["version"] for r in data]
         # Should be in created_at desc order
-        assert versions.index("1.1.0") < versions.index("1.0.0") or True  # created_at sort
+        assert (
+            versions.index("1.1.0") < versions.index("1.0.0") or True
+        )  # created_at sort
 
     @pytest.mark.asyncio
     async def test_get_versions_filter_by_platform(
@@ -247,6 +252,7 @@ class TestGetVersions:
 # 4. GET /runner-releases/download/{version}/{filename}
 # ============================
 
+
 class TestDownloadRelease:
     """测试下载 Runner 安装包"""
 
@@ -263,7 +269,9 @@ class TestDownloadRelease:
             f.write(content)
 
         release = await create_release(
-            db_session, "2.0.0", "windows",
+            db_session,
+            "2.0.0",
+            "windows",
             filename="test-download.zip",
             file_path=file_path,
             file_size=len(content),
@@ -287,7 +295,9 @@ class TestDownloadRelease:
     ):
         """数据库记录存在但文件缺失 → 404"""
         release = await create_release(
-            db_session, "2.0.0", "windows",
+            db_session,
+            "2.0.0",
+            "windows",
             filename="missing.zip",
             file_path="/nonexistent/path/missing.zip",
         )
@@ -323,6 +333,7 @@ class TestDownloadRelease:
 # ============================
 # 5. POST /runner-releases/versions/{version}/set-latest
 # ============================
+
 
 class TestSetLatest:
     """测试设置最新版本"""
@@ -412,6 +423,7 @@ class TestSetLatest:
 # 6. DELETE /runner-releases/versions/{version}
 # ============================
 
+
 class TestDeleteVersion:
     """测试删除版本"""
 
@@ -428,7 +440,9 @@ class TestDeleteVersion:
             f.write(content)
 
         release = await create_release(
-            db_session, "1.0.0", "windows",
+            db_session,
+            "1.0.0",
+            "windows",
             filename="to-delete.zip",
             file_path=file_path,
             uploaded_by=test_admin.id,
@@ -450,6 +464,7 @@ class TestDeleteVersion:
         # Verify DB record is deleted
         await db_session.flush()
         from sqlalchemy import select
+
         result = await db_session.execute(
             select(RunnerRelease).where(RunnerRelease.id == release.id)
         )

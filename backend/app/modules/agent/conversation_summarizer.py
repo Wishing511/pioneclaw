@@ -12,23 +12,23 @@ ConversationSummarizer - LLM 对话摘要写入 MEMORY.md (Track 1)
 
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
+
+from app.modules.agent.compactor import CONVERSATION_TO_MEMORY_PROMPT
 
 logger = logging.getLogger(__name__)
-
-# 复用 compactor.py 中的提示词
-from app.modules.agent.compactor import CONVERSATION_TO_MEMORY_PROMPT
 
 
 @dataclass
 class SummarizerConfig:
     """摘要器配置"""
-    token_threshold: int = 4000       # token 数阈值
-    tool_call_threshold: int = 5      # 工具调用次数阈值
-    cooldown_seconds: float = 300.0   # 冷却期（秒）
-    max_memory_chars: int = 4000      # 摘要最大字符数
-    source_tag: str = "agent-summary" # MEMORY.md 中的来源标签
+
+    token_threshold: int = 4000  # token 数阈值
+    tool_call_threshold: int = 5  # 工具调用次数阈值
+    cooldown_seconds: float = 300.0  # 冷却期（秒）
+    max_memory_chars: int = 4000  # 摘要最大字符数
+    source_tag: str = "agent-summary"  # MEMORY.md 中的来源标签
 
 
 class ConversationSummarizer:
@@ -51,8 +51,8 @@ class ConversationSummarizer:
         model: str = "gpt-4",
         user_id: int = 1,
         session_id: str = "",
-        agent_id: Optional[int] = None,
-        config: Optional[SummarizerConfig] = None,
+        agent_id: int | None = None,
+        config: SummarizerConfig | None = None,
     ):
         self.llm_provider = llm_provider
         self.memory_store = memory_store
@@ -72,11 +72,11 @@ class ConversationSummarizer:
         # 阈值检查（任一达到即可）
         if token_count >= self.config.token_threshold:
             return True
-        if tool_call_count >= self.config.tool_call_threshold:
-            return True
-        return False
+        return tool_call_count >= self.config.tool_call_threshold
 
-    async def summarize_conversation(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+    async def summarize_conversation(
+        self, messages: list[dict[str, Any]]
+    ) -> str | None:
         """摘要对话并写入 MEMORY.md
 
         Returns:
@@ -103,7 +103,7 @@ class ConversationSummarizer:
             # 4. 写入 MEMORY.md
             line_number = self.memory_store.append_entry(
                 source=self.config.source_tag,
-                content=summary[:self.config.max_memory_chars],
+                content=summary[: self.config.max_memory_chars],
             )
             self._last_summarized_at = time.time()
             logger.info(
@@ -112,10 +112,14 @@ class ConversationSummarizer:
             return summary
 
         except Exception as e:
-            logger.error(f"ConversationSummarizer: summarize failed: {e}", exc_info=True)
+            logger.error(
+                f"ConversationSummarizer: summarize failed: {e}", exc_info=True
+            )
             return None
 
-    async def summarize_overflow(self, old_messages: List[Dict[str, Any]]) -> Optional[str]:
+    async def summarize_overflow(
+        self, old_messages: list[dict[str, Any]]
+    ) -> str | None:
         """Compactor 溢出时调用：摘要被淘汰的消息
 
         Args:
@@ -141,7 +145,7 @@ class ConversationSummarizer:
 
             line_number = self.memory_store.append_entry(
                 source="auto-overflow",
-                content=summary[:self.config.max_memory_chars],
+                content=summary[: self.config.max_memory_chars],
             )
             logger.info(
                 f"ConversationSummarizer: wrote overflow summary to MEMORY.md line {line_number}"
@@ -152,7 +156,7 @@ class ConversationSummarizer:
             logger.error(f"ConversationSummarizer: overflow summarize failed: {e}")
             return None
 
-    def _format_messages(self, messages: List[Dict[str, Any]]) -> str:
+    def _format_messages(self, messages: list[dict[str, Any]]) -> str:
         """格式化消息为文本（复用 AIE MessageAnalyzer 的简化版）"""
         lines = []
         total_chars = 0
@@ -184,7 +188,7 @@ class ConversationSummarizer:
 
         return "\n".join(lines)
 
-    async def _call_llm_for_summary(self, formatted_messages: str) -> Optional[str]:
+    async def _call_llm_for_summary(self, formatted_messages: str) -> str | None:
         """调用 LLM 生成摘要"""
         if not self.llm_provider:
             return self._fallback_summary(formatted_messages)
@@ -193,7 +197,7 @@ class ConversationSummarizer:
             prompt = CONVERSATION_TO_MEMORY_PROMPT.format(messages=formatted_messages)
             messages = [{"role": "user", "content": prompt}]
 
-            if hasattr(self.llm_provider, 'chat_stream'):
+            if hasattr(self.llm_provider, "chat_stream"):
                 chunks = []
                 async for chunk in self.llm_provider.chat_stream(
                     messages=messages,
@@ -204,7 +208,7 @@ class ConversationSummarizer:
                         if content:
                             chunks.append(content)
                 return "".join(chunks).strip()
-            elif hasattr(self.llm_provider, 'chat'):
+            elif hasattr(self.llm_provider, "chat"):
                 response = await self.llm_provider.chat(messages)
                 if isinstance(response, dict):
                     return response.get("content", "").strip()

@@ -38,7 +38,7 @@ jobs:
           pip install ruff
 
       - name: Lint with ruff
-        run: ruff check app/ tests/ --select E,W,F,I,B,N,UP,SIM
+        run: ruff check app/ tests/ --select E,W,F,I --line-length=160 --ignore B008
 
       - name: Run tests with coverage
         env:

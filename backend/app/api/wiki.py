@@ -1,26 +1,37 @@
 """
 Wiki 知识库 API
 """
-import re
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from fastapi.responses import PlainTextResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_
-from sqlalchemy.orm import joinedload
-from loguru import logger
 
-from app.core.database import get_db
+import re
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import PlainTextResponse
+from loguru import logger
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
 from app.api.auth import get_current_active_user
-from app.models import User, Wiki, WikiVersion, WikiSpace, Approval
-from app.models.wiki import WikiScope, WikiSpaceType
-from app.models.approval import ApprovalType, ApprovalStatus
+from app.core.database import get_db
+from app.models import Approval, User, Wiki, WikiSpace, WikiVersion
+from app.models.wiki import WikiScope
 from app.schemas.wiki import (
-    WikiCreate, WikiUpdate, WikiInDB, WikiDetail, WikiTree,
-    WikiVersionInDB, WikiVersionListResponse, WikiListResponse,
-    WikiSearchResult, WikiSearchResponse, WikiImportRequest,
-    WikiSemanticSearchRequest, WikiSemanticSearchResult, WikiSemanticSearchResponse,
-    WikiChunkRequest, WikiChunkResponse,
+    WikiChunkRequest,
+    WikiChunkResponse,
+    WikiCreate,
+    WikiDetail,
+    WikiImportRequest,
+    WikiInDB,
+    WikiListResponse,
+    WikiSearchResponse,
+    WikiSearchResult,
+    WikiSemanticSearchRequest,
+    WikiSemanticSearchResponse,
+    WikiSemanticSearchResult,
+    WikiTree,
+    WikiUpdate,
+    WikiVersionInDB,
+    WikiVersionListResponse,
 )
 
 router = APIRouter(prefix="/wiki", tags=["Wiki管理"])
@@ -78,7 +89,8 @@ def filter_wikis_by_permission(user: User, query):
 
     if user.organization_id:
         conditions.append(
-            (Wiki.scope == WikiScope.ORG.value) & (Wiki.organization_id == user.organization_id)
+            (Wiki.scope == WikiScope.ORG.value)
+            & (Wiki.organization_id == user.organization_id)
         )
 
     conditions.append(
@@ -88,20 +100,30 @@ def filter_wikis_by_permission(user: User, query):
     return query.where(or_(*conditions))
 
 
-def build_wiki_tree(wikis: List[Wiki], parent_id: str = None) -> List[WikiTree]:
+def build_wiki_tree(wikis: list[Wiki], parent_id: str = None) -> list[WikiTree]:
     """构建 Wiki 树"""
     tree = []
     children = [w for w in wikis if w.parent_id == parent_id]
     for wiki in children:
         node = WikiTree(
-            id=wiki.id, title=wiki.title, content=wiki.content,
-            path=wiki.path, parent_id=wiki.parent_id, tags=wiki.tags,
-            created_by=wiki.created_by, organization_id=wiki.organization_id,
-            version=wiki.version, status=wiki.status,
-            doc_type=wiki.doc_type, source=wiki.source,
-            chunk_count=wiki.chunk_count, is_indexed=wiki.is_indexed,
-            scope=wiki.scope, meta_data=wiki.meta_data,
-            created_at=wiki.created_at, updated_at=wiki.updated_at,
+            id=wiki.id,
+            title=wiki.title,
+            content=wiki.content,
+            path=wiki.path,
+            parent_id=wiki.parent_id,
+            tags=wiki.tags,
+            created_by=wiki.created_by,
+            organization_id=wiki.organization_id,
+            version=wiki.version,
+            status=wiki.status,
+            doc_type=wiki.doc_type,
+            source=wiki.source,
+            chunk_count=wiki.chunk_count,
+            is_indexed=wiki.is_indexed,
+            scope=wiki.scope,
+            meta_data=wiki.meta_data,
+            created_at=wiki.created_at,
+            updated_at=wiki.updated_at,
         )
         node.children = build_wiki_tree(wikis, wiki.id)
         tree.append(node)
@@ -110,7 +132,7 @@ def build_wiki_tree(wikis: List[Wiki], parent_id: str = None) -> List[WikiTree]:
 
 def extract_title_from_markdown(content: str) -> str:
     """从 Markdown 内容提取标题"""
-    match = re.match(r'^#\s+(.+)', content)
+    match = re.match(r"^#\s+(.+)", content)
     if match:
         return match.group(1).strip()
     return "Untitled"
@@ -118,10 +140,10 @@ def extract_title_from_markdown(content: str) -> str:
 
 @router.get("/", response_model=WikiListResponse)
 async def list_wikis(
-    organization_id: Optional[str] = None,
-    status: Optional[str] = None,
-    tag: Optional[str] = None,
-    scope: Optional[str] = None,
+    organization_id: str | None = None,
+    status: str | None = None,
+    tag: str | None = None,
+    scope: str | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -162,9 +184,9 @@ async def list_wikis(
     )
 
 
-@router.get("/tree", response_model=List[WikiTree])
+@router.get("/tree", response_model=list[WikiTree])
 async def get_wiki_tree(
-    organization_id: Optional[str] = None,
+    organization_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -190,15 +212,20 @@ async def search_wikis(
 ):
     """搜索 Wiki"""
     # 简单的 LIKE 搜索，后续可替换为 Elasticsearch
-    query = select(Wiki).where(
-        (Wiki.title.contains(q)) | (Wiki.content.contains(q))
-    ).where(Wiki.status == "published")
+    query = (
+        select(Wiki)
+        .where((Wiki.title.contains(q)) | (Wiki.content.contains(q)))
+        .where(Wiki.status == "published")
+    )
     # 权限过滤
     query = filter_wikis_by_permission(current_user, query)
 
-    count_query = select(func.count()).select_from(Wiki).where(
-        (Wiki.title.contains(q)) | (Wiki.content.contains(q))
-    ).where(Wiki.status == "published")
+    count_query = (
+        select(func.count())
+        .select_from(Wiki)
+        .where((Wiki.title.contains(q)) | (Wiki.content.contains(q)))
+        .where(Wiki.status == "published")
+    )
     count_query = filter_wikis_by_permission(current_user, count_query)
 
     total = (await db.execute(count_query)).scalar() or 0
@@ -221,12 +248,14 @@ async def search_wikis(
             if end < len(w.content):
                 highlight = highlight + "..."
 
-        items.append(WikiSearchResult(
-            id=w.id,
-            title=w.title,
-            path=w.path,
-            highlight=highlight,
-        ))
+        items.append(
+            WikiSearchResult(
+                id=w.id,
+                title=w.title,
+                path=w.path,
+                highlight=highlight,
+            )
+        )
 
     return WikiSearchResponse(items=items, total=total)
 
@@ -249,7 +278,9 @@ async def create_wiki(
         raise HTTPException(status_code=403, detail="只有超管可以创建系统级 Wiki")
     if scope == WikiScope.ORG.value:
         if not current_user.is_org_admin and not current_user.is_super_admin:
-            raise HTTPException(status_code=403, detail="只有组织管理员可以创建组织级 Wiki")
+            raise HTTPException(
+                status_code=403, detail="只有组织管理员可以创建组织级 Wiki"
+            )
         if not data.organization_id and not current_user.organization_id:
             raise HTTPException(status_code=400, detail="组织级 Wiki 需要指定组织")
 
@@ -321,13 +352,18 @@ async def parse_wiki_file(
 
         elif ext == ".docx":
             from docx import Document
+
             doc = Document(BytesIO(file_bytes))
             paragraphs = []
             for p in doc.paragraphs:
                 if p.text.strip():
                     # Preserve heading levels
                     if p.style.name.startswith("Heading"):
-                        level = int(p.style.name.split()[-1]) if p.style.name.split()[-1].isdigit() else 1
+                        level = (
+                            int(p.style.name.split()[-1])
+                            if p.style.name.split()[-1].isdigit()
+                            else 1
+                        )
                         paragraphs.append("#" * level + " " + p.text.strip())
                     else:
                         paragraphs.append(p.text.strip())
@@ -335,6 +371,7 @@ async def parse_wiki_file(
 
         elif ext == ".pdf":
             from PyPDF2 import PdfReader
+
             reader = PdfReader(BytesIO(file_bytes))
             pages = []
             for page in reader.pages:
@@ -365,14 +402,23 @@ async def list_wiki_approvals(
 ):
     """获取 Wiki 审批列表"""
     result = await db.execute(
-        select(Approval).where(
-            Approval.approval_type == "task_approval",
-            Approval.resource_type == "wiki"
-        ).order_by(Approval.created_at.desc())
+        select(Approval)
+        .where(
+            Approval.approval_type == "task_approval", Approval.resource_type == "wiki"
+        )
+        .order_by(Approval.created_at.desc())
     )
     approvals = result.scalars().all()
-    return [{"id": a.id, "title": a.title, "status": a.status, "requester_id": a.requester_id,
-             "created_at": a.created_at.isoformat()} for a in approvals]
+    return [
+        {
+            "id": a.id,
+            "title": a.title,
+            "status": a.status,
+            "requester_id": a.requester_id,
+            "created_at": a.created_at.isoformat(),
+        }
+        for a in approvals
+    ]
 
 
 @router.get("/{wiki_id}", response_model=WikiDetail)
@@ -424,9 +470,15 @@ async def update_wiki(
     # 如果要修改 scope，需要检查权限
     if data.scope and data.scope != wiki.scope:
         if data.scope == WikiScope.SYSTEM.value and not current_user.is_super_admin:
-            raise HTTPException(status_code=403, detail="只有超管可以将 Wiki 提升为系统级")
-        if data.scope == WikiScope.ORG.value and not (current_user.is_org_admin or current_user.is_super_admin):
-            raise HTTPException(status_code=403, detail="只有组织管理员可以将 Wiki 提升为组织级")
+            raise HTTPException(
+                status_code=403, detail="只有超管可以将 Wiki 提升为系统级"
+            )
+        if data.scope == WikiScope.ORG.value and not (
+            current_user.is_org_admin or current_user.is_super_admin
+        ):
+            raise HTTPException(
+                status_code=403, detail="只有组织管理员可以将 Wiki 提升为组织级"
+            )
 
     # 保存当前版本到历史
     version = wiki.create_version(
@@ -437,7 +489,7 @@ async def update_wiki(
 
     # 更新字段
     update_data = data.model_dump(exclude_unset=True)
-    change_summary = update_data.pop("change_summary", None)
+    update_data.pop("change_summary", None)
     for key, value in update_data.items():
         setattr(wiki, key, value)
 
@@ -491,7 +543,9 @@ async def get_wiki_history(
         raise HTTPException(status_code=404, detail="Wiki 不存在")
 
     count_result = await db.execute(
-        select(func.count()).select_from(WikiVersion).where(WikiVersion.wiki_id == wiki_id)
+        select(func.count())
+        .select_from(WikiVersion)
+        .where(WikiVersion.wiki_id == wiki_id)
     )
     total = count_result.scalar() or 0
 
@@ -530,8 +584,9 @@ async def restore_wiki_version(
 
     # 查找目标版本
     result = await db.execute(
-        select(WikiVersion)
-        .where(WikiVersion.wiki_id == wiki_id, WikiVersion.version == version)
+        select(WikiVersion).where(
+            WikiVersion.wiki_id == wiki_id, WikiVersion.version == version
+        )
     )
     target_version = result.scalar_one_or_none()
     if not target_version:
@@ -555,6 +610,7 @@ async def restore_wiki_version(
 
 
 # ==================== 语义搜索 ====================
+
 
 @router.post("/search/semantic", response_model=WikiSemanticSearchResponse)
 async def semantic_search_wikis(
@@ -589,15 +645,17 @@ async def semantic_search_wikis(
                 )
                 wiki = wiki_result.scalar_one_or_none()
                 if wiki:
-                    items.append(WikiSemanticSearchResult(
-                        id=wiki.id,
-                        title=wiki.title,
-                        path=wiki.path,
-                        content_snippet=r.get("content", "")[:200],
-                        score=r.get("score", 0),
-                        doc_type=wiki.doc_type,
-                        tags=wiki.tags or [],
-                    ))
+                    items.append(
+                        WikiSemanticSearchResult(
+                            id=wiki.id,
+                            title=wiki.title,
+                            path=wiki.path,
+                            content_snippet=r.get("content", "")[:200],
+                            score=r.get("score", 0),
+                            doc_type=wiki.doc_type,
+                            tags=wiki.tags or [],
+                        )
+                    )
 
         return WikiSemanticSearchResponse(items=items, total=len(items))
 
@@ -612,9 +670,12 @@ async def _keyword_search_fallback(
     db: AsyncSession,
 ) -> WikiSemanticSearchResponse:
     """关键词搜索降级"""
-    query = select(Wiki).where(
-        (Wiki.title.contains(data.query)) | (Wiki.content.contains(data.query))
-    ).where(Wiki.status == "published").limit(data.top_k)
+    query = (
+        select(Wiki)
+        .where((Wiki.title.contains(data.query)) | (Wiki.content.contains(data.query)))
+        .where(Wiki.status == "published")
+        .limit(data.top_k)
+    )
 
     result = await db.execute(query)
     wikis = result.scalars().all()
@@ -628,20 +689,23 @@ async def _keyword_search_fallback(
         elif data.query.lower() in wiki.content.lower():
             score = 0.7
 
-        items.append(WikiSemanticSearchResult(
-            id=wiki.id,
-            title=wiki.title,
-            path=wiki.path,
-            content_snippet=wiki.content[:200],
-            score=score,
-            doc_type=wiki.doc_type,
-            tags=wiki.tags or [],
-        ))
+        items.append(
+            WikiSemanticSearchResult(
+                id=wiki.id,
+                title=wiki.title,
+                path=wiki.path,
+                content_snippet=wiki.content[:200],
+                score=score,
+                doc_type=wiki.doc_type,
+                tags=wiki.tags or [],
+            )
+        )
 
     return WikiSemanticSearchResponse(items=items, total=len(items))
 
 
 # ==================== 分块管理 ====================
+
 
 @router.post("/{wiki_id}/chunks", response_model=WikiChunkResponse)
 async def chunk_wiki(
@@ -672,15 +736,17 @@ async def chunk_wiki(
     for para in paragraphs:
         if len(current_chunk) + len(para) > data.chunk_size and current_chunk:
             # 保存当前块
-            chunks.append({
-                "index": chunk_index,
-                "content": current_chunk.strip(),
-                "start": start_pos,
-                "end": start_pos + len(current_chunk),
-            })
+            chunks.append(
+                {
+                    "index": chunk_index,
+                    "content": current_chunk.strip(),
+                    "start": start_pos,
+                    "end": start_pos + len(current_chunk),
+                }
+            )
             # 保留重叠部分
             if data.chunk_overlap > 0 and len(current_chunk) > data.chunk_overlap:
-                current_chunk = current_chunk[-data.chunk_overlap:] + "\n\n" + para
+                current_chunk = current_chunk[-data.chunk_overlap :] + "\n\n" + para
             else:
                 current_chunk = para
             start_pos += len(current_chunk) - len(para)
@@ -690,12 +756,14 @@ async def chunk_wiki(
 
     # 最后一块
     if current_chunk.strip():
-        chunks.append({
-            "index": chunk_index,
-            "content": current_chunk.strip(),
-            "start": start_pos,
-            "end": start_pos + len(current_chunk),
-        })
+        chunks.append(
+            {
+                "index": chunk_index,
+                "content": current_chunk.strip(),
+                "start": start_pos,
+                "end": start_pos + len(current_chunk),
+            }
+        )
 
     # 更新分块数
     wiki.chunk_count = len(chunks)
@@ -745,7 +813,7 @@ async def index_wiki_to_vector_store(
                     "path": wiki.path,
                     "chunk_index": chunk["index"],
                     "doc_type": wiki.doc_type,
-                }
+                },
             )
 
         # 更新索引状态
@@ -797,6 +865,7 @@ async def remove_wiki_from_index(
 
 # ==================== 知识图谱集成 ====================
 
+
 @router.post("/{wiki_id}/graph", response_model=dict)
 async def index_wiki_to_graph(
     wiki_id: str,
@@ -834,6 +903,7 @@ async def index_wiki_to_graph(
 # Wiki 空间
 # ============================================================
 
+
 @router.get("/spaces")
 async def list_spaces(
     db: AsyncSession = Depends(get_db),
@@ -841,15 +911,22 @@ async def list_spaces(
 ):
     """获取用户可见的空间列表"""
     # 用户自己的空间 + 组织空间 + 系统空间
-    conditions = [WikiSpace.is_active == True]
+    conditions = [WikiSpace.is_active]
     result = await db.execute(
         select(WikiSpace).where(*conditions).order_by(WikiSpace.type, WikiSpace.name)
     )
     spaces = result.scalars().all()
     return [
-        {"id": s.id, "name": s.name, "description": s.description,
-         "type": s.type, "owner_id": s.owner_id, "organization_id": s.organization_id,
-         "doc_count": 0, "created_at": s.created_at.isoformat()}
+        {
+            "id": s.id,
+            "name": s.name,
+            "description": s.description,
+            "type": s.type,
+            "owner_id": s.owner_id,
+            "organization_id": s.organization_id,
+            "doc_count": 0,
+            "created_at": s.created_at.isoformat(),
+        }
         for s in spaces
     ]
 
@@ -921,12 +998,16 @@ async def get_space(
     space = await db.get(WikiSpace, space_id)
     if not space:
         raise HTTPException(status_code=404, detail="空间不存在")
-    doc_count = (await db.execute(
-        select(func.count(Wiki.id)).where(Wiki.space_id == space_id)
-    )).scalar() or 0
+    doc_count = (
+        await db.execute(select(func.count(Wiki.id)).where(Wiki.space_id == space_id))
+    ).scalar() or 0
     return {
-        "id": space.id, "name": space.name, "description": space.description,
-        "type": space.type, "owner_id": space.owner_id, "doc_count": doc_count,
+        "id": space.id,
+        "name": space.name,
+        "description": space.description,
+        "type": space.type,
+        "owner_id": space.owner_id,
+        "doc_count": doc_count,
         "created_at": space.created_at.isoformat(),
     }
 
@@ -934,8 +1015,8 @@ async def get_space(
 @router.put("/spaces/{space_id}")
 async def update_space(
     space_id: str,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
+    name: str | None = None,
+    description: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -965,8 +1046,14 @@ async def list_space_documents(
     )
     docs = result.scalars().all()
     return [
-        {"id": d.id, "title": d.title, "path": d.path, "status": d.status,
-         "version": d.version, "updated_at": d.updated_at.isoformat()}
+        {
+            "id": d.id,
+            "title": d.title,
+            "path": d.path,
+            "status": d.status,
+            "version": d.version,
+            "updated_at": d.updated_at.isoformat(),
+        }
         for d in docs
     ]
 
@@ -974,6 +1061,7 @@ async def list_space_documents(
 # ============================================================
 # 文档操作
 # ============================================================
+
 
 @router.get("/{wiki_id}/content")
 async def get_wiki_content(
@@ -985,7 +1073,12 @@ async def get_wiki_content(
     wiki = await db.get(Wiki, wiki_id)
     if not wiki:
         raise HTTPException(status_code=404, detail="文档不存在")
-    return {"id": wiki.id, "title": wiki.title, "content": wiki.content, "content_type": wiki.doc_type}
+    return {
+        "id": wiki.id,
+        "title": wiki.title,
+        "content": wiki.content,
+        "content_type": wiki.doc_type,
+    }
 
 
 @router.get("/{wiki_id}/outline")
@@ -1023,8 +1116,13 @@ async def get_wiki_backlinks(
     )
     backlinks = result.scalars().all()
     return {
-        "id": wiki.id, "title": wiki.title,
-        "backlinks": [{"id": b.id, "title": b.title, "path": b.path} for b in backlinks if b.id != wiki_id]
+        "id": wiki.id,
+        "title": wiki.title,
+        "backlinks": [
+            {"id": b.id, "title": b.title, "path": b.path}
+            for b in backlinks
+            if b.id != wiki_id
+        ],
     }
 
 
@@ -1041,8 +1139,11 @@ async def get_wiki_outlinks(
     # 提取 Markdown 链接 [text](url)
     links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", wiki.content)
     return {
-        "id": wiki.id, "title": wiki.title,
-        "outlinks": [{"text": t, "url": u, "is_wiki": u.startswith("/wiki/")} for t, u in links]
+        "id": wiki.id,
+        "title": wiki.title,
+        "outlinks": [
+            {"text": t, "url": u, "is_wiki": u.startswith("/wiki/")} for t, u in links
+        ],
     }
 
 
@@ -1053,12 +1154,14 @@ async def download_wiki(
     current_user: User = Depends(get_current_active_user),
 ):
     """下载文档为 Markdown"""
-    from fastapi.responses import PlainTextResponse
     wiki = await db.get(Wiki, wiki_id)
     if not wiki:
         raise HTTPException(status_code=404, detail="文档不存在")
-    return PlainTextResponse(wiki.content, media_type="text/markdown",
-                             headers={"Content-Disposition": f"attachment; filename={wiki.title}.md"})
+    return PlainTextResponse(
+        wiki.content,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f"attachment; filename={wiki.title}.md"},
+    )
 
 
 @router.post("/{wiki_id}/publish")
@@ -1082,11 +1185,12 @@ async def publish_wiki(
 # P1: 对话捕获 + 版本内容 + 审批
 # ============================================================
 
+
 @router.post("/capture_from_chat")
 async def capture_from_chat(
     title: str,
     content: str,
-    space_id: Optional[str] = None,
+    space_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -1094,20 +1198,33 @@ async def capture_from_chat(
     # Auto-create user space if not specified
     if not space_id:
         sp_result = await db.execute(
-            select(WikiSpace).where(WikiSpace.owner_id == current_user.id, WikiSpace.type == "user")
+            select(WikiSpace).where(
+                WikiSpace.owner_id == current_user.id, WikiSpace.type == "user"
+            )
         )
         space = sp_result.scalar_one_or_none()
         if not space:
-            space = WikiSpace(name=f"{current_user.display_name or current_user.username} 的空间",
-                              type="user", owner_id=current_user.id, organization_id=current_user.organization_id)
+            space = WikiSpace(
+                name=f"{current_user.display_name or current_user.username} 的空间",
+                type="user",
+                owner_id=current_user.id,
+                organization_id=current_user.organization_id,
+            )
             db.add(space)
             await db.flush()
         space_id = space.id
 
-    safe_title = re.sub(r'[^\w\-]', '-', title.lower())
+    safe_title = re.sub(r"[^\w\-]", "-", title.lower())
     safe_path = f"/wiki/{current_user.username}/{safe_title}"
-    wiki = Wiki(title=title, content=content, path=safe_path, space_id=space_id,
-                created_by=current_user.id, scope="user", doc_type="markdown")
+    wiki = Wiki(
+        title=title,
+        content=content,
+        path=safe_path,
+        space_id=space_id,
+        created_by=current_user.id,
+        scope="user",
+        doc_type="markdown",
+    )
     db.add(wiki)
     await db.commit()
     await db.refresh(wiki)
@@ -1116,18 +1233,26 @@ async def capture_from_chat(
 
 @router.get("/{wiki_id}/versions/{version}/content")
 async def get_version_content(
-    wiki_id: str, version: int,
+    wiki_id: str,
+    version: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """获取指定版本的内容"""
     result = await db.execute(
-        select(WikiVersion).where(WikiVersion.wiki_id == wiki_id, WikiVersion.version == version)
+        select(WikiVersion).where(
+            WikiVersion.wiki_id == wiki_id, WikiVersion.version == version
+        )
     )
     ver = result.scalar_one_or_none()
     if not ver:
         raise HTTPException(status_code=404, detail="版本不存在")
-    return {"wiki_id": wiki_id, "version": ver.version, "title": ver.title, "content": ver.content}
+    return {
+        "wiki_id": wiki_id,
+        "version": ver.version,
+        "title": ver.title,
+        "content": ver.content,
+    }
 
 
 @router.post("/{wiki_id}/submit-approval")
@@ -1141,9 +1266,13 @@ async def submit_wiki_approval(
     if not wiki:
         raise HTTPException(status_code=404, detail="文档不存在")
     approval = Approval(
-        approval_type="task_approval", status="pending",
-        title=f"Wiki审批: {wiki.title}", description=wiki.content[:200] if wiki.content else "",
-        requester_id=current_user.id, resource_type="wiki", resource_id=wiki_id,
+        approval_type="task_approval",
+        status="pending",
+        title=f"Wiki审批: {wiki.title}",
+        description=wiki.content[:200] if wiki.content else "",
+        requester_id=current_user.id,
+        resource_type="wiki",
+        resource_id=wiki_id,
         target_scope="org",
     )
     wiki.status = "pending_approval"

@@ -4,19 +4,15 @@ Tracing API - 追踪系统 API
 提供追踪数据查询的 REST API
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 
 from app.api.auth import get_current_active_user
 from app.models import User
 from app.modules.agent.tracing import (
     AgentTracer,
-    SpanKind,
-    SpanStatus,
     Span,
     Trace,
-    TokenUsage,
     get_tracer,
 )
 
@@ -25,23 +21,25 @@ router = APIRouter(prefix="/tracing", tags=["追踪管理"])
 
 # ==================== Pydantic Models ====================
 
+
 class SpanResponse(BaseModel):
     """跨度响应"""
+
     id: str
     trace_id: str
-    parent_id: Optional[str]
+    parent_id: str | None
     kind: str
     name: str
     start_time: float
-    end_time: Optional[float]
+    end_time: float | None
     duration_ms: int
     status: str
-    error: Optional[str]
+    error: str | None
     input_data: dict
     output_data: dict
     metadata: dict
-    tokens: Optional[dict]
-    children: List["SpanResponse"] = []
+    tokens: dict | None
+    children: list["SpanResponse"] = []
 
     class Config:
         from_attributes = True
@@ -49,10 +47,11 @@ class SpanResponse(BaseModel):
 
 class TraceResponse(BaseModel):
     """追踪响应"""
+
     id: str
     name: str
     start_time: float
-    end_time: Optional[float]
+    end_time: float | None
     duration_ms: int
     total_tokens: int
     total_cost: float
@@ -61,9 +60,9 @@ class TraceResponse(BaseModel):
     agent_id: str
     agent_name: str
     session_id: str
-    user_id: Optional[int]
+    user_id: int | None
     metadata: dict
-    root_span: Optional[SpanResponse]
+    root_span: SpanResponse | None
 
     class Config:
         from_attributes = True
@@ -71,17 +70,19 @@ class TraceResponse(BaseModel):
 
 class TraceListResponse(BaseModel):
     """追踪列表响应"""
-    items: List[TraceResponse]
+
+    items: list[TraceResponse]
     total: int
 
 
 class TimelineItem(BaseModel):
     """时间线项"""
+
     id: str
     name: str
     kind: str
     start: float
-    end: Optional[float]
+    end: float | None
     duration_ms: int
     status: str
     depth: int
@@ -90,14 +91,16 @@ class TimelineItem(BaseModel):
 
 class TimelineResponse(BaseModel):
     """时间线响应"""
+
     trace_id: str
     trace_name: str
     total_duration_ms: int
-    items: List[TimelineItem]
+    items: list[TimelineItem]
 
 
 class TraceStatsResponse(BaseModel):
     """追踪统计响应"""
+
     total_traces: int
     total_spans: int
     total_tokens: int
@@ -109,11 +112,12 @@ class TraceStatsResponse(BaseModel):
 
 # ==================== API Endpoints ====================
 
+
 @router.get("/", response_model=TraceListResponse)
 async def list_traces(
-    agent_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    user_id: Optional[int] = None,
+    agent_id: str | None = None,
+    session_id: str | None = None,
+    user_id: int | None = None,
     limit: int = Query(50, ge=1, le=200),
     tracer: AgentTracer = Depends(get_tracer),
     current_user: User = Depends(get_current_active_user),
@@ -138,9 +142,9 @@ async def list_traces(
 
 @router.get("/stats", response_model=TraceStatsResponse)
 async def get_trace_stats(
-    agent_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    user_id: Optional[int] = None,
+    agent_id: str | None = None,
+    session_id: str | None = None,
+    user_id: int | None = None,
     tracer: AgentTracer = Depends(get_tracer),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -242,11 +246,11 @@ async def get_trace_timeline(
     )
 
 
-@router.get("/{trace_id}/spans", response_model=List[SpanResponse])
+@router.get("/{trace_id}/spans", response_model=list[SpanResponse])
 async def get_trace_spans(
     trace_id: str,
-    kind: Optional[str] = None,
-    status: Optional[str] = None,
+    kind: str | None = None,
+    status: str | None = None,
     tracer: AgentTracer = Depends(get_tracer),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -308,6 +312,7 @@ async def clear_traces(
 
 # ==================== Helper Functions ====================
 
+
 def _span_to_response(span: Span) -> SpanResponse:
     """转换跨度到响应"""
     return SpanResponse(
@@ -328,7 +333,9 @@ def _span_to_response(span: Span) -> SpanResponse:
             "prompt": span.tokens.prompt_tokens,
             "completion": span.tokens.completion_tokens,
             "total": span.tokens.total_tokens,
-        } if span.tokens else None,
+        }
+        if span.tokens
+        else None,
         children=[_span_to_response(c) for c in span.children],
     )
 

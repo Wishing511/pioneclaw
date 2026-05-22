@@ -3,16 +3,18 @@ VectorStore API 端点
 向量存储管理接口
 """
 
-import logging
 import functools
-from typing import Optional, List, Dict, Any, Callable
+import logging
+from collections.abc import Callable
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.auth import get_current_active_user
 from app.models import User
-from ..modules.agent.vector_store import get_vector_store, VectorStore
+
+from ..modules.agent.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,7 @@ def _protected(operation: str):
                     status_code=500,
                     detail=f"向量存储操作失败 ({operation}): {e}",
                 )
+
         return wrapper
 
     return decorator
@@ -42,41 +45,47 @@ def _protected(operation: str):
 
 # ==================== 请求模型 ====================
 
+
 class AddEntryRequest(BaseModel):
     """添加条目请求"""
+
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     source_type: str = "knowledge"
-    source_id: Optional[str] = None
+    source_id: str | None = None
     generate_embedding: bool = True
 
 
 class AddBatchRequest(BaseModel):
     """批量添加请求"""
-    entries: List[Dict[str, Any]]
+
+    entries: list[dict[str, Any]]
     source_type: str = "knowledge"
-    source_id: Optional[str] = None
+    source_id: str | None = None
 
 
 class UpdateEntryRequest(BaseModel):
     """更新条目请求"""
-    content: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+
+    content: str | None = None
+    metadata: dict[str, Any] | None = None
     generate_embedding: bool = True
 
 
 class SearchRequest(BaseModel):
     """搜索请求"""
+
     query: str
     top_k: int = 5
-    source_type: Optional[str] = None
-    source_id: Optional[str] = None
+    source_type: str | None = None
+    source_id: str | None = None
     min_score: float = 0.5
     hybrid: bool = False
     keyword_weight: float = 0.3
 
 
 # ==================== API 端点 ====================
+
 
 @router.get("/stats")
 @_protected("get_stats")
@@ -91,7 +100,7 @@ async def get_stats(
 @router.get("/count")
 @_protected("get_count")
 async def get_count(
-    source_type: Optional[str] = None,
+    source_type: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """获取条目数量"""
@@ -102,7 +111,7 @@ async def get_count(
 @router.get("/source-ids")
 @_protected("get_source_ids")
 async def get_source_ids(
-    source_type: Optional[str] = None,
+    source_type: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """获取所有来源 ID"""
@@ -195,8 +204,8 @@ async def delete_entry(
 @router.delete("/by-source")
 @_protected("delete_by_source")
 async def delete_by_source(
-    source_type: Optional[str] = None,
-    source_id: Optional[str] = None,
+    source_type: str | None = None,
+    source_id: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """按来源删除向量条目"""
@@ -242,7 +251,7 @@ async def search(
 async def quick_search(
     query: str,
     top_k: int = 5,
-    source_type: Optional[str] = None,
+    source_type: str | None = None,
     min_score: float = 0.5,
     current_user: User = Depends(get_current_active_user),
 ):

@@ -9,7 +9,6 @@
 """
 
 import logging
-from typing import Optional, Set
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -20,7 +19,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # 公开路径 - 始终不需要认证
-PUBLIC_PATHS: Set[str] = {
+PUBLIC_PATHS: set[str] = {
     "/",
     "/health",
     "/docs",
@@ -29,7 +28,7 @@ PUBLIC_PATHS: Set[str] = {
 }
 
 # 公开路径前缀 - 不需要认证
-PUBLIC_PREFIXES: Set[str] = {
+PUBLIC_PREFIXES: set[str] = {
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/refresh-token",
@@ -37,7 +36,7 @@ PUBLIC_PREFIXES: Set[str] = {
 }
 
 # 本地回环地址
-LOCAL_HOSTS: Set[str] = {
+LOCAL_HOSTS: set[str] = {
     "127.0.0.1",
     "::1",
     "localhost",
@@ -55,8 +54,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self,
         app,
         local_bypass: bool = True,
-        public_paths: Optional[Set[str]] = None,
-        public_prefixes: Optional[Set[str]] = None,
+        public_paths: set[str] | None = None,
+        public_prefixes: set[str] | None = None,
     ) -> None:
         super().__init__(app)
         self.local_bypass = local_bypass
@@ -70,10 +69,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return False
         if path in self.public_paths:
             return True
-        for prefix in self.public_prefixes:
-            if path.startswith(prefix):
-                return True
-        return False
+        return any(path.startswith(prefix) for prefix in self.public_prefixes)
 
     def _is_local_request(self, request: Request) -> bool:
         """检查请求是否来自本地"""
@@ -98,7 +94,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         return False
 
-    def _extract_token(self, request: Request) -> Optional[str]:
+    def _extract_token(self, request: Request) -> str | None:
         """从请求中提取 Bearer Token"""
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):

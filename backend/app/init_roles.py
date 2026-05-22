@@ -1,10 +1,13 @@
 """
 初始化角色数据
 """
+
 import asyncio
+
+from sqlalchemy import select
+
 from app.core import async_session_maker
 from app.models import Role
-from sqlalchemy import select
 
 
 async def init_roles():
@@ -15,7 +18,7 @@ async def init_roles():
         if result.scalar_one_or_none():
             print("角色数据已存在，跳过初始化")
             return
-        
+
         # 创建默认角色
         roles = [
             Role(
@@ -30,7 +33,7 @@ async def init_roles():
                     "memory": ["view", "create", "edit", "delete"],
                     "knowledge": ["view", "create", "edit", "delete", "upload"],
                     "runner": ["view", "approve", "delete"],
-                    "system": ["ai_config", "role", "user", "settings"]
+                    "system": ["ai_config", "role", "user", "settings"],
                 },
                 is_system=True,
                 is_active=True,
@@ -47,7 +50,7 @@ async def init_roles():
                     "memory": ["view", "create", "edit"],
                     "knowledge": ["view", "create", "edit", "upload"],
                     "runner": ["view"],
-                    "system": ["user"]
+                    "system": ["user"],
                 },
                 is_system=True,
                 is_active=True,
@@ -62,7 +65,7 @@ async def init_roles():
                     "agent": ["view", "execute"],
                     "skill": ["view"],
                     "memory": ["view", "create"],
-                    "knowledge": ["view"]
+                    "knowledge": ["view"],
                 },
                 is_system=True,
                 is_active=True,
@@ -70,7 +73,7 @@ async def init_roles():
         ]
         for role in roles:
             session.add(role)
-        
+
         await session.commit()
         print("✅ 角色初始化完成！")
 

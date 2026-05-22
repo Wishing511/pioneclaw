@@ -1,35 +1,35 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import List, Optional
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-import shutil
 import uuid
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
+from app.core.database import get_db
 from app.core.permissions import PermissionChecker
-from app.models.models import User, Task, TaskTemplate, TaskDependency, Agent
 from app.models.approval import Approval, ApprovalType
+from app.models.models import Agent, Task, TaskDependency, TaskTemplate, User
 from app.models.task_comment import TaskComment
-from app.schemas.schemas import (
-    TaskCreate, TaskUpdate, TaskResponse, MessageResponse
-)
+from app.schemas.schemas import MessageResponse, TaskCreate, TaskResponse, TaskUpdate
 from app.schemas.task_comment import (
-    TaskCommentCreate, TaskCommentInDB, TaskCommentDetail, TaskCommentListResponse,
+    TaskCommentCreate,
+    TaskCommentDetail,
+    TaskCommentInDB,
+    TaskCommentListResponse,
 )
 
 router = APIRouter(prefix="/tasks", tags=["任务管理"])
 
 
-@router.get("", response_model=List[TaskResponse])
+@router.get("", response_model=list[TaskResponse])
 async def list_tasks(
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
-    task_type: Optional[str] = None,
-    assignee_id: Optional[int] = None,
-    creator_id: Optional[int] = None,
+    status: str | None = None,
+    priority: str | None = None,
+    task_type: str | None = None,
+    assignee_id: int | None = None,
+    creator_id: int | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -52,8 +52,7 @@ async def list_tasks(
     # 权限过滤：非超管只能看自己的任务
     if not current_user.is_super_admin:
         query = query.where(
-            (Task.creator_id == current_user.id)
-            | (Task.assignee_id == current_user.id)
+            (Task.creator_id == current_user.id) | (Task.assignee_id == current_user.id)
         )
 
     query = query.order_by(Task.created_at.desc()).offset(skip).limit(limit)
@@ -113,12 +112,15 @@ async def get_task_analytics(
     """获取任务分析数据"""
     # 近7天完成趋势
     from sqlalchemy import text
-    result = await db.execute(text(
-        "SELECT DATE(completed_at) as date, COUNT(*) as count "
-        "FROM tasks WHERE completed_at IS NOT NULL "
-        "AND completed_at >= DATE('now', '-7 days') "
-        "GROUP BY DATE(completed_at) ORDER BY date"
-    ))
+
+    result = await db.execute(
+        text(
+            "SELECT DATE(completed_at) as date, COUNT(*) as count "
+            "FROM tasks WHERE completed_at IS NOT NULL "
+            "AND completed_at >= DATE('now', '-7 days') "
+            "GROUP BY DATE(completed_at) ORDER BY date"
+        )
+    )
     completion_trend = [{"date": str(row[0]), "count": row[1]} for row in result]
 
     # 各类型任务数
@@ -133,7 +135,7 @@ async def get_task_analytics(
     }
 
 
-@router.get("/mine", response_model=List[TaskResponse])
+@router.get("/mine", response_model=list[TaskResponse])
 async def get_my_tasks(
     skip: int = 0,
     limit: int = 50,
@@ -147,13 +149,18 @@ async def get_my_tasks(
             (Task.assignee_id == current_user.id) | (Task.creator_id == current_user.id)
         )
         .order_by(Task.created_at.desc())
-        .offset(skip).limit(limit)
+        .offset(skip)
+        .limit(limit)
     )
     return result.scalars().all()
 
 
-@router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(PermissionChecker("task:create"))])
+@router.post(
+    "",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(PermissionChecker("task:create"))],
+)
 async def create_task(
     task_data: TaskCreate,
     db: AsyncSession = Depends(get_db),
@@ -181,6 +188,7 @@ async def create_task(
 # 任务模板（固定路径，必须在 /{task_id} 之前）
 # ============================================================
 
+
 @router.get("/templates")
 async def list_templates(
     db: AsyncSession = Depends(get_db),
@@ -193,10 +201,15 @@ async def list_templates(
     templates = result.scalars().all()
     return [
         {
-            "id": t.id, "name": t.name, "title": t.title,
-            "description": t.description, "priority": t.priority,
-            "task_type": t.task_type, "input_data": t.input_data,
-            "agent_id": t.agent_id, "usage_count": t.usage_count,
+            "id": t.id,
+            "name": t.name,
+            "title": t.title,
+            "description": t.description,
+            "priority": t.priority,
+            "task_type": t.task_type,
+            "input_data": t.input_data,
+            "agent_id": t.agent_id,
+            "usage_count": t.usage_count,
         }
         for t in templates
     ]
@@ -206,11 +219,11 @@ async def list_templates(
 async def create_template(
     name: str,
     title: str,
-    description: Optional[str] = None,
+    description: str | None = None,
     priority: str = "normal",
     task_type: str = "manual",
-    agent_id: Optional[int] = None,
-    input_data: Optional[str] = None,
+    agent_id: int | None = None,
+    input_data: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -240,7 +253,9 @@ async def delete_template(
     current_user: User = Depends(get_current_active_user),
 ):
     """删除任务模板"""
-    result = await db.execute(select(TaskTemplate).where(TaskTemplate.id == template_id))
+    result = await db.execute(
+        select(TaskTemplate).where(TaskTemplate.id == template_id)
+    )
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
@@ -249,14 +264,20 @@ async def delete_template(
     return {"message": "模板已删除"}
 
 
-@router.post("/from-template/{template_id}", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/from-template/{template_id}",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_from_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
     """从模板创建任务"""
-    result = await db.execute(select(TaskTemplate).where(TaskTemplate.id == template_id))
+    result = await db.execute(
+        select(TaskTemplate).where(TaskTemplate.id == template_id)
+    )
     template = result.scalar_one_or_none()
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
@@ -306,7 +327,9 @@ async def get_workload(
         )
     )
     active = active_result.scalar() or 0
-    week_ago = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    week_ago = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     week_ago -= timedelta(days=week_ago.weekday())
     done_result = await db.execute(
         select(func.count(Task.id)).where(
@@ -317,13 +340,19 @@ async def get_workload(
     )
     done_this_week = done_result.scalar() or 0
     by_p = await db.execute(
-        select(Task.priority, func.count(Task.id)).where(
+        select(Task.priority, func.count(Task.id))
+        .where(
             Task.assignee_id == current_user.id,
             Task.status.in_(["todo", "in_progress"]),
-        ).group_by(Task.priority)
+        )
+        .group_by(Task.priority)
     )
     by_priority = {row[0]: row[1] for row in by_p.all()}
-    return {"active_tasks": active, "done_this_week": done_this_week, "by_priority": by_priority}
+    return {
+        "active_tasks": active,
+        "done_this_week": done_this_week,
+        "by_priority": by_priority,
+    }
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
@@ -340,8 +369,11 @@ async def get_task(
     return task
 
 
-@router.put("/{task_id}", response_model=TaskResponse,
-             dependencies=[Depends(PermissionChecker("task:update"))])
+@router.put(
+    "/{task_id}",
+    response_model=TaskResponse,
+    dependencies=[Depends(PermissionChecker("task:update"))],
+)
 async def update_task(
     task_id: int,
     task_data: TaskUpdate,
@@ -396,7 +428,9 @@ async def delete_task(
     if not current_user.is_super_admin:
         if task.creator_id != current_user.id and task.assignee_id != current_user.id:
             if not (current_user.is_org_admin and current_user.organization_id):
-                raise HTTPException(status_code=403, detail="权限不足，只能删除自己创建或被指派的任务")
+                raise HTTPException(
+                    status_code=403, detail="权限不足，只能删除自己创建或被指派的任务"
+                )
 
     await db.delete(task)
     await db.commit()
@@ -427,7 +461,7 @@ async def start_task(
 @router.post("/{task_id}/complete", response_model=TaskResponse)
 async def complete_task(
     task_id: int,
-    output_data: Optional[dict] = None,
+    output_data: dict | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -450,7 +484,7 @@ async def complete_task(
 @router.post("/{task_id}/cancel", response_model=TaskResponse)
 async def cancel_task(
     task_id: int,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -472,8 +506,12 @@ async def cancel_task(
 
 # ========== 子任务 ==========
 
-@router.post("/{task_id}/subtasks", response_model=TaskResponse,
-             dependencies=[Depends(PermissionChecker("task:create"))])
+
+@router.post(
+    "/{task_id}/subtasks",
+    response_model=TaskResponse,
+    dependencies=[Depends(PermissionChecker("task:create"))],
+)
 async def create_subtask(
     task_id: int,
     task_data: TaskCreate,
@@ -505,7 +543,7 @@ async def create_subtask(
     return subtask
 
 
-@router.get("/{task_id}/subtasks", response_model=List[TaskResponse])
+@router.get("/{task_id}/subtasks", response_model=list[TaskResponse])
 async def get_subtasks(
     task_id: int,
     db: AsyncSession = Depends(get_db),
@@ -524,6 +562,7 @@ async def get_subtasks(
 
 # ========== 评论 ==========
 
+
 @router.get("/{task_id}/comments", response_model=TaskCommentListResponse)
 async def get_task_comments(
     task_id: int,
@@ -539,26 +578,33 @@ async def get_task_comments(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     count_result = await db.execute(
-        select(func.count()).select_from(TaskComment)
-        .where(TaskComment.task_id == task_id, TaskComment.is_deleted == False)
+        select(func.count())
+        .select_from(TaskComment)
+        .where(TaskComment.task_id == task_id, not TaskComment.is_deleted)
     )
     total = count_result.scalar() or 0
 
     result = await db.execute(
         select(TaskComment)
-        .where(TaskComment.task_id == task_id, TaskComment.is_deleted == False)
+        .where(TaskComment.task_id == task_id, not TaskComment.is_deleted)
         .order_by(TaskComment.created_at.asc())
-        .offset(skip).limit(limit)
+        .offset(skip)
+        .limit(limit)
     )
     comments = result.scalars().all()
 
     items = []
     for c in comments:
         item = TaskCommentDetail(
-            id=c.id, task_id=c.task_id, user_id=c.user_id,
-            content=c.content, parent_id=c.parent_id,
-            mentions=c.mentions, created_at=c.created_at,
-            updated_at=c.updated_at, is_deleted=c.is_deleted,
+            id=c.id,
+            task_id=c.task_id,
+            user_id=c.user_id,
+            content=c.content,
+            parent_id=c.parent_id,
+            mentions=c.mentions,
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+            is_deleted=c.is_deleted,
             user_name=c.user.display_name if c.user else None,
             user_avatar=c.user.avatar if c.user else None,
             replies=[],
@@ -568,8 +614,11 @@ async def get_task_comments(
     return TaskCommentListResponse(items=items, total=total)
 
 
-@router.post("/{task_id}/comments", response_model=TaskCommentInDB,
-             dependencies=[Depends(PermissionChecker("task:comment"))])
+@router.post(
+    "/{task_id}/comments",
+    response_model=TaskCommentInDB,
+    dependencies=[Depends(PermissionChecker("task:comment"))],
+)
 async def create_task_comment(
     task_id: int,
     data: TaskCommentCreate,
@@ -584,7 +633,9 @@ async def create_task_comment(
 
     # 检查父评论
     if data.parent_id:
-        result = await db.execute(select(TaskComment).where(TaskComment.id == data.parent_id))
+        result = await db.execute(
+            select(TaskComment).where(TaskComment.id == data.parent_id)
+        )
         parent_comment = result.scalar_one_or_none()
         if not parent_comment:
             raise HTTPException(status_code=400, detail="父评论不存在")
@@ -606,8 +657,12 @@ async def create_task_comment(
 
 # ========== 批量操作 ==========
 
-@router.post("/batch/assign", response_model=MessageResponse,
-             dependencies=[Depends(PermissionChecker("task:update"))])
+
+@router.post(
+    "/batch/assign",
+    response_model=MessageResponse,
+    dependencies=[Depends(PermissionChecker("task:update"))],
+)
 async def batch_assign_tasks(
     request: dict,
     db: AsyncSession = Depends(get_db),
@@ -620,9 +675,7 @@ async def batch_assign_tasks(
     if not task_ids or assignee_id is None:
         raise HTTPException(status_code=400, detail="参数不完整")
 
-    result = await db.execute(
-        select(Task).where(Task.id.in_(task_ids))
-    )
+    result = await db.execute(select(Task).where(Task.id.in_(task_ids)))
     tasks = result.scalars().all()
 
     for task in tasks:
@@ -632,8 +685,11 @@ async def batch_assign_tasks(
     return MessageResponse(message=f"已分配 {len(tasks)} 个任务")
 
 
-@router.post("/batch/update", response_model=MessageResponse,
-             dependencies=[Depends(PermissionChecker("task:update"))])
+@router.post(
+    "/batch/update",
+    response_model=MessageResponse,
+    dependencies=[Depends(PermissionChecker("task:update"))],
+)
 async def batch_update_tasks(
     request: dict,
     db: AsyncSession = Depends(get_db),
@@ -646,9 +702,7 @@ async def batch_update_tasks(
     if not task_ids or not updates:
         raise HTTPException(status_code=400, detail="参数不完整")
 
-    result = await db.execute(
-        select(Task).where(Task.id.in_(task_ids))
-    )
+    result = await db.execute(select(Task).where(Task.id.in_(task_ids)))
     tasks = result.scalars().all()
 
     allowed_fields = ["status", "priority", "assignee_id"]
@@ -684,12 +738,16 @@ async def list_attachments(
     attachments = []
     for f in task_dir.iterdir():
         if f.is_file():
-            attachments.append({
-                "id": f.stem,
-                "filename": f.name,
-                "size": f.stat().st_size,
-                "created_at": datetime.fromtimestamp(f.stat().st_ctime, tz=timezone.utc).isoformat(),
-            })
+            attachments.append(
+                {
+                    "id": f.stem,
+                    "filename": f.name,
+                    "size": f.stat().st_size,
+                    "created_at": datetime.fromtimestamp(
+                        f.stat().st_ctime, tz=timezone.utc
+                    ).isoformat(),
+                }
+            )
 
     return {"attachments": attachments}
 
@@ -764,10 +822,11 @@ async def delete_attachment(
 # AI 执行集成
 # ============================================================
 
+
 @router.post("/{task_id}/send-to-ai")
 async def send_task_to_ai(
     task_id: int,
-    agent_id: Optional[int] = None,
+    agent_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -794,7 +853,9 @@ async def send_task_to_ai(
         agent = agent_result.scalar_one_or_none()
 
     if not agent:
-        raise HTTPException(status_code=400, detail="没有可用的 Agent，请先创建 Agent 或指定 agent_id")
+        raise HTTPException(
+            status_code=400, detail="没有可用的 Agent，请先创建 Agent 或指定 agent_id"
+        )
 
     task.status = "in_progress"
     task.started_at = datetime.now(tz=timezone.utc)
@@ -823,9 +884,7 @@ async def ai_suggest_assignee(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     # Simple heuristic: find users with fewest tasks
-    user_result = await db.execute(
-        select(User).where(User.is_active == True).limit(10)
-    )
+    user_result = await db.execute(select(User).where(User.is_active).limit(10))
     users = user_result.scalars().all()
 
     suggestions = []
@@ -837,12 +896,14 @@ async def ai_suggest_assignee(
             )
         )
         count = count_result.scalar() or 0
-        suggestions.append({
-            "user_id": u.id,
-            "username": u.username,
-            "display_name": u.display_name,
-            "current_task_count": count,
-        })
+        suggestions.append(
+            {
+                "user_id": u.id,
+                "username": u.username,
+                "display_name": u.display_name,
+                "current_task_count": count,
+            }
+        )
 
     suggestions.sort(key=lambda x: x["current_task_count"])
     return {"task_id": task_id, "suggestions": suggestions}
@@ -863,16 +924,34 @@ async def ai_suggest_split(
     # Simple heuristic: split by keywords in description
     subtasks = []
     if task.description:
-        lines = [l.strip("- ").strip() for l in task.description.split("\n") if l.strip().startswith("-")]
+        lines = [
+            line.strip("- ").strip()
+            for line in task.description.split("\n")
+            if line.strip().startswith("-")
+        ]
         if lines:
             for i, line in enumerate(lines[:5]):
-                subtasks.append({"title": line, "priority": task.priority, "suggested_order": i + 1})
+                subtasks.append(
+                    {"title": line, "priority": task.priority, "suggested_order": i + 1}
+                )
 
     if not subtasks:
         subtasks = [
-            {"title": f"{task.title} - 分析阶段", "priority": "high", "suggested_order": 1},
-            {"title": f"{task.title} - 执行阶段", "priority": task.priority, "suggested_order": 2},
-            {"title": f"{task.title} - 验证阶段", "priority": "normal", "suggested_order": 3},
+            {
+                "title": f"{task.title} - 分析阶段",
+                "priority": "high",
+                "suggested_order": 1,
+            },
+            {
+                "title": f"{task.title} - 执行阶段",
+                "priority": task.priority,
+                "suggested_order": 2,
+            },
+            {
+                "title": f"{task.title} - 验证阶段",
+                "priority": "normal",
+                "suggested_order": 3,
+            },
         ]
 
     return {"task_id": task_id, "suggested_subtasks": subtasks}
@@ -881,6 +960,7 @@ async def ai_suggest_split(
 # ============================================================
 # 任务依赖
 # ============================================================
+
 
 @router.get("/{task_id}/dependencies")
 async def get_task_dependencies(
@@ -898,13 +978,15 @@ async def get_task_dependencies(
     for d in deps:
         dep_task = await db.execute(select(Task).where(Task.id == d.depends_on_id))
         t = dep_task.scalar_one_or_none()
-        dep_list.append({
-            "id": d.id,
-            "task_id": d.task_id,
-            "depends_on_id": d.depends_on_id,
-            "depends_on_title": t.title if t else "(已删除)",
-            "depends_on_status": t.status if t else "unknown",
-        })
+        dep_list.append(
+            {
+                "id": d.id,
+                "task_id": d.task_id,
+                "depends_on_id": d.depends_on_id,
+                "depends_on_title": t.title if t else "(已删除)",
+                "depends_on_status": t.status if t else "unknown",
+            }
+        )
     return dep_list
 
 
@@ -959,7 +1041,13 @@ async def check_task_dependencies(
         dep_task = await db.execute(select(Task).where(Task.id == d.depends_on_id))
         t = dep_task.scalar_one_or_none()
         if t and t.status != "done":
-            blocked.append({"depends_on_id": d.depends_on_id, "depends_on_title": t.title, "status": t.status})
+            blocked.append(
+                {
+                    "depends_on_id": d.depends_on_id,
+                    "depends_on_title": t.title,
+                    "status": t.status,
+                }
+            )
         else:
             satisfied.append(d.depends_on_id)
 
@@ -973,6 +1061,7 @@ async def check_task_dependencies(
 # ============================================================
 # 任务审批
 # ============================================================
+
 
 @router.post("/{task_id}/submit")
 async def submit_task_for_approval(
@@ -1032,7 +1121,7 @@ async def approve_task(
 @router.post("/{task_id}/reject")
 async def reject_task(
     task_id: int,
-    reject_reason: Optional[str] = None,
+    reject_reason: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -1049,7 +1138,9 @@ async def reject_task(
         raise HTTPException(status_code=400, detail="任务不在待审批状态")
 
     task.status = "todo"
-    task.description = (task.description or "") + f"\n[驳回原因]: {reject_reason or '未说明'}"
+    task.description = (
+        task.description or ""
+    ) + f"\n[驳回原因]: {reject_reason or '未说明'}"
     await db.commit()
     return {"message": "任务已驳回", "task_id": task_id}
 
@@ -1058,10 +1149,11 @@ async def reject_task(
 # 任务拆分、进度、工作量
 # ============================================================
 
+
 @router.post("/{task_id}/split")
 async def split_task(
     task_id: int,
-    subtasks: List[str],
+    subtasks: list[str],
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -1072,7 +1164,7 @@ async def split_task(
         raise HTTPException(status_code=404, detail="任务不存在")
 
     created = []
-    for i, title in enumerate(subtasks[:10]):  # 最多10个子任务
+    for _i, title in enumerate(subtasks[:10]):  # 最多10个子任务
         sub = Task(
             title=title,
             priority=task.priority,
@@ -1093,7 +1185,7 @@ async def split_task(
 async def update_progress(
     task_id: int,
     progress: int,
-    comment: Optional[str] = None,
+    comment: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -1120,5 +1212,3 @@ async def update_progress(
 
     await db.commit()
     return {"task_id": task_id, "progress": progress, "status": task.status}
-
-

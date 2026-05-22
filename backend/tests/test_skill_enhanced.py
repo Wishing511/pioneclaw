@@ -2,13 +2,13 @@
 技能系统增强测试
 """
 
-import pytest
-import os
 import shutil
 import tempfile
 from pathlib import Path
 
-from app.modules.agent.skills import SkillsLoader, Skill, SkillMetadata
+import pytest
+
+from app.modules.agent.skills import Skill, SkillMetadata, SkillsLoader
 
 
 @pytest.fixture
@@ -137,10 +137,12 @@ class TestSkill:
             name="test",
             path=temp_skills_dir / "test" / "SKILL.md",
             content="test",
-            metadata=SkillMetadata(requires={
-                "bins": ["nonexistent_binary_xyz"],
-                "env": ["NONEXISTENT_ENV_VAR_XYZ"],
-            }),
+            metadata=SkillMetadata(
+                requires={
+                    "bins": ["nonexistent_binary_xyz"],
+                    "env": ["NONEXISTENT_ENV_VAR_XYZ"],
+                }
+            ),
         )
         missing = skill.get_missing_requirements()
         assert "nonexistent_binary_xyz" in missing
@@ -170,7 +172,11 @@ class TestSkillsLoader:
 
     def test_load_workspace_skill(self, temp_skills_dir):
         """测试加载工作空间技能"""
-        _create_skill_file(temp_skills_dir, "my-skill", "---\ntitle: My Skill\ndescription: Test\n---\n\nContent here")
+        _create_skill_file(
+            temp_skills_dir,
+            "my-skill",
+            "---\ntitle: My Skill\ndescription: Test\n---\n\nContent here",
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         assert "my-skill" in loader.skills
         assert loader.skills["my-skill"].metadata.title == "My Skill"
@@ -178,21 +184,35 @@ class TestSkillsLoader:
 
     def test_load_builtin_skill(self, temp_skills_dir, builtin_skills_dir):
         """测试加载内置技能"""
-        _create_skill_file(builtin_skills_dir, "builtin-skill", "---\ntitle: Built-in\n---\n\nBuilt-in content")
+        _create_skill_file(
+            builtin_skills_dir,
+            "builtin-skill",
+            "---\ntitle: Built-in\n---\n\nBuilt-in content",
+        )
         loader = SkillsLoader(temp_skills_dir, builtin_skills_dir=builtin_skills_dir)
         assert "builtin-skill" in loader.skills
         assert loader.skills["builtin-skill"].source == "builtin"
 
     def test_workspace_priority(self, temp_skills_dir, builtin_skills_dir):
         """测试工作空间优先级高于内置"""
-        _create_skill_file(temp_skills_dir, "same-name", "---\ntitle: Workspace Version\n---\n\nWS")
-        _create_skill_file(builtin_skills_dir, "same-name", "---\ntitle: Builtin Version\n---\n\nBuilt-in")
+        _create_skill_file(
+            temp_skills_dir, "same-name", "---\ntitle: Workspace Version\n---\n\nWS"
+        )
+        _create_skill_file(
+            builtin_skills_dir,
+            "same-name",
+            "---\ntitle: Builtin Version\n---\n\nBuilt-in",
+        )
         loader = SkillsLoader(temp_skills_dir, builtin_skills_dir=builtin_skills_dir)
         assert loader.skills["same-name"].metadata.title == "Workspace Version"
 
     def test_parse_frontmatter_always(self, temp_skills_dir):
         """测试解析 always 字段"""
-        _create_skill_file(temp_skills_dir, "auto-skill", "---\ntitle: Auto\ndescription: Auto load\nalways: true\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir,
+            "auto-skill",
+            "---\ntitle: Auto\ndescription: Auto load\nalways: true\n---\n\nContent",
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         skill = loader.get_skill("auto-skill")
         assert skill is not None
@@ -201,7 +221,11 @@ class TestSkillsLoader:
 
     def test_parse_frontmatter_tags(self, temp_skills_dir):
         """测试解析 tags 字段"""
-        _create_skill_file(temp_skills_dir, "tagged-skill", '---\ntitle: Tagged\ntags: [tool, auto]\n---\n\nContent')
+        _create_skill_file(
+            temp_skills_dir,
+            "tagged-skill",
+            "---\ntitle: Tagged\ntags: [tool, auto]\n---\n\nContent",
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         skill = loader.get_skill("tagged-skill")
         assert skill is not None
@@ -228,14 +252,18 @@ class TestSkillsLoader:
 
     def test_add_duplicate_skill(self, temp_skills_dir):
         """测试添加重复技能"""
-        _create_skill_file(temp_skills_dir, "existing", "---\ntitle: Existing\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "existing", "---\ntitle: Existing\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         result = loader.add_skill("existing", "New content")
         assert result is False
 
     def test_update_skill(self, temp_skills_dir):
         """测试更新技能"""
-        _create_skill_file(temp_skills_dir, "my-skill", "---\ntitle: Old\n---\n\nOld content")
+        _create_skill_file(
+            temp_skills_dir, "my-skill", "---\ntitle: Old\n---\n\nOld content"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         result = loader.update_skill("my-skill", "---\ntitle: New\n---\n\nNew content")
         assert result is True
@@ -243,7 +271,9 @@ class TestSkillsLoader:
 
     def test_delete_skill(self, temp_skills_dir):
         """测试删除技能"""
-        _create_skill_file(temp_skills_dir, "to-delete", "---\ntitle: Delete Me\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "to-delete", "---\ntitle: Delete Me\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         result = loader.delete_skill("to-delete")
         assert result is True
@@ -251,7 +281,9 @@ class TestSkillsLoader:
 
     def test_enable_disable_skill(self, temp_skills_dir):
         """测试启用/禁用技能"""
-        _create_skill_file(temp_skills_dir, "toggle-skill", "---\ntitle: Toggle\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "toggle-skill", "---\ntitle: Toggle\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         # 禁用
         result = loader.disable_skill("toggle-skill")
@@ -265,7 +297,9 @@ class TestSkillsLoader:
 
     def test_toggle_skill(self, temp_skills_dir):
         """测试切换技能状态"""
-        _create_skill_file(temp_skills_dir, "toggle-skill", "---\ntitle: Toggle\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "toggle-skill", "---\ntitle: Toggle\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         result = loader.toggle_skill("toggle-skill", False)
         assert result is True
@@ -273,8 +307,14 @@ class TestSkillsLoader:
 
     def test_get_always_skills(self, temp_skills_dir):
         """测试获取 always 技能列表"""
-        _create_skill_file(temp_skills_dir, "auto-skill", "---\ntitle: Auto\nalways: true\n---\n\nContent")
-        _create_skill_file(temp_skills_dir, "normal-skill", "---\ntitle: Normal\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir,
+            "auto-skill",
+            "---\ntitle: Auto\nalways: true\n---\n\nContent",
+        )
+        _create_skill_file(
+            temp_skills_dir, "normal-skill", "---\ntitle: Normal\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         always_skills = loader.get_always_skills()
         assert "auto-skill" in always_skills
@@ -282,7 +322,11 @@ class TestSkillsLoader:
 
     def test_load_skills_for_context(self, temp_skills_dir):
         """测试加载技能上下文"""
-        _create_skill_file(temp_skills_dir, "ctx-skill", "---\ntitle: Context\n---\n\nContext content here")
+        _create_skill_file(
+            temp_skills_dir,
+            "ctx-skill",
+            "---\ntitle: Context\n---\n\nContext content here",
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         context = loader.load_skills_for_context(["ctx-skill"])
         assert "Context content here" in context
@@ -290,8 +334,16 @@ class TestSkillsLoader:
 
     def test_build_skills_summary(self, temp_skills_dir):
         """测试构建技能摘要"""
-        _create_skill_file(temp_skills_dir, "skill-a", "---\ntitle: Skill A\ndescription: First skill\n---\n\nContent A")
-        _create_skill_file(temp_skills_dir, "skill-b", "---\ntitle: Skill B\ndescription: Second skill\n---\n\nContent B")
+        _create_skill_file(
+            temp_skills_dir,
+            "skill-a",
+            "---\ntitle: Skill A\ndescription: First skill\n---\n\nContent A",
+        )
+        _create_skill_file(
+            temp_skills_dir,
+            "skill-b",
+            "---\ntitle: Skill B\ndescription: Second skill\n---\n\nContent B",
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         summary = loader.build_skills_summary()
         assert "Skill A" in summary
@@ -300,12 +352,16 @@ class TestSkillsLoader:
 
     def test_reload(self, temp_skills_dir):
         """测试热重载"""
-        _create_skill_file(temp_skills_dir, "existing", "---\ntitle: Existing\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "existing", "---\ntitle: Existing\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         assert "existing" in loader.skills
 
         # 添加新技能文件
-        _create_skill_file(temp_skills_dir, "new-after-init", "---\ntitle: New\n---\n\nNew content")
+        _create_skill_file(
+            temp_skills_dir, "new-after-init", "---\ntitle: New\n---\n\nNew content"
+        )
 
         # 重载前不应该有新技能
         assert "new-after-init" not in loader.skills
@@ -317,7 +373,9 @@ class TestSkillsLoader:
 
     def test_get_stats(self, temp_skills_dir):
         """测试获取统计"""
-        _create_skill_file(temp_skills_dir, "skill-a", "---\ntitle: A\nalways: true\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "skill-a", "---\ntitle: A\nalways: true\n---\n\nContent"
+        )
         _create_skill_file(temp_skills_dir, "skill-b", "---\ntitle: B\n---\n\nContent")
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         stats = loader.get_stats()
@@ -327,7 +385,9 @@ class TestSkillsLoader:
 
     def test_list_skills_enabled_only(self, temp_skills_dir):
         """测试只列出已启用的技能"""
-        _create_skill_file(temp_skills_dir, "enabled-skill", "---\ntitle: Enabled\n---\n\nContent")
+        _create_skill_file(
+            temp_skills_dir, "enabled-skill", "---\ntitle: Enabled\n---\n\nContent"
+        )
         loader = SkillsLoader(temp_skills_dir, external_skills_dirs=[])
         loader.disable_skill("enabled-skill")
 

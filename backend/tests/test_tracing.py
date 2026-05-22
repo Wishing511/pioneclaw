@@ -11,27 +11,26 @@
 - AgentLoop 追踪集成
 """
 
-import asyncio
+import contextlib
+from unittest.mock import MagicMock
+
 import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.agent.tracing import (
+    AgentTracer,
+    Span,
     SpanKind,
     SpanStatus,
     TokenUsage,
-    Span,
     Trace,
-    AgentTracer,
     get_tracer,
     reset_tracer,
     trace_agent,
     trace_tool,
 )
 
-
 # ==================== SpanKind 测试 ====================
+
 
 class TestSpanKind:
     def test_kind_values(self):
@@ -47,11 +46,22 @@ class TestSpanKind:
 
     def test_all_kinds_exist(self):
         kinds = {k.value for k in SpanKind}
-        expected = {"trace", "agent", "llm", "tool", "handoff", "guardrail", "hook", "retrieval", "embedding"}
+        expected = {
+            "trace",
+            "agent",
+            "llm",
+            "tool",
+            "handoff",
+            "guardrail",
+            "hook",
+            "retrieval",
+            "embedding",
+        }
         assert kinds == expected
 
 
 # ==================== SpanStatus 测试 ====================
+
 
 class TestSpanStatus:
     def test_status_values(self):
@@ -62,6 +72,7 @@ class TestSpanStatus:
 
 
 # ==================== TokenUsage 测试 ====================
+
 
 class TestTokenUsage:
     def test_defaults(self):
@@ -86,6 +97,7 @@ class TestTokenUsage:
 
 
 # ==================== Span 测试 ====================
+
 
 class TestSpan:
     def test_defaults(self):
@@ -112,7 +124,9 @@ class TestSpan:
             start_time=0.0,
             input_data={"prompt": "test"},
             metadata={"model": "gpt-4"},
-            tokens=TokenUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150),
+            tokens=TokenUsage(
+                prompt_tokens=100, completion_tokens=50, total_tokens=150
+            ),
         )
         assert span.kind == SpanKind.LLM
         assert span.input_data["prompt"] == "test"
@@ -120,6 +134,7 @@ class TestSpan:
 
     def test_finish(self):
         import time
+
         span = Span(
             id="span-3",
             trace_id="trace-1",
@@ -205,6 +220,7 @@ class TestSpan:
 
 # ==================== Trace 测试 ====================
 
+
 class TestTrace:
     def test_defaults(self):
         trace = Trace(id="trace-1", name="Test trace")
@@ -284,6 +300,7 @@ class TestTrace:
 
 
 # ==================== AgentTracer 测试 ====================
+
 
 class TestAgentTracer:
     def test_current_trace(self):
@@ -366,7 +383,7 @@ class TestAgentTracer:
         tracer.start_span(SpanKind.TOOL, "tool")
 
         # 不手动关闭跨度，直接结束追踪
-        trace = tracer.end_trace()
+        tracer.end_trace()
 
         # 所有跨度应该被标记为 CANCELLED
         assert tracer._span_stack == []
@@ -462,6 +479,7 @@ class TestAgentTracer:
 
 # ==================== 全局追踪器测试 ====================
 
+
 class TestGlobalTracer:
     def test_get_tracer(self):
         reset_tracer()
@@ -479,6 +497,7 @@ class TestGlobalTracer:
 
 
 # ==================== 装饰器测试 ====================
+
 
 class TestDecorators:
     @pytest.mark.asyncio
@@ -511,6 +530,7 @@ class TestDecorators:
 
 # ==================== AgentLoop 追踪集成测试 ====================
 
+
 class TestAgentLoopTracing:
     def test_tracer_parameter(self):
         from app.modules.agent.loop import AgentLoop
@@ -535,7 +555,9 @@ class TestAgentLoopTracing:
 
         provider = MagicMock()
         tracer = AgentTracer()
-        loop = AgentLoop(provider=provider, tracer=tracer, agent_id="agent-1", agent_name="Agent")
+        loop = AgentLoop(
+            provider=provider, tracer=tracer, agent_id="agent-1", agent_name="Agent"
+        )
 
         trace = loop.start_trace("Test execution")
         assert trace is not None
@@ -640,10 +662,8 @@ class TestAgentLoopTracing:
         async def failing_func():
             raise ValueError("Test error")
 
-        try:
+        with contextlib.suppress(ValueError):
             await loop.traced_execution(failing_func)
-        except ValueError:
-            pass
 
         # 跨度应该被标记为 ERROR
         # 检查追踪中的错误跨度

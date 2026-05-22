@@ -1,16 +1,18 @@
 """
 聊天会话 API — 列表、消息历史、删除
 """
+
 import logging
 import uuid
-from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-from app.core import get_db
-from app.models import User, Session, SessionMessage, Agent, AIModelConfig
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
+from app.models import Agent, AIModelConfig, Session, SessionMessage, User
 from app.modules.agent.token_budget import TokenBudget
 
 router = APIRouter(prefix="/chat/sessions", tags=["会话管理"])
@@ -19,7 +21,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONTEXT_WINDOW = 128000
 
 
-def _estimate_tokens(msgs: List[SessionMessage]) -> int:
+def _estimate_tokens(msgs: list[SessionMessage]) -> int:
     """估算消息列表的 token 用量（字符数 // 4 的启发式算法）。"""
     total = 0
     for m in msgs:
@@ -64,7 +66,9 @@ async def get_session(
 ):
     """获取会话详情（含消息）"""
     result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == current_user.id)
+        select(Session).where(
+            Session.id == session_id, Session.user_id == current_user.id
+        )
     )
     session = result.scalar_one_or_none()
     if not session:
@@ -86,7 +90,7 @@ async def get_session(
             model_res = await db.execute(
                 select(AIModelConfig.context_window)
                 .where(AIModelConfig.model_name == agent.model)
-                .where(AIModelConfig.is_active == True)
+                .where(AIModelConfig.is_active)
             )
             cw = model_res.scalar_one_or_none()
             if cw:
@@ -96,7 +100,9 @@ async def get_session(
     input_tokens = _estimate_tokens(messages)
     budget = TokenBudget(context_window=context_window)
     context_usage = budget.to_dict(input_tokens)
-    logger.info(f"[get_session] session={session_id} messages={len(messages)} input_tokens={input_tokens} context_usage={context_usage}")
+    logger.info(
+        f"[get_session] session={session_id} messages={len(messages)} input_tokens={input_tokens} context_usage={context_usage}"
+    )
 
     return {
         "id": session.id,
@@ -122,8 +128,8 @@ async def get_session(
 @router.post("")
 async def create_session(
     title: str = "新对话",
-    agent_id: Optional[int] = None,
-    runner_id: Optional[int] = None,
+    agent_id: int | None = None,
+    runner_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -138,7 +144,11 @@ async def create_session(
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return {"id": session.id, "title": session.title, "created_at": session.created_at.isoformat()}
+    return {
+        "id": session.id,
+        "title": session.title,
+        "created_at": session.created_at.isoformat(),
+    }
 
 
 @router.delete("/{session_id}")
@@ -149,7 +159,9 @@ async def delete_session(
 ):
     """删除会话"""
     result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == current_user.id)
+        select(Session).where(
+            Session.id == session_id, Session.user_id == current_user.id
+        )
     )
     session = result.scalar_one_or_none()
     if not session:
@@ -163,9 +175,9 @@ async def delete_session(
 
 class SaveMessageBody(BaseModel):
     role: str
-    content: Optional[str] = ""
-    reasoning_content: Optional[str] = None
-    tool_calls: Optional[str] = None
+    content: str | None = ""
+    reasoning_content: str | None = None
+    tool_calls: str | None = None
 
 
 @router.post("/{session_id}/messages")
@@ -177,7 +189,9 @@ async def save_message(
 ):
     """保存消息到会话"""
     result = await db.execute(
-        select(Session).where(Session.id == session_id, Session.user_id == current_user.id)
+        select(Session).where(
+            Session.id == session_id, Session.user_id == current_user.id
+        )
     )
     session = result.scalar_one_or_none()
     if not session:

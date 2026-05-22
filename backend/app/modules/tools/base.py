@@ -11,11 +11,12 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
 from app.modules.tools.types import (
+    PermissionBehavior,
     PermissionResult,
     ToolContext,
     ToolDecorator,
@@ -31,8 +32,8 @@ class ToolParameter(BaseModel):
 
     type: str = "string"
     description: str = ""
-    enum: Optional[list[str]] = None
-    default: Optional[Any] = None
+    enum: list[str] | None = None
+    default: Any | None = None
 
 
 @dataclass
@@ -177,9 +178,7 @@ class BaseTool(ToolDef, ToolDecorator, ABC):
     # 参数验证（保留兼容旧代码）
     # ------------------------------------------------------------------
 
-    def validate_arguments(
-        self, arguments: dict[str, Any]
-    ) -> tuple[bool, Optional[str]]:
+    def validate_arguments(self, arguments: dict[str, Any]) -> tuple[bool, str | None]:
         for req in self.required:
             if req not in arguments:
                 param_info = self.parameters.get(req)
@@ -189,7 +188,6 @@ class BaseTool(ToolDef, ToolDecorator, ABC):
                 elif isinstance(param_info, dict):
                     desc = f"{req}({param_info.get('type', 'string')}): {param_info.get('description', '')}"
                 return False, (
-                    f"缺少必填参数 {desc}。"
-                    f"请提供 '{req}' 参数后重试调用 {self.id}。"
+                    f"缺少必填参数 {desc}。请提供 '{req}' 参数后重试调用 {self.id}。"
                 )
         return True, None

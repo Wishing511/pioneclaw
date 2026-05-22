@@ -6,13 +6,15 @@
 提供插件可调用的运行时功能：事件总线、配置、数据库会话。
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 # 全局运行时上下文（由 PluginManager 在加载时设置）
-_runtime_context: Dict[str, Any] = {}
+_runtime_context: dict[str, Any] = {}
 
 
-def set_runtime_context(event_bus=None, config: Optional[Dict] = None, db_session_factory=None) -> None:
+def set_runtime_context(
+    event_bus=None, config: dict | None = None, db_session_factory=None
+) -> None:
     """设置运行时上下文（PluginManager 调用）"""
     _runtime_context["event_bus"] = event_bus
     _runtime_context["config"] = config or {}

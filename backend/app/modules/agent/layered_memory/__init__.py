@@ -9,11 +9,11 @@
 - MemoryOrchestrator: 门面类，组合所有子模块
 """
 
-from app.modules.agent.layered_memory.tier_manager import TierManager
-from app.modules.agent.layered_memory.retrieval_engine import RetrievalEngine
-from app.modules.agent.layered_memory.rerank_module import RerankModule
 from app.modules.agent.layered_memory.intent_analyzer import IntentAnalyzer
 from app.modules.agent.layered_memory.memory_orchestrator import MemoryOrchestrator
+from app.modules.agent.layered_memory.rerank_module import RerankModule
+from app.modules.agent.layered_memory.retrieval_engine import RetrievalEngine
+from app.modules.agent.layered_memory.tier_manager import TierManager
 
 __all__ = [
     "TierManager",

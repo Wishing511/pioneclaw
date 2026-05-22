@@ -16,9 +16,10 @@ Tool Hooks 工具拦截系统
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class HookEvent(Enum):
 
     借鉴 PraisonAI HookEvent
     """
+
     BEFORE_TOOL = "before_tool"
     AFTER_TOOL = "after_tool"
     ON_ERROR = "on_error"
@@ -39,14 +41,15 @@ class HookContext:
 
     借鉴 PraisonAI HookContext
     """
+
     tool_name: str
-    tool_args: Dict[str, Any]
+    tool_args: dict[str, Any]
     tool_result: Any = None
-    error: Optional[Exception] = None
-    agent_id: Optional[str] = None
-    agent_name: Optional[str] = None
-    conversation_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: Exception | None = None
+    agent_id: str | None = None
+    agent_name: str | None = None
+    conversation_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # 控制标志
     skip_execution: bool = False  # BEFORE_TOOL 可设置，跳过实际执行
@@ -57,8 +60,9 @@ class HookContext:
 @dataclass
 class HookResult:
     """Hook 处理结果"""
+
     # 修改后的参数（BEFORE_TOOL）
-    modified_args: Optional[Dict[str, Any]] = None
+    modified_args: dict[str, Any] | None = None
 
     # 修改后的结果（AFTER_TOOL）
     modified_result: Any = None
@@ -85,8 +89,8 @@ class ToolHook:
     def __init__(
         self,
         event: HookEvent,
-        callback: Callable[[HookContext], Union[HookResult, Dict, None]],
-        tool_filter: Optional[List[str]] = None,  # 只对特定工具生效
+        callback: Callable[[HookContext], HookResult | dict | None],
+        tool_filter: list[str] | None = None,  # 只对特定工具生效
         priority: int = 100,  # 优先级，数字越小越先执行
     ):
         """
@@ -107,7 +111,7 @@ class ToolHook:
             return True
         return tool_name in self.tool_filter
 
-    async def execute(self, context: HookContext) -> Optional[HookResult]:
+    async def execute(self, context: HookContext) -> HookResult | None:
         """执行 Hook"""
         try:
             result = self.callback(context)
@@ -146,7 +150,7 @@ class ToolHookRunner:
     """
 
     def __init__(self):
-        self._hooks: Dict[HookEvent, List[ToolHook]] = {
+        self._hooks: dict[HookEvent, list[ToolHook]] = {
             HookEvent.BEFORE_TOOL: [],
             HookEvent.AFTER_TOOL: [],
             HookEvent.ON_ERROR: [],
@@ -163,7 +167,7 @@ class ToolHookRunner:
         if hook in self._hooks[hook.event]:
             self._hooks[hook.event].remove(hook)
 
-    def clear(self, event: Optional[HookEvent] = None) -> None:
+    def clear(self, event: HookEvent | None = None) -> None:
         """清除 Hook"""
         if event:
             self._hooks[event].clear()
@@ -174,9 +178,9 @@ class ToolHookRunner:
     async def run_before(
         self,
         tool_name: str,
-        args: Dict[str, Any],
-        context: Optional[HookContext] = None,
-    ) -> tuple[Dict[str, Any], bool]:
+        args: dict[str, Any],
+        context: HookContext | None = None,
+    ) -> tuple[dict[str, Any], bool]:
         """执行 BEFORE_TOOL hooks
 
         Args:
@@ -219,9 +223,9 @@ class ToolHookRunner:
     async def run_after(
         self,
         tool_name: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         result: Any,
-        context: Optional[HookContext] = None,
+        context: HookContext | None = None,
     ) -> Any:
         """执行 AFTER_TOOL hooks
 
@@ -262,9 +266,9 @@ class ToolHookRunner:
     async def run_on_error(
         self,
         tool_name: str,
-        args: Dict[str, Any],
+        args: dict[str, Any],
         error: Exception,
-        context: Optional[HookContext] = None,
+        context: HookContext | None = None,
     ) -> tuple[bool, Any]:
         """执行 ON_ERROR hooks
 
@@ -308,8 +312,8 @@ class ToolHookRunner:
         self,
         tool_name: str,
         tool_func: Callable,
-        args: Dict[str, Any],
-        context: Optional[HookContext] = None,
+        args: dict[str, Any],
+        context: HookContext | None = None,
     ) -> Any:
         """带 Hook 的工具执行
 
@@ -345,7 +349,9 @@ class ToolHookRunner:
                     result = await result
 
                 # 3. AFTER_TOOL
-                final_result = await self.run_after(tool_name, modified_args, result, ctx)
+                final_result = await self.run_after(
+                    tool_name, modified_args, result, ctx
+                )
                 return final_result
 
             except Exception as e:
@@ -358,7 +364,9 @@ class ToolHookRunner:
 
                 if should_retry and retry_count < max_retries - 1:
                     retry_count += 1
-                    logger.info(f"Retrying tool {tool_name} (attempt {retry_count + 1})")
+                    logger.info(
+                        f"Retrying tool {tool_name} (attempt {retry_count + 1})"
+                    )
                     continue
 
                 if default_value is not None:
@@ -371,13 +379,14 @@ class ToolHookRunner:
 
 # ==================== 预置 Hooks ====================
 
+
 class builtin_hooks:
     """预置 Hook 函数"""
 
     @staticmethod
     def log_execution(
         event: HookEvent = HookEvent.AFTER_TOOL,
-        logger_func: Optional[Callable] = None,
+        logger_func: Callable | None = None,
     ) -> ToolHook:
         """日志记录 Hook
 
@@ -394,7 +403,9 @@ class builtin_hooks:
             if event == HookEvent.BEFORE_TOOL:
                 _log(f"[BEFORE] Tool: {ctx.tool_name}, Args: {ctx.tool_args}")
             elif event == HookEvent.AFTER_TOOL:
-                _log(f"[AFTER] Tool: {ctx.tool_name}, Result: {str(ctx.tool_result)[:100]}")
+                _log(
+                    f"[AFTER] Tool: {ctx.tool_name}, Result: {str(ctx.tool_result)[:100]}"
+                )
             elif event == HookEvent.ON_ERROR:
                 _log(f"[ERROR] Tool: {ctx.tool_name}, Error: {ctx.error}")
             return HookResult()
@@ -403,8 +414,8 @@ class builtin_hooks:
 
     @staticmethod
     def validate_args(
-        schema: Dict[str, Any],
-        tool_filter: Optional[List[str]] = None,
+        schema: dict[str, Any],
+        tool_filter: list[str] | None = None,
     ) -> ToolHook:
         """参数验证 Hook
 
@@ -415,28 +426,31 @@ class builtin_hooks:
         Returns:
             ToolHook
         """
+
         def callback(ctx: HookContext) -> HookResult:
             # 简单验证：检查必需参数
             required = schema.get("required", [])
             properties = schema.get("properties", {})
 
             missing = []
-            for field in required:
-                if field not in ctx.tool_args or ctx.tool_args[field] is None:
-                    missing.append(field)
+            for req_field in required:
+                if req_field not in ctx.tool_args or ctx.tool_args[req_field] is None:
+                    missing.append(req_field)
 
             if missing:
                 raise ValueError(f"Missing required arguments: {missing}")
 
             # 类型检查（简化版）
-            for field, field_schema in properties.items():
-                if field in ctx.tool_args:
+            for prop_name, field_schema in properties.items():
+                if prop_name in ctx.tool_args:
                     expected_type = field_schema.get("type")
-                    value = ctx.tool_args[field]
+                    value = ctx.tool_args[prop_name]
 
                     if expected_type == "string" and not isinstance(value, str):
                         raise TypeError(f"Argument '{field}' must be string")
-                    elif expected_type == "number" and not isinstance(value, (int, float)):
+                    elif expected_type == "number" and not isinstance(
+                        value, (int, float)
+                    ):
                         raise TypeError(f"Argument '{field}' must be number")
                     elif expected_type == "boolean" and not isinstance(value, bool):
                         raise TypeError(f"Argument '{field}' must be boolean")
@@ -455,8 +469,8 @@ class builtin_hooks:
 
     @staticmethod
     def cache_result(
-        cache: Optional[Dict[str, Any]] = None,
-        key_func: Optional[Callable[[str, Dict], str]] = None,
+        cache: dict[str, Any] | None = None,
+        key_func: Callable[[str, dict], str] | None = None,
         ttl_seconds: int = 3600,
     ) -> ToolHook:
         """结果缓存 Hook
@@ -479,6 +493,7 @@ class builtin_hooks:
             else:
                 import hashlib
                 import json
+
                 args_str = json.dumps(ctx.tool_args, sort_keys=True)
                 args_hash = hashlib.md5(args_str.encode()).hexdigest()
                 cache_key = f"{ctx.tool_name}:{args_hash}"
@@ -515,7 +530,7 @@ class builtin_hooks:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         exceptions: tuple = (Exception,),
-        tool_filter: Optional[List[str]] = None,
+        tool_filter: list[str] | None = None,
     ) -> ToolHook:
         """错误重试 Hook
 
@@ -547,7 +562,7 @@ class builtin_hooks:
     def rate_limit(
         max_calls: int = 10,
         window_seconds: float = 60.0,
-        tool_filter: Optional[List[str]] = None,
+        tool_filter: list[str] | None = None,
     ) -> ToolHook:
         """速率限制 Hook
 
@@ -561,7 +576,7 @@ class builtin_hooks:
         """
         import time
 
-        call_times: List[float] = []
+        call_times: list[float] = []
 
         def callback(ctx: HookContext) -> HookResult:
             now = time.time()
@@ -587,7 +602,7 @@ class builtin_hooks:
     @staticmethod
     def timeout(
         timeout_seconds: float = 30.0,
-        tool_filter: Optional[List[str]] = None,
+        tool_filter: list[str] | None = None,
     ) -> ToolHook:
         """超时控制 Hook
 
@@ -600,6 +615,7 @@ class builtin_hooks:
         Returns:
             ToolHook
         """
+
         def callback(ctx: HookContext) -> HookResult:
             ctx.metadata["timeout"] = timeout_seconds
             return HookResult()
@@ -612,8 +628,8 @@ class builtin_hooks:
 
     @staticmethod
     def transform_args(
-        transformer: Callable[[Dict[str, Any]], Dict[str, Any]],
-        tool_filter: Optional[List[str]] = None,
+        transformer: Callable[[dict[str, Any]], dict[str, Any]],
+        tool_filter: list[str] | None = None,
     ) -> ToolHook:
         """参数转换 Hook
 
@@ -624,6 +640,7 @@ class builtin_hooks:
         Returns:
             ToolHook
         """
+
         def callback(ctx: HookContext) -> HookResult:
             new_args = transformer(ctx.tool_args)
             return HookResult(modified_args=new_args)
@@ -637,7 +654,7 @@ class builtin_hooks:
     @staticmethod
     def transform_result(
         transformer: Callable[[Any], Any],
-        tool_filter: Optional[List[str]] = None,
+        tool_filter: list[str] | None = None,
     ) -> ToolHook:
         """结果转换 Hook
 
@@ -648,6 +665,7 @@ class builtin_hooks:
         Returns:
             ToolHook
         """
+
         def callback(ctx: HookContext) -> HookResult:
             new_result = transformer(ctx.tool_result)
             return HookResult(modified_result=new_result)
@@ -661,9 +679,10 @@ class builtin_hooks:
 
 # ==================== 装饰器 ====================
 
+
 def hook(
     event: HookEvent,
-    tool_filter: Optional[List[str]] = None,
+    tool_filter: list[str] | None = None,
     priority: int = 100,
 ):
     """Hook 装饰器
@@ -675,6 +694,7 @@ def hook(
         async def log_search(ctx: HookContext):
             print(f"Searching: {ctx.tool_args}")
     """
+
     def decorator(func: Callable) -> ToolHook:
         return ToolHook(
             event=event,
@@ -682,4 +702,5 @@ def hook(
             tool_filter=tool_filter,
             priority=priority,
         )
+
     return decorator

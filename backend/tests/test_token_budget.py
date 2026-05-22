@@ -7,7 +7,6 @@ Test TokenBudget — 统一 token 预算计算
 3. 状态判定（normal/warning/caution/critical/block）
 4. usage_percent 计算正确
 """
-import pytest
 
 from app.modules.agent.token_budget import TokenBudget, TokenUsage
 

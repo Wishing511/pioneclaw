@@ -1,40 +1,41 @@
-from typing import List, Optional, Any
+import io
+import shutil
+import zipfile
 from datetime import datetime, timezone
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
-from pathlib import Path
-import shutil
-from app.core import get_db
-from app.models import Skill, SkillScope, User, Approval
-from app.models.approval import ApprovalType
-import zipfile, io, json
-from app.schemas import SkillCreate, SkillUpdate, SkillResponse, MessageResponse
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
 from app.core.permissions import PermissionChecker
+from app.models import Approval, Skill, User
 from app.modules.agent.skills import get_skills_loader
 from app.modules.agent.skills_config import (
     SkillsConfigManager,
     get_config_manager,
 )
 from app.modules.agent.skills_schema import (
-    SkillsSchemaRegistry,
     SkillSchema,
+    SkillsSchemaRegistry,
     get_schema_registry,
 )
+from app.schemas import MessageResponse, SkillCreate, SkillResponse, SkillUpdate
 
 router = APIRouter(prefix="/skills", tags=["技能管理"])
 
 
-@router.get("", response_model=List[SkillResponse])
+@router.get("", response_model=list[SkillResponse])
 async def list_skills(
     skip: int = 0,
     limit: int = 20,
-    category: Optional[str] = None,
-    is_active: Optional[bool] = None,
+    category: str | None = None,
+    is_active: bool | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取技能列表"""
     from app.models.models import SkillScope
@@ -63,6 +64,7 @@ async def list_skills(
     # 合并文件系统 workspace 技能（去重：DB 已存在的优先）
     try:
         from app.modules.agent.skills import get_skills_loader
+
         loader = get_skills_loader()
         for name, fs in loader.skills.items():
             if name in seen:
@@ -70,23 +72,25 @@ async def list_skills(
             if fs.source not in ("workspace",):
                 continue  # 只引入 workspace，builtin 和 openclaw 不引入
             seen.add(name)
-            db_skills.append(SkillResponse(
-                name=name,
-                display_name=fs.metadata.title or name,
-                description=fs.metadata.description or "",
-                category="custom",
-                scope="user",  # 文件技能默认归属当前 workspace 用户
-                source="file",
-                content=fs.content,
-                package_type="inline",
-                package_size=len(fs.content.encode()) if fs.content else 0,
-                always_activate=fs.metadata.always,
-                skill_format="inline",
-                tags=fs.metadata.tags,
-                is_active=fs.enabled,
-                is_public=False,
-                creator_id=None,
-            ))
+            db_skills.append(
+                SkillResponse(
+                    name=name,
+                    display_name=fs.metadata.title or name,
+                    description=fs.metadata.description or "",
+                    category="custom",
+                    scope="user",  # 文件技能默认归属当前 workspace 用户
+                    source="file",
+                    content=fs.content,
+                    package_type="inline",
+                    package_size=len(fs.content.encode()) if fs.content else 0,
+                    always_activate=fs.metadata.always,
+                    skill_format="inline",
+                    tags=fs.metadata.tags,
+                    is_active=fs.enabled,
+                    is_public=False,
+                    creator_id=None,
+                )
+            )
     except Exception:
         pass
 
@@ -97,7 +101,7 @@ async def list_skills(
 async def get_skill(
     skill_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取单个技能详情"""
     result = await db.execute(select(Skill).where(Skill.id == skill_id))
@@ -113,7 +117,7 @@ async def get_skill(
 async def get_skill_content(
     skill_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取技能内容"""
     result = await db.execute(select(Skill).where(Skill.id == skill_id))
@@ -130,12 +134,15 @@ def _project_skills_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "skills"
 
 
-@router.post("", status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(PermissionChecker("skill:create"))])
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(PermissionChecker("skill:create"))],
+)
 async def create_skill(
     skill_data: SkillCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """创建技能 → 写入本地 skills/ 目录"""
     # 检查名称是否已存在（DB + 文件系统）
@@ -148,7 +155,6 @@ async def create_skill(
         raise HTTPException(status_code=400, detail="技能名称已在文件系统中存在")
 
     # 写入 skills/{name}/SKILL.md
-    from app.modules.agent.skills import SkillsLoader
     skill_dir = _project_skills_dir() / skill_data.name
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_file = skill_dir / "SKILL.md"
@@ -176,13 +182,16 @@ async def create_skill(
     )
 
 
-@router.put("/{skill_id}", response_model=SkillResponse,
-            dependencies=[Depends(PermissionChecker("skill:update"))])
+@router.put(
+    "/{skill_id}",
+    response_model=SkillResponse,
+    dependencies=[Depends(PermissionChecker("skill:update"))],
+)
 async def update_skill(
     skill_id: int,
     skill_data: SkillUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新技能"""
     result = await db.execute(select(Skill).where(Skill.id == skill_id))
@@ -200,6 +209,7 @@ async def update_skill(
         # 解析 frontmatter 中的 always 和 format
         if update_data["content"].startswith("---"):
             import re
+
             match = re.match(r"^---\n(.*?)\n---", update_data["content"], re.DOTALL)
             if match:
                 yaml_content = match.group(1)
@@ -207,9 +217,13 @@ async def update_skill(
                     if ":" in line:
                         key, value = line.split(":", 1)
                         key = key.strip()
-                        value = value.strip().strip('"\'')
+                        value = value.strip().strip("\"'")
                         if key == "always":
-                            update_data["always_activate"] = value.lower() in ("true", "yes", "1")
+                            update_data["always_activate"] = value.lower() in (
+                                "true",
+                                "yes",
+                                "1",
+                            )
                         elif key == "format":
                             update_data["skill_format"] = value
 
@@ -222,12 +236,15 @@ async def update_skill(
     return skill
 
 
-@router.delete("/{skill_id}", response_model=MessageResponse,
-               dependencies=[Depends(PermissionChecker("skill:delete"))])
+@router.delete(
+    "/{skill_id}",
+    response_model=MessageResponse,
+    dependencies=[Depends(PermissionChecker("skill:delete"))],
+)
 async def delete_skill(
     skill_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """删除技能"""
     result = await db.execute(select(Skill).where(Skill.id == skill_id))
@@ -244,8 +261,8 @@ async def delete_skill(
 
 class UpdateFileSkillRequest(BaseModel):
     content: str
-    display_name: Optional[str] = None
-    description: Optional[str] = None
+    display_name: str | None = None
+    description: str | None = None
 
 
 @router.put("/file/{skill_name}", response_model=SkillResponse)
@@ -268,8 +285,11 @@ async def update_file_skill(
     fs = loader.skills.get(skill_name)
     return SkillResponse(
         name=skill_name,
-        display_name=skill_data.display_name or (fs.metadata.title if fs else skill_name),
-        description=skill_data.description or (fs.metadata.description if fs else "") or "",
+        display_name=skill_data.display_name
+        or (fs.metadata.title if fs else skill_name),
+        description=skill_data.description
+        or (fs.metadata.description if fs else "")
+        or "",
         category="custom",
         scope="user",
         source="file",
@@ -284,7 +304,6 @@ async def delete_file_skill(
     current_user: User = Depends(get_current_active_user),
 ):
     """删除文件技能（删除整个技能目录）"""
-    import shutil
     loader = get_skills_loader()
     fs = loader.skills.get(skill_name)
     if not fs or fs.source not in ("workspace",):
@@ -298,12 +317,11 @@ async def delete_file_skill(
 
 
 @router.post("/reload", response_model=MessageResponse)
-async def reload_skills(
-    current_user: User = Depends(get_current_active_user)
-):
+async def reload_skills(current_user: User = Depends(get_current_active_user)):
     """重新加载技能文件（热重载）"""
     try:
         from app.modules.agent.skills import get_skills_loader
+
         loader = get_skills_loader()
         loader.reload()
         return MessageResponse(message=f"技能已重新加载，共 {len(loader.skills)} 个")
@@ -315,7 +333,7 @@ async def reload_skills(
 async def check_skill_dependencies(
     skill_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """检查技能依赖是否满足"""
     result = await db.execute(select(Skill).where(Skill.id == skill_id))
@@ -324,7 +342,6 @@ async def check_skill_dependencies(
     if not skill:
         raise HTTPException(status_code=404, detail="技能不存在")
 
-    import shutil
     import os
 
     dependencies = skill.dependencies or {}
@@ -333,19 +350,33 @@ async def check_skill_dependencies(
     # 检查二进制依赖
     for binary in dependencies.get("bins", []):
         if not shutil.which(binary):
-            missing.append({"type": "binary", "name": binary, "message": f"CLI 工具未安装: {binary}"})
+            missing.append(
+                {
+                    "type": "binary",
+                    "name": binary,
+                    "message": f"CLI 工具未安装: {binary}",
+                }
+            )
 
     # 检查环境变量
     for env_var in dependencies.get("env", []):
         if not os.environ.get(env_var):
-            missing.append({"type": "env", "name": env_var, "message": f"环境变量未设置: {env_var}"})
+            missing.append(
+                {
+                    "type": "env",
+                    "name": env_var,
+                    "message": f"环境变量未设置: {env_var}",
+                }
+            )
 
     # 检查 Python 包
     for pkg in dependencies.get("python_packages", []):
         try:
             __import__(pkg)
         except ImportError:
-            missing.append({"type": "python", "name": pkg, "message": f"Python 包未安装: {pkg}"})
+            missing.append(
+                {"type": "python", "name": pkg, "message": f"Python 包未安装: {pkg}"}
+            )
 
     return {
         "skill_id": skill_id,
@@ -357,12 +388,15 @@ async def check_skill_dependencies(
 
 # ==================== 请求模型 (config/schema) ====================
 
+
 class SetConfigRequest(BaseModel):
     """设置配置请求"""
+
     config: dict
 
 
 # ==================== 依赖 (config/schema) ====================
+
 
 def _get_config_mgr() -> SkillsConfigManager:
     project_root = Path(__file__).resolve().parents[3]
@@ -377,6 +411,7 @@ def _get_schema_reg() -> SkillsSchemaRegistry:
 
 
 # ==================== 配置管理 API (name-based) ====================
+
 
 @router.get("/{name}/config")
 async def get_skill_config(
@@ -409,17 +444,13 @@ async def set_skill_config(
     is_valid, errors = schema_reg.validate_config(name, request.config)
 
     if not is_valid:
-        raise HTTPException(
-            status_code=400,
-            detail={"errors": errors}
-        )
+        raise HTTPException(status_code=400, detail={"errors": errors})
 
     success = config_mgr.save_config(name, request.config)
 
     if not success:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save config for skill '{name}'"
+            status_code=500, detail=f"Failed to save config for skill '{name}'"
         )
 
     return {"success": True, "name": name}
@@ -435,10 +466,7 @@ async def fix_skill_config(
     success, changes = config_mgr.auto_fix_config(name)
 
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail={"changes": changes}
-        )
+        raise HTTPException(status_code=400, detail={"changes": changes})
 
     return {
         "success": True,
@@ -448,6 +476,7 @@ async def fix_skill_config(
 
 
 # ==================== Schema 管理 API (name-based) ====================
+
 
 @router.get("/{name}/schema")
 async def get_skill_schema(
@@ -460,8 +489,7 @@ async def get_skill_schema(
 
     if schema is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"Schema not found for skill '{name}'"
+            status_code=404, detail=f"Schema not found for skill '{name}'"
         )
 
     return schema.to_dict()
@@ -481,8 +509,7 @@ async def create_skill_schema(
         return {"success": True, "name": name}
     except Exception as e:
         raise HTTPException(
-            status_code=400,
-            detail=f"Failed to create schema: {str(e)}"
+            status_code=400, detail=f"Failed to create schema: {str(e)}"
         )
 
 
@@ -515,7 +542,10 @@ async def promote_file_skill(
     # 权限检查：只有超管可以发布为 system，org_admin 可发布为 org
     if request.scope == "system" and current_user.role.value not in ("super_admin",):
         raise HTTPException(status_code=403, detail="仅超级管理员可发布为系统级技能")
-    if request.scope == "org" and current_user.role.value not in ("super_admin", "org_admin"):
+    if request.scope == "org" and current_user.role.value not in (
+        "super_admin",
+        "org_admin",
+    ):
         raise HTTPException(status_code=403, detail="仅管理员可发布为组织级技能")
 
     # 创建 DB 记录
@@ -544,9 +574,8 @@ async def upload_skill_zip(
     current_user: User = Depends(get_current_active_user),
 ):
     """上传 ZIP 压缩包 → 解压到 skills/{name}/ 保留完整目录结构"""
-    import zipfile
     import io
-    import shutil
+    import zipfile
 
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="仅支持 ZIP 文件")
@@ -664,7 +693,11 @@ async def import_skill(
     """导入 Skill zip 包"""
     if scope not in ("user", "org", "system"):
         raise HTTPException(status_code=400, detail="scope 必须为 user/org/system")
-    if scope in ("org", "system") and not current_user.is_org_admin and not current_user.is_super_admin:
+    if (
+        scope in ("org", "system")
+        and not current_user.is_org_admin
+        and not current_user.is_super_admin
+    ):
         raise HTTPException(status_code=403, detail="需要管理员权限导入到组织/系统级别")
 
     try:
@@ -673,11 +706,16 @@ async def import_skill(
         target = SKILLS_DIR / name
         if target.exists():
             import shutil
+
             shutil.rmtree(target)
         target.mkdir(parents=True)
         for entry in zf.namelist():
             # 安全：防止路径穿越
-            safe = Path(entry).name if "/" not in entry and "\\" not in entry else entry.split("/")[-1]
+            safe = (
+                Path(entry).name
+                if "/" not in entry and "\\" not in entry
+                else entry.split("/")[-1]
+            )
             if not safe:
                 continue
             content = zf.read(entry)
@@ -698,8 +736,10 @@ async def import_skill(
             name=name,
             display_name=fs.metadata.title if fs else name,
             description=fs.metadata.description if fs else "",
-            category="custom", scope=scope,
-            creator_id=current_user.id, is_active=True,
+            category="custom",
+            scope=scope,
+            creator_id=current_user.id,
+            is_active=True,
         )
         db.add(skill)
         await db.commit()
@@ -742,8 +782,9 @@ async def download_skill(
             for f in skill_dir.rglob("*"):
                 if f.is_file():
                     zf.write(f, f.relative_to(skill_dir))
-    return FileResponse(zip_path, filename=f"{skill.name}.zip",
-                        media_type="application/zip")
+    return FileResponse(
+        zip_path, filename=f"{skill.name}.zip", media_type="application/zip"
+    )
 
 
 @router.get("/reviews/pending")
@@ -755,22 +796,31 @@ async def list_pending_reviews(
     if not current_user.is_org_admin and not current_user.is_super_admin:
         raise HTTPException(status_code=403, detail="需要管理员权限")
     result = await db.execute(
-        select(Approval).where(
+        select(Approval)
+        .where(
             Approval.approval_type == "skill_to_org",
             Approval.status == "pending",
-        ).order_by(Approval.created_at.desc())
+        )
+        .order_by(Approval.created_at.desc())
     )
     approvals = result.scalars().all()
-    return [{"id": a.id, "title": a.title, "requester_id": a.requester_id,
-             "resource_id": a.resource_id, "created_at": a.created_at.isoformat()}
-            for a in approvals]
+    return [
+        {
+            "id": a.id,
+            "title": a.title,
+            "requester_id": a.requester_id,
+            "resource_id": a.resource_id,
+            "created_at": a.created_at.isoformat(),
+        }
+        for a in approvals
+    ]
 
 
 @router.post("/reviews/{review_id}")
 async def review_skill(
     review_id: int,
     approve: bool = True,
-    reject_reason: Optional[str] = None,
+    reject_reason: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -800,6 +850,7 @@ async def review_skill(
 # Skill 文件管理
 # ============================================================
 
+
 @router.get("/{skill_id}/files")
 async def list_skill_files(
     skill_id: int,
@@ -824,7 +875,8 @@ async def list_skill_files(
 
 @router.get("/{skill_id}/files/{path:path}")
 async def get_skill_file(
-    skill_id: int, path: str,
+    skill_id: int,
+    path: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -841,7 +893,8 @@ async def get_skill_file(
 
 @router.put("/{skill_id}/files/{path:path}")
 async def put_skill_file(
-    skill_id: int, path: str,
+    skill_id: int,
+    path: str,
     content: str,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),

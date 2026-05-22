@@ -9,15 +9,8 @@
 文档：https://open.dingtalk.com/document/
 """
 
-import asyncio
-import json
 import logging
 import time
-import hmac
-import hashlib
-import base64
-from typing import Optional
-from urllib.parse import quote_plus
 
 import httpx
 
@@ -28,7 +21,6 @@ from .base import (
     ChannelStatus,
     ChannelType,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +34,11 @@ class DingTalkChannel(BaseChannel):
         super().__init__(config)
         self.app_key = config.app_id
         self.app_secret = config.app_secret
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_expire: float = 0
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(self) -> str | None:
         """获取 access_token"""
         if self._access_token and time.time() < self._token_expire - 60:
             return self._access_token
@@ -63,7 +55,9 @@ class DingTalkChannel(BaseChannel):
                 self._token_expire = time.time() + data.get("expires_in", 7200)
                 return self._access_token
             else:
-                logger.error(f"[{self.channel_id}] Get token failed: {data.get('errmsg')}")
+                logger.error(
+                    f"[{self.channel_id}] Get token failed: {data.get('errmsg')}"
+                )
                 return None
 
         except Exception as e:
@@ -113,7 +107,7 @@ class DingTalkChannel(BaseChannel):
         chat_id: str,
         content: str,
         **kwargs,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """发送消息（工作通知）"""
         if not self._client or self.status != ChannelStatus.CONNECTED:
             return False, "Channel not connected"
@@ -128,7 +122,10 @@ class DingTalkChannel(BaseChannel):
             if msg_type == "text":
                 msg = {"msgtype": "text", "text": {"content": content}}
             elif msg_type == "markdown":
-                msg = {"msgtype": "markdown", "markdown": {"title": kwargs.get("title", "通知"), "text": content}}
+                msg = {
+                    "msgtype": "markdown",
+                    "markdown": {"title": kwargs.get("title", "通知"), "text": content},
+                }
             else:
                 msg = {"msgtype": "text", "text": {"content": content}}
 
@@ -181,7 +178,9 @@ class DingTalkChannel(BaseChannel):
                 content=text_content,
                 content_type="text",
                 chat_id=conversation_id,
-                chat_type="group" if event.get("ConversationType") == "2" else "private",
+                chat_type="group"
+                if event.get("ConversationType") == "2"
+                else "private",
                 raw=event,
             )
 
@@ -189,5 +188,6 @@ class DingTalkChannel(BaseChannel):
 
 
 # 注册适配器
-from .manager import register_channel
+from .manager import register_channel  # noqa: E402
+
 register_channel(ChannelType.DINGTALK, DingTalkChannel)

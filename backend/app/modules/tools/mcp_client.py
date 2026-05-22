@@ -16,9 +16,10 @@ MCP 客户端抽象层
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +27,19 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MCPServerConnection:
     """MCP 服务器连接状态"""
+
     name: str
     transport: str  # "stdio" | "sse" | "http"
-    command: Optional[str] = None  # stdio 模式的命令
-    args: Optional[List[str]] = None  # stdio 模式的命令行参数
-    env: Optional[Dict[str, str]] = None  # 环境变量
-    url: Optional[str] = None  # sse/http 模式的 URL
-    auth_config: Optional[Dict[str, Any]] = None  # 认证配置
+    command: str | None = None  # stdio 模式的命令
+    args: list[str] | None = None  # stdio 模式的命令行参数
+    env: dict[str, str] | None = None  # 环境变量
+    url: str | None = None  # sse/http 模式的 URL
+    auth_config: dict[str, Any] | None = None  # 认证配置
     status: str = "disconnected"  # disconnected/connecting/connected/error
-    tools: List[dict] = field(default_factory=list)
-    resources: List[dict] = field(default_factory=list)
-    server_info: Optional[dict] = None
-    error_message: Optional[str] = None
+    tools: list[dict] = field(default_factory=list)
+    resources: list[dict] = field(default_factory=list)
+    server_info: dict | None = None
+    error_message: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -63,7 +65,7 @@ class MCPToolRegistry:
     _instance: Optional["MCPToolRegistry"] = None
 
     def __init__(self):
-        self._servers: Dict[str, MCPServerConnection] = {}
+        self._servers: dict[str, MCPServerConnection] = {}
         self._lock = asyncio.Lock()
 
     @classmethod
@@ -79,11 +81,11 @@ class MCPToolRegistry:
         self,
         name: str,
         transport: str = "stdio",
-        command: Optional[str] = None,
-        args: Optional[List[str]] = None,
-        env: Optional[Dict[str, str]] = None,
-        url: Optional[str] = None,
-        auth_config: Optional[Dict[str, Any]] = None,
+        command: str | None = None,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        url: str | None = None,
+        auth_config: dict[str, Any] | None = None,
     ) -> MCPServerConnection:
         """注册 MCP 服务器配置"""
         conn = MCPServerConnection(
@@ -109,11 +111,11 @@ class MCPToolRegistry:
             return True
         return False
 
-    def get_server(self, name: str) -> Optional[MCPServerConnection]:
+    def get_server(self, name: str) -> MCPServerConnection | None:
         """获取服务器连接状态"""
         return self._servers.get(name)
 
-    def list_servers(self) -> List[MCPServerConnection]:
+    def list_servers(self) -> list[MCPServerConnection]:
         """列出所有已注册的服务器"""
         return list(self._servers.values())
 
@@ -125,7 +127,9 @@ class MCPToolRegistry:
         if not conn.auth_config:
             return headers
         # 支持 {"headers": {"Authorization": "Bearer xxx", "X-API-Key": "yyy"}}
-        if "headers" in conn.auth_config and isinstance(conn.auth_config["headers"], dict):
+        if "headers" in conn.auth_config and isinstance(
+            conn.auth_config["headers"], dict
+        ):
             headers.update(conn.auth_config["headers"])
         # 简写 {"api_key": "xxx"} → Bearer token
         if "api_key" in conn.auth_config and "Authorization" not in headers:
@@ -137,7 +141,7 @@ class MCPToolRegistry:
     @asynccontextmanager
     async def _open_transport(
         self, conn: MCPServerConnection
-    ) -> AsyncIterator[Tuple[Any, Any]]:
+    ) -> AsyncIterator[tuple[Any, Any]]:
         """打开传输层，yield (read_stream, write_stream)
 
         按 conn.transport 分发到 stdio / sse / http 客户端。
@@ -165,7 +169,11 @@ class MCPToolRegistry:
             from mcp.client.streamable_http import streamablehttp_client
 
             headers = self._build_auth_headers(conn)
-            async with streamablehttp_client(conn.url, headers=headers or None) as (read, write, _get_session_id):
+            async with streamablehttp_client(conn.url, headers=headers or None) as (
+                read,
+                write,
+                _get_session_id,
+            ):
                 yield read, write
 
         else:
@@ -189,45 +197,44 @@ class MCPToolRegistry:
         try:
             from mcp import ClientSession
 
-            async with self._open_transport(conn) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
+            async with self._open_transport(conn) as (read, write), ClientSession(read, write) as session:
+                await session.initialize()
 
-                    conn.server_info = {
-                        "name": getattr(session, "server_name", "unknown"),
-                        "version": getattr(session, "server_version", "0.0.0"),
-                    }
+                conn.server_info = {
+                    "name": getattr(session, "server_name", "unknown"),
+                    "version": getattr(session, "server_version", "0.0.0"),
+                }
 
-                    # 发现工具
-                    try:
-                        tools_result = await session.list_tools()
-                        conn.tools = [
-                            {
-                                "name": t.name,
-                                "description": getattr(t, "description", ""),
-                                "inputSchema": getattr(t, "inputSchema", {}),
-                            }
-                            for t in tools_result.tools
-                        ]
-                    except Exception as e:
-                        logger.warning(f"[MCPToolRegistry] 工具发现失败 ({name}): {e}")
-                        conn.tools = []
+                # 发现工具
+                try:
+                    tools_result = await session.list_tools()
+                    conn.tools = [
+                        {
+                            "name": t.name,
+                            "description": getattr(t, "description", ""),
+                            "inputSchema": getattr(t, "inputSchema", {}),
+                        }
+                        for t in tools_result.tools
+                    ]
+                except Exception as e:
+                    logger.warning(f"[MCPToolRegistry] 工具发现失败 ({name}): {e}")
+                    conn.tools = []
 
-                    # 发现资源
-                    try:
-                        resources_result = await session.list_resources()
-                        conn.resources = [
-                            {
-                                "uri": str(r.uri),
-                                "name": r.name,
-                                "description": getattr(r, "description", ""),
-                                "mimeType": getattr(r, "mimeType", ""),
-                            }
-                            for r in resources_result.resources
-                        ]
-                    except Exception as e:
-                        logger.warning(f"[MCPToolRegistry] 资源发现失败 ({name}): {e}")
-                        conn.resources = []
+                # 发现资源
+                try:
+                    resources_result = await session.list_resources()
+                    conn.resources = [
+                        {
+                            "uri": str(r.uri),
+                            "name": r.name,
+                            "description": getattr(r, "description", ""),
+                            "mimeType": getattr(r, "mimeType", ""),
+                        }
+                        for r in resources_result.resources
+                    ]
+                except Exception as e:
+                    logger.warning(f"[MCPToolRegistry] 资源发现失败 ({name}): {e}")
+                    conn.resources = []
 
             conn.status = "connected"
             logger.info(
@@ -246,7 +253,7 @@ class MCPToolRegistry:
 
         return conn
 
-    async def list_tools(self, server_name: str) -> List[dict]:
+    async def list_tools(self, server_name: str) -> list[dict]:
         """列出 MCP 服务器提供的工具
 
         如果服务器尚未连接，会先尝试连接。
@@ -263,7 +270,7 @@ class MCPToolRegistry:
     # ==================== 工具调用 ====================
 
     async def call_tool(
-        self, server_name: str, tool_name: str, arguments: Optional[dict] = None
+        self, server_name: str, tool_name: str, arguments: dict | None = None
     ) -> dict:
         """调用 MCP 服务器的工具
 
@@ -286,37 +293,43 @@ class MCPToolRegistry:
                 return {"success": False, "error": f"连接失败: {e}"}
 
         if conn.status != "connected":
-            return {"success": False, "error": f"服务器未连接: {conn.error_message or conn.status}"}
+            return {
+                "success": False,
+                "error": f"服务器未连接: {conn.error_message or conn.status}",
+            }
 
         try:
             from mcp import ClientSession
 
-            async with self._open_transport(conn) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
+            async with self._open_transport(conn) as (read, write), ClientSession(read, write) as session:
+                await session.initialize()
 
-                    arguments = arguments or {}
-                    result = await session.call_tool(tool_name, arguments)
+                arguments = arguments or {}
+                result = await session.call_tool(tool_name, arguments)
 
-                    content_parts = []
-                    for c in result.content:
-                        if hasattr(c, "text"):
-                            content_parts.append({"type": "text", "text": c.text})
-                        elif hasattr(c, "data"):
-                            content_parts.append({
+                content_parts = []
+                for c in result.content:
+                    if hasattr(c, "text"):
+                        content_parts.append({"type": "text", "text": c.text})
+                    elif hasattr(c, "data"):
+                        content_parts.append(
+                            {
                                 "type": getattr(c, "type", "resource"),
                                 "data": str(c.data)[:1000],
-                            })
-                        else:
-                            content_parts.append({"type": "unknown", "data": str(c)[:1000]})
+                            }
+                        )
+                    else:
+                        content_parts.append(
+                            {"type": "unknown", "data": str(c)[:1000]}
+                        )
 
-                    return {
-                        "success": True,
-                        "server": server_name,
-                        "tool": tool_name,
-                        "content": content_parts,
-                        "isError": getattr(result, "isError", False),
-                    }
+                return {
+                    "success": True,
+                    "server": server_name,
+                    "tool": tool_name,
+                    "content": content_parts,
+                    "isError": getattr(result, "isError", False),
+                }
 
         except Exception as e:
             conn.status = "error"
@@ -325,7 +338,7 @@ class MCPToolRegistry:
 
     # ==================== 资源操作 ====================
 
-    async def list_resources(self, server_name: Optional[str] = None) -> dict:
+    async def list_resources(self, server_name: str | None = None) -> dict:
         """列出 MCP 服务器提供的资源
 
         Args:
@@ -372,25 +385,28 @@ class MCPToolRegistry:
         try:
             from mcp import ClientSession
 
-            async with self._open_transport(conn) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    result = await session.read_resource(uri)
+            async with self._open_transport(conn) as (read, write), ClientSession(read, write) as session:
+                await session.initialize()
+                result = await session.read_resource(uri)
 
-                    contents = []
-                    for c in result.contents:
-                        contents.append({
+                contents = []
+                for c in result.contents:
+                    contents.append(
+                        {
                             "uri": str(c.uri) if hasattr(c, "uri") else uri,
                             "mimeType": getattr(c, "mimeType", ""),
-                            "text": getattr(c, "text", str(c)[:2000]) if hasattr(c, "text") else str(c)[:2000],
-                        })
+                            "text": getattr(c, "text", str(c)[:2000])
+                            if hasattr(c, "text")
+                            else str(c)[:2000],
+                        }
+                    )
 
-                    return {
-                        "success": True,
-                        "server": server_name,
-                        "uri": uri,
-                        "contents": contents,
-                    }
+                return {
+                    "success": True,
+                    "server": server_name,
+                    "uri": uri,
+                    "contents": contents,
+                }
 
         except Exception as e:
             return {"success": False, "error": f"资源读取失败: {e}"}
@@ -398,7 +414,7 @@ class MCPToolRegistry:
 
 # ==================== 命名空间工具 ====================
 
-_namespace_tools: Dict[Tuple[str, str], type] = {}
+_namespace_tools: dict[tuple[str, str], type] = {}
 
 
 def _create_mcp_namespaced_tool(server_name: str, tool_info: dict) -> type:
@@ -425,8 +441,10 @@ def _create_mcp_namespaced_tool(server_name: str, tool_info: dict) -> type:
         required = _required
 
         async def execute(self, **kwargs) -> str:
-            from app.modules.tools.mcp_client import get_mcp_registry
             import json
+
+            from app.modules.tools.mcp_client import get_mcp_registry
+
             registry = get_mcp_registry()
             result = await registry.call_tool(server_name, tool_name, kwargs)
             return json.dumps(result, ensure_ascii=False)
@@ -436,7 +454,7 @@ def _create_mcp_namespaced_tool(server_name: str, tool_info: dict) -> type:
     return MCPNamespacedTool
 
 
-def register_mcp_namespace_tools(server_name: str, tools: List[dict]) -> None:
+def register_mcp_namespace_tools(server_name: str, tools: list[dict]) -> None:
     """注册 MCP 服务器工具为一级命名空间工具"""
     from app.modules.tools.registry import get_tool_registry
 
@@ -472,15 +490,17 @@ def unregister_mcp_namespace_tools(server_name: str) -> None:
 
 # ==================== 自动发现 ====================
 
+
 async def auto_discover_mcp_servers() -> dict:
     """启动时从 DB 加载 enabled 的 MCP 服务器，注册并连接
 
     Returns:
         {"connected": int, "failed": int, "errors": list}
     """
+    from sqlalchemy import select
+
     from app.core.database import async_session_maker
     from app.models.models import MCPServerConfig
-    from sqlalchemy import select
 
     registry = get_mcp_registry()
     summary: dict = {"connected": 0, "failed": 0, "errors": []}
@@ -488,7 +508,7 @@ async def auto_discover_mcp_servers() -> dict:
     try:
         async with async_session_maker() as session:
             result = await session.execute(
-                select(MCPServerConfig).where(MCPServerConfig.is_enabled == True)
+                select(MCPServerConfig).where(MCPServerConfig.is_enabled)
             )
             configs = result.scalars().all()
     except Exception as e:
@@ -511,7 +531,9 @@ async def auto_discover_mcp_servers() -> dict:
                 summary["connected"] += 1
             else:
                 summary["failed"] += 1
-                summary["errors"].append({"server": config.name, "error": conn.error_message})
+                summary["errors"].append(
+                    {"server": config.name, "error": conn.error_message}
+                )
         except Exception as e:
             summary["failed"] += 1
             summary["errors"].append({"server": config.name, "error": str(e)})
@@ -524,7 +546,7 @@ async def auto_discover_mcp_servers() -> dict:
 
 # ==================== 全局注册表 ====================
 
-_mcp_registry: Optional[MCPToolRegistry] = None
+_mcp_registry: MCPToolRegistry | None = None
 
 
 def get_mcp_registry() -> MCPToolRegistry:

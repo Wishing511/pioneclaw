@@ -9,17 +9,13 @@ Test ContextPruner: MicroCompacter + Snip
 5. Snip 截断超长 reasoning_content
 6. ContextPruner 统一入口组合 Snip + MicroCompacter
 """
-import pytest
 
 from app.modules.agent.context_pruner import (
+    ContextPruner,
     MicroCompacter,
     Snip,
-    ContextPruner,
     estimate_tokens,
-    CLEAR_PLACEHOLDER,
-    COMPACTABLE_TOOLS,
 )
-
 
 # --- MicroCompacter tests ---
 
@@ -64,7 +60,9 @@ class TestMicroCompacter:
         result, saved = compacter.prune(original)
 
         # 长内容使用结构化占位符
-        cleared = sum(1 for m in result if m["content"] == "[tool_result: grep, content cleared]")
+        cleared = sum(
+            1 for m in result if m["content"] == "[tool_result: grep, content cleared]"
+        )
         assert cleared == 7  # 15 - 8 = 7
         assert saved > 0
 
@@ -83,14 +81,20 @@ class TestMicroCompacter:
         compacter = MicroCompacter(keep_recent=0, max_chars=9999)
         original = [
             {"role": "tool", "tool_name": "custom_tool", "content": "should stay"},
-            {"role": "tool", "tool_name": "read_file", "content": "will be cleared" + "x" * 100},
+            {
+                "role": "tool",
+                "tool_name": "read_file",
+                "content": "will be cleared" + "x" * 100,
+            },
         ]
         result, _ = compacter.prune(original)
 
         assert result[0]["content"] == "should stay"
         # 长内容使用结构化占位符
         assert result[1]["content"] == "[tool_result: read_file, content cleared]"
-        assert original[1]["content"] == "will be cleared" + "x" * 100  # original unchanged
+        assert (
+            original[1]["content"] == "will be cleared" + "x" * 100
+        )  # original unchanged
 
     def test_does_not_touch_non_tool_roles(self):
         compacter = MicroCompacter(keep_recent=0, max_chars=9999)
@@ -212,25 +216,61 @@ class TestSnip:
 
 class TestContextPruner:
     def test_combined_pruning(self):
-        pruner = ContextPruner(keep_recent=2, max_tool_result_chars=9999, max_reasoning_chars=50)
+        pruner = ContextPruner(
+            keep_recent=2, max_tool_result_chars=9999, max_reasoning_chars=50
+        )
 
         messages = [
             {"role": "system", "content": ""},  # should be removed by snip
             {"role": "system", "content": "be helpful"},
             {"role": "user", "content": "read files"},
             # 5 tool results — only keep 2 most recent
-            {"role": "tool", "tool_name": "read_file", "tool_call_id": "1", "content": "A" * 100},
-            {"role": "tool", "tool_name": "read_file", "tool_call_id": "2", "content": "B" * 100},
-            {"role": "tool", "tool_name": "read_file", "tool_call_id": "3", "content": "C" * 100},
-            {"role": "tool", "tool_name": "read_file", "tool_call_id": "4", "content": "D" * 100},
-            {"role": "tool", "tool_name": "read_file", "tool_call_id": "5", "content": "E" * 100},
+            {
+                "role": "tool",
+                "tool_name": "read_file",
+                "tool_call_id": "1",
+                "content": "A" * 100,
+            },
+            {
+                "role": "tool",
+                "tool_name": "read_file",
+                "tool_call_id": "2",
+                "content": "B" * 100,
+            },
+            {
+                "role": "tool",
+                "tool_name": "read_file",
+                "tool_call_id": "3",
+                "content": "C" * 100,
+            },
+            {
+                "role": "tool",
+                "tool_name": "read_file",
+                "tool_call_id": "4",
+                "content": "D" * 100,
+            },
+            {
+                "role": "tool",
+                "tool_name": "read_file",
+                "tool_call_id": "5",
+                "content": "E" * 100,
+            },
             {"role": "assistant", "content": "done", "reasoning_content": "X" * 200},
         ]
 
         # Snip first
         messages, snip_saved = pruner.snip_prune(messages)
         assert snip_saved > 0  # empty system removed + reasoning truncated
-        assert len([m for m in messages if m.get("role") == "system" and m.get("content") == ""]) == 0
+        assert (
+            len(
+                [
+                    m
+                    for m in messages
+                    if m.get("role") == "system" and m.get("content") == ""
+                ]
+            )
+            == 0
+        )
 
         # Micro compact
         messages, micro_saved = pruner.micro_compact(messages)

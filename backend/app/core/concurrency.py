@@ -1,30 +1,30 @@
 """
 并发管理器 — 限制用户和全局 AgentLoop 并发数，超配额任务进入等待队列
 """
+
 import asyncio
-import time
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AcquireResult:
-    acquired: bool = False       # 直接获得执行权
-    queued: bool = False         # 进入排队
-    rejected: bool = False       # 排队已满，拒绝
-    position: int = 0            # 排队位置（从1开始）
-    estimated_wait_ms: int = 0   # 预估等待时间
-    wait_future: Optional[asyncio.Future] = None  # 排队等待的 Future
+    acquired: bool = False  # 直接获得执行权
+    queued: bool = False  # 进入排队
+    rejected: bool = False  # 排队已满，拒绝
+    position: int = 0  # 排队位置（从1开始）
+    estimated_wait_ms: int = 0  # 预估等待时间
+    wait_future: asyncio.Future | None = None  # 排队等待的 Future
 
 
 @dataclass
 class QueuedTask:
     user_id: int
     task_id: str
-    message_len: int             # 用于优先级排序（短任务优先）
+    message_len: int  # 用于优先级排序（短任务优先）
     enqueued_at: float = field(default_factory=time.time)
     wait_future: asyncio.Future = field(default_factory=asyncio.Future)
 
@@ -38,9 +38,9 @@ class ConcurrencyManager:
         self.max_queue_per_user: int = 5
         self.queue_timeout_seconds: int = 180  # 3分钟超时
 
-        self._active: dict[int, int] = {}       # user_id → 活跃数
+        self._active: dict[int, int] = {}  # user_id → 活跃数
         self._total_active: int = 0
-        self._queue: list[QueuedTask] = []      # 全局等待队列
+        self._queue: list[QueuedTask] = []  # 全局等待队列
 
     @property
     def total_active(self) -> int:
@@ -55,13 +55,19 @@ class ConcurrencyManager:
     def queue_size(self) -> int:
         return len(self._queue)
 
-    async def acquire(self, user_id: int, task_id: str, message_len: int = 100) -> AcquireResult:
+    async def acquire(
+        self, user_id: int, task_id: str, message_len: int = 100
+    ) -> AcquireResult:
         """申请执行配额。返回 AcquireResult"""
         now = time.time()
 
         # 清理超时任务
-        self._queue = [t for t in self._queue
-                       if not t.wait_future.done() and (now - t.enqueued_at) < self.queue_timeout_seconds]
+        self._queue = [
+            t
+            for t in self._queue
+            if not t.wait_future.done()
+            and (now - t.enqueued_at) < self.queue_timeout_seconds
+        ]
 
         user_active = self._active.get(user_id, 0)
         user_queue = sum(1 for t in self._queue if t.user_id == user_id)
@@ -70,8 +76,10 @@ class ConcurrencyManager:
         if user_active < self.max_per_user and self._total_active < self.max_global:
             self._active[user_id] = user_active + 1
             self._total_active += 1
-            logger.info(f"[Concurrency] Acquired: user={user_id}, task={task_id}, "
-                        f"user_active={self._active[user_id]}, total={self._total_active}")
+            logger.info(
+                f"[Concurrency] Acquired: user={user_id}, task={task_id}, "
+                f"user_active={self._active[user_id]}, total={self._total_active}"
+            )
             return AcquireResult(acquired=True)
 
         # 检查排队是否已满
@@ -81,32 +89,47 @@ class ConcurrencyManager:
 
         # 加入排队
         wait_future = asyncio.Future()
-        task = QueuedTask(user_id=user_id, task_id=task_id,
-                          message_len=message_len, enqueued_at=now,
-                          wait_future=wait_future)
+        task = QueuedTask(
+            user_id=user_id,
+            task_id=task_id,
+            message_len=message_len,
+            enqueued_at=now,
+            wait_future=wait_future,
+        )
         self._queue.append(task)
         # 排序：短消息优先，同长度按入队时间
         self._queue.sort(key=lambda t: (t.message_len, t.enqueued_at))
 
-        position = sum(1 for t in self._queue
-                       if (t.message_len, t.enqueued_at) <= (task.message_len, task.enqueued_at))
+        position = sum(
+            1
+            for t in self._queue
+            if (t.message_len, t.enqueued_at) <= (task.message_len, task.enqueued_at)
+        )
 
         # 预估等待：假设每个活跃任务平均 30s
         ahead = position
         estimated_ms = ahead * 30000
 
-        logger.info(f"[Concurrency] Queued: user={user_id}, task={task_id}, "
-                    f"position={position}/{len(self._queue)}, wait_ms={estimated_ms}")
+        logger.info(
+            f"[Concurrency] Queued: user={user_id}, task={task_id}, "
+            f"position={position}/{len(self._queue)}, wait_ms={estimated_ms}"
+        )
 
-        return AcquireResult(queued=True, position=position,
-                            estimated_wait_ms=estimated_ms, wait_future=wait_future)
+        return AcquireResult(
+            queued=True,
+            position=position,
+            estimated_wait_ms=estimated_ms,
+            wait_future=wait_future,
+        )
 
     def release(self, user_id: int):
         """释放执行配额，并唤醒下一个排队任务"""
         self._active[user_id] = max(0, self._active.get(user_id, 1) - 1)
         self._total_active = max(0, self._total_active - 1)
-        logger.info(f"[Concurrency] Released: user={user_id}, "
-                    f"user_active={self._active.get(user_id, 0)}, total={self._total_active}")
+        logger.info(
+            f"[Concurrency] Released: user={user_id}, "
+            f"user_active={self._active.get(user_id, 0)}, total={self._total_active}"
+        )
 
         # 唤醒下一个
         self._wake_next()
@@ -126,8 +149,10 @@ class ConcurrencyManager:
                 self._active[task.user_id] = user_active + 1
                 self._total_active += 1
                 task.wait_future.set_result(True)
-                logger.info(f"[Concurrency] Woke: user={task.user_id}, "
-                            f"task={task.task_id}, waited={time.time() - task.enqueued_at:.1f}s")
+                logger.info(
+                    f"[Concurrency] Woke: user={task.user_id}, "
+                    f"task={task.task_id}, waited={time.time() - task.enqueued_at:.1f}s"
+                )
                 return
         # 没有可唤醒的任务（都在排队，各自等前面的释放）
 

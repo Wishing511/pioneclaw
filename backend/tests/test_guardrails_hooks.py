@@ -14,23 +14,21 @@
 - AgentLoop Tool Hooks 集成
 """
 
-import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.agent.guardrails import (
     Guardrail,
     GuardrailConfig,
     GuardrailExecutor,
-    ValidationResult,
     GuardrailFailedError,
+    ValidationResult,
     builtin_validators,
 )
 from app.modules.agent.tool_hooks import (
-    HookEvent,
     HookContext,
+    HookEvent,
     HookResult,
     ToolHook,
     ToolHookRunner,
@@ -38,8 +36,8 @@ from app.modules.agent.tool_hooks import (
     hook,
 )
 
-
 # ==================== GuardrailConfig 测试 ====================
+
 
 class TestGuardrailConfig:
     def test_defaults(self):
@@ -65,6 +63,7 @@ class TestGuardrailConfig:
 
 # ==================== ValidationResult 测试 ====================
 
+
 class TestValidationResult:
     def test_valid_result(self):
         result = ValidationResult(valid=True, reason="OK")
@@ -84,6 +83,7 @@ class TestValidationResult:
 
 
 # ==================== Guardrail 函数验证测试 ====================
+
 
 class TestGuardrailFunctionValidation:
     @pytest.mark.asyncio
@@ -146,6 +146,7 @@ class TestGuardrailFunctionValidation:
 
 # ==================== Guardrail LLM 验证测试 ====================
 
+
 class TestGuardrailLLMValidation:
     @pytest.mark.asyncio
     async def test_llm_validation_pass(self):
@@ -195,6 +196,7 @@ class TestGuardrailLLMValidation:
 
 
 # ==================== GuardrailExecutor 测试 ====================
+
 
 class TestGuardrailExecutor:
     @pytest.mark.asyncio
@@ -287,6 +289,7 @@ class TestGuardrailExecutor:
 
 # ==================== builtin_validators 测试 ====================
 
+
 class TestBuiltinValidators:
     def test_is_json_valid_string(self):
         valid, reason = builtin_validators.is_json('{"name": "test"}')
@@ -356,6 +359,7 @@ class TestBuiltinValidators:
 
 # ==================== HookEvent 测试 ====================
 
+
 class TestHookEvent:
     def test_event_values(self):
         assert HookEvent.BEFORE_TOOL.value == "before_tool"
@@ -368,6 +372,7 @@ class TestHookEvent:
 
 
 # ==================== HookContext 测试 ====================
+
 
 class TestHookContext:
     def test_defaults(self):
@@ -392,6 +397,7 @@ class TestHookContext:
 
 # ==================== HookResult 测试 ====================
 
+
 class TestHookResult:
     def test_defaults(self):
         result = HookResult()
@@ -406,6 +412,7 @@ class TestHookResult:
 
 
 # ==================== ToolHook 测试 ====================
+
 
 class TestToolHook:
     def test_creation(self):
@@ -477,6 +484,7 @@ class TestToolHook:
 
 
 # ==================== ToolHookRunner 测试 ====================
+
 
 class TestToolHookRunner:
     def test_register(self):
@@ -571,23 +579,25 @@ class TestToolHookRunner:
         runner = ToolHookRunner()
 
         # BEFORE hook 修改参数
-        runner.register(ToolHook(
-            HookEvent.BEFORE_TOOL,
-            lambda ctx: HookResult(modified_args={"x": 10}),
-        ))
+        runner.register(
+            ToolHook(
+                HookEvent.BEFORE_TOOL,
+                lambda ctx: HookResult(modified_args={"x": 10}),
+            )
+        )
 
         # AFTER hook 修改结果
-        runner.register(ToolHook(
-            HookEvent.AFTER_TOOL,
-            lambda ctx: HookResult(modified_result=ctx.tool_result * 2),
-        ))
+        runner.register(
+            ToolHook(
+                HookEvent.AFTER_TOOL,
+                lambda ctx: HookResult(modified_result=ctx.tool_result * 2),
+            )
+        )
 
         def tool_func(x):
             return x + 5
 
-        result = await runner.execute_with_hooks(
-            "test", tool_func, {"x": 1}
-        )
+        result = await runner.execute_with_hooks("test", tool_func, {"x": 1})
 
         # 流程：args {x:1} -> BEFORE {x:10} -> func(10) -> 15 -> AFTER -> 30
         assert result == 30
@@ -609,9 +619,7 @@ class TestToolHookRunner:
             call_count += 1
             raise ValueError("always fails")
 
-        result = await runner.execute_with_hooks(
-            "test", failing_func, {}
-        )
+        result = await runner.execute_with_hooks("test", failing_func, {})
 
         assert result == "fallback"
         assert call_count == 2  # 初始 + 1次重试
@@ -619,10 +627,12 @@ class TestToolHookRunner:
 
 # ==================== builtin_hooks 测试 ====================
 
+
 class TestBuiltinHooks:
     @pytest.mark.asyncio
     async def test_log_execution(self):
         logs = []
+
         def logger_func(msg):
             logs.append(msg)
 
@@ -725,6 +735,7 @@ class TestBuiltinHooks:
 
 # ==================== hook 装饰器测试 ====================
 
+
 class TestHookDecorator:
     def test_decorator(self):
         @hook(HookEvent.BEFORE_TOOL, tool_filter=["search"])
@@ -744,6 +755,7 @@ class TestHookDecorator:
 
 
 # ==================== AgentLoop Guardrails 集成测试 ====================
+
 
 class TestAgentLoopGuardrails:
     def test_guardrails_parameter(self):
@@ -771,9 +783,7 @@ class TestAgentLoopGuardrails:
         from app.modules.agent.loop import AgentLoop
 
         provider = MagicMock()
-        guardrail = Guardrail(GuardrailConfig(
-            validator=lambda x: len(x) > 5
-        ))
+        guardrail = Guardrail(GuardrailConfig(validator=lambda x: len(x) > 5))
         loop = AgentLoop(provider=provider, guardrails=[guardrail])
 
         result = await loop.validate_output("short")
@@ -789,6 +799,7 @@ class TestAgentLoopGuardrails:
         provider = MagicMock()
 
         call_count = 0
+
         def validator(output):
             return output == "success"
 
@@ -808,6 +819,7 @@ class TestAgentLoopGuardrails:
 
 
 # ==================== AgentLoop Tool Hooks 集成测试 ====================
+
 
 class TestAgentLoopToolHooks:
     def test_tool_hooks_parameter(self):
@@ -871,10 +883,12 @@ class TestAgentLoopToolHooks:
 
         # 创建 Hook 修改结果
         runner = ToolHookRunner()
-        runner.register(ToolHook(
-            HookEvent.AFTER_TOOL,
-            lambda ctx: HookResult(modified_result="modified result"),
-        ))
+        runner.register(
+            ToolHook(
+                HookEvent.AFTER_TOOL,
+                lambda ctx: HookResult(modified_result="modified result"),
+            )
+        )
 
         loop = AgentLoop(provider=provider, tools=tools, tool_hooks=runner)
 

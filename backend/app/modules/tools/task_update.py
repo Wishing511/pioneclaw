@@ -6,7 +6,7 @@ import json
 import logging
 
 from app.modules.tools.base import BaseTool, ToolParameter
-from app.modules.tools.task_store import update_task_status, get_task
+from app.modules.tools.task_store import get_task, update_task_status
 
 logger = logging.getLogger(__name__)
 
@@ -43,30 +43,45 @@ class TaskUpdateTool(BaseTool):
     }
     required = ["task_id"]
 
-    async def execute(self, task_id: str, status: str = "", progress: int = -1,
-                      label: str = "", **kwargs) -> str:
+    async def execute(
+        self,
+        task_id: str,
+        status: str = "",
+        progress: int = -1,
+        label: str = "",
+        **kwargs,
+    ) -> str:
         try:
             if not task_id or not task_id.strip():
-                return json.dumps({
-                    "success": False,
-                    "error": "task_id 不能为空",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "task_id 不能为空",
+                    },
+                    ensure_ascii=False,
+                )
 
             task = get_task(task_id.strip())
             if not task:
-                return json.dumps({
-                    "success": False,
-                    "error": f"任务不存在: '{task_id}'",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"任务不存在: '{task_id}'",
+                    },
+                    ensure_ascii=False,
+                )
 
             old_status = task.get("status", "pending")
 
             # 检查是否终态
             if old_status in ("done", "failed", "cancelled"):
-                return json.dumps({
-                    "success": False,
-                    "error": f"任务 '{task_id}' 已处于终态 ({old_status})，无法修改",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"任务 '{task_id}' 已处于终态 ({old_status})，无法修改",
+                    },
+                    ensure_ascii=False,
+                )
 
             # 验证 progress
             if progress >= 0:
@@ -82,24 +97,30 @@ class TaskUpdateTool(BaseTool):
             if status and status.strip():
                 ok = update_task_status(task_id.strip(), status.strip())
                 if not ok:
-                    return json.dumps({
-                        "success": False,
-                        "error": (
-                            f"无效的状态转换: {old_status} → {status}。"
-                            f"允许的转换: pending→running/cancelled/failed, "
-                            f"running→done/failed/cancelled"
-                        ),
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": (
+                                f"无效的状态转换: {old_status} → {status}。"
+                                f"允许的转换: pending→running/cancelled/failed, "
+                                f"running→done/failed/cancelled"
+                            ),
+                        },
+                        ensure_ascii=False,
+                    )
 
-            return json.dumps({
-                "success": True,
-                "task_id": task_id.strip(),
-                "old_status": old_status,
-                "new_status": task.get("status"),
-                "progress": task.get("progress", 0),
-                "label": task.get("label"),
-                "message": f"任务 '{task_id}' 已更新",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "task_id": task_id.strip(),
+                    "old_status": old_status,
+                    "new_status": task.get("status"),
+                    "progress": task.get("progress", 0),
+                    "label": task.get("label"),
+                    "message": f"任务 '{task_id}' 已更新",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TaskUpdateTool execution error: {e}")

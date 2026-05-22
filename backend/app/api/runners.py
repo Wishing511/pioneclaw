@@ -1,22 +1,30 @@
 import secrets
-from typing import List, Optional
+import uuid as _uuid
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core import get_db, settings
-from app.models import Runner, User, RunnerStatus, ApiUsage, ConnectionEvent
-from app.schemas import (
-    RunnerCreate, RunnerUpdate, RunnerResponse,
-    RunnerApprove, RunnerHeartbeat, MessageResponse,
-    BindUserRequest, SetDefaultRunnerRequest, RotateTokenResponse,
-    DiagnosticsResponse, LocalLogQuery, LocalLogEntry,
-    ConnectionEventResponse,
-)
+
 from app.api.auth import get_current_active_user
-from app.core.permissions import PermissionChecker
+from app.core import get_db, settings
 from app.core.crypto import encrypt
+from app.core.permissions import PermissionChecker
 from app.core.security import decode_access_token
+from app.models import ApiUsage, ConnectionEvent, Runner, RunnerStatus, User
+from app.schemas import (
+    BindUserRequest,
+    ConnectionEventResponse,
+    DiagnosticsResponse,
+    MessageResponse,
+    RotateTokenResponse,
+    RunnerApprove,
+    RunnerCreate,
+    RunnerHeartbeat,
+    RunnerResponse,
+    RunnerUpdate,
+    SetDefaultRunnerRequest,
+)
 
 router = APIRouter(prefix="/runners", tags=["Runner管理"])
 
@@ -25,9 +33,9 @@ router = APIRouter(prefix="/runners", tags=["Runner管理"])
 async def list_runners(
     skip: int = 0,
     limit: int = 20,
-    status_filter: Optional[RunnerStatus] = None,
+    status_filter: RunnerStatus | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取 Runner 列表"""
     query = select(Runner)
@@ -49,34 +57,49 @@ async def list_runners(
     runner_list = []
     for r in runners:
         d = {
-            "id": r.id, "name": r.name, "display_name": r.display_name,
-            "description": r.description, "status": r.status,
-            "host": r.host, "port": r.port, "api_key": r.api_key,
-            "capabilities": r.capabilities, "version": r.version,
-            "platform": r.platform, "last_heartbeat": r.last_heartbeat,
-            "current_task": r.current_task, "total_tasks": r.total_tasks,
-            "success_tasks": r.success_tasks, "failed_tasks": r.failed_tasks,
-            "applied_at": r.applied_at, "approved_at": r.approved_at,
-            "approved_by": r.approved_by, "user_id": r.user_id,
+            "id": r.id,
+            "name": r.name,
+            "display_name": r.display_name,
+            "description": r.description,
+            "status": r.status,
+            "host": r.host,
+            "port": r.port,
+            "api_key": r.api_key,
+            "capabilities": r.capabilities,
+            "version": r.version,
+            "platform": r.platform,
+            "last_heartbeat": r.last_heartbeat,
+            "current_task": r.current_task,
+            "total_tasks": r.total_tasks,
+            "success_tasks": r.success_tasks,
+            "failed_tasks": r.failed_tasks,
+            "applied_at": r.applied_at,
+            "approved_at": r.approved_at,
+            "approved_by": r.approved_by,
+            "user_id": r.user_id,
             "username": username_map.get(r.user_id) if r.user_id else None,
             "reject_reason": r.reject_reason,
-            "created_at": r.created_at, "updated_at": r.updated_at,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at,
         }
         runner_list.append(RunnerResponse(**d))
 
     return runner_list
 
 
-@router.get("/pending", response_model=List[RunnerResponse])
+@router.get("/pending", response_model=list[RunnerResponse])
 async def list_pending_runners(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取待审批的 Runner 列表"""
     result = await db.execute(
-        select(Runner).where(Runner.status == RunnerStatus.PENDING).offset(skip).limit(limit)
+        select(Runner)
+        .where(Runner.status == RunnerStatus.PENDING)
+        .offset(skip)
+        .limit(limit)
     )
     return result.scalars().all()
 
@@ -84,7 +107,7 @@ async def list_pending_runners(
 @router.get("/model-usage")
 async def get_model_usage(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取模型使用统计"""
     now = datetime.now(tz=timezone.utc)
@@ -96,15 +119,14 @@ async def get_model_usage(
             func.count(ApiUsage.id).label("total_calls"),
             func.coalesce(func.sum(ApiUsage.total_tokens), 0).label("total_tokens"),
             func.coalesce(func.avg(ApiUsage.duration_ms), 0).label("avg_duration"),
-        )
-        .where(ApiUsage.created_at >= yesterday)
+        ).where(ApiUsage.created_at >= yesterday)
     )
     overview = result.one()
 
     # 成功/失败
     failed = await db.execute(
         select(func.count(ApiUsage.id))
-        .where(ApiUsage.is_success == False)
+        .where(not ApiUsage.is_success)
         .where(ApiUsage.created_at >= yesterday)
     )
     failed_calls = failed.scalar() or 0
@@ -116,7 +138,7 @@ async def get_model_usage(
             func.count(ApiUsage.id).label("calls"),
             func.coalesce(func.sum(ApiUsage.total_tokens), 0).label("tokens"),
             func.coalesce(func.avg(ApiUsage.duration_ms), 0).label("avg_ms"),
-            func.count(ApiUsage.id).filter(ApiUsage.is_success == False).label("failures"),
+            func.count(ApiUsage.id).filter(not ApiUsage.is_success).label("failures"),
         )
         .where(ApiUsage.created_at >= yesterday)
         .group_by(ApiUsage.model)
@@ -124,14 +146,18 @@ async def get_model_usage(
     )
     models = []
     for row in by_model.all():
-        models.append({
-            "model": row.model,
-            "calls": row.calls,
-            "tokens": row.tokens,
-            "avg_duration_ms": round(float(row.avg_ms), 0),
-            "failures": row.failures or 0,
-            "success_rate": round((1 - (row.failures or 0) / row.calls) * 100, 1) if row.calls > 0 else 100,
-        })
+        models.append(
+            {
+                "model": row.model,
+                "calls": row.calls,
+                "tokens": row.tokens,
+                "avg_duration_ms": round(float(row.avg_ms), 0),
+                "failures": row.failures or 0,
+                "success_rate": round((1 - (row.failures or 0) / row.calls) * 100, 1)
+                if row.calls > 0
+                else 100,
+            }
+        )
 
     return {
         "total_calls": overview.total_calls or 0,
@@ -145,37 +171,31 @@ async def get_model_usage(
 @router.get("/stats")
 async def get_runner_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取 Runner 统计"""
     # 各状态数量
     result = await db.execute(
-        select(Runner.status, func.count(Runner.id))
-        .group_by(Runner.status)
+        select(Runner.status, func.count(Runner.id)).group_by(Runner.status)
     )
     status_counts = {row[0].value: row[1] for row in result.all()}
-    
+
     # 在线数量
     result = await db.execute(
-        select(func.count(Runner.id))
-        .where(Runner.status == RunnerStatus.ONLINE)
+        select(func.count(Runner.id)).where(Runner.status == RunnerStatus.ONLINE)
     )
     online_count = result.scalar() or 0
-    
+
     # 总任务数
-    result = await db.execute(
-        select(func.sum(Runner.total_tasks))
-    )
+    result = await db.execute(select(func.sum(Runner.total_tasks)))
     total_tasks = result.scalar() or 0
-    
+
     # 成功率
-    result = await db.execute(
-        select(func.sum(Runner.success_tasks))
-    )
+    result = await db.execute(select(func.sum(Runner.success_tasks)))
     success_tasks = result.scalar() or 0
-    
+
     success_rate = (success_tasks / total_tasks * 100) if total_tasks > 0 else 0
-    
+
     pending = status_counts.get("pending", 0)
     return {
         "status_counts": status_counts,
@@ -183,35 +203,34 @@ async def get_runner_stats(
         "pending_count": pending,
         "total_runners": sum(status_counts.values()),
         "total_tasks": total_tasks,
-        "success_rate": round(success_rate, 1)
+        "success_rate": round(success_rate, 1),
     }
 
 
 @router.get("/center-info")
 async def get_center_info(
-    request: Request,
-    current_user: User = Depends(get_current_active_user)
+    request: Request, current_user: User = Depends(get_current_active_user)
 ):
     """获取中心节点连接信息"""
     # 使用实际请求的 host，兼容本地开发和 Docker 部署
-    host = request.headers.get("host", request.client.host if request.client else "localhost")
+    host = request.headers.get(
+        "host", request.client.host if request.client else "localhost"
+    )
     base = f"http://{host}"
     return {
         "http_address": base,
         "apply_endpoint": f"{base}/api/runners/apply",
-        "api_prefix": settings.API_PREFIX
+        "api_prefix": settings.API_PREFIX,
     }
 
 
-@router.get("/my-bindings", response_model=List[RunnerResponse])
+@router.get("/my-bindings", response_model=list[RunnerResponse])
 async def get_my_bindings(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取当前用户绑定的所有 Runner"""
-    result = await db.execute(
-        select(Runner).where(Runner.user_id == current_user.id)
-    )
+    result = await db.execute(select(Runner).where(Runner.user_id == current_user.id))
     return result.scalars().all()
 
 
@@ -219,7 +238,7 @@ async def get_my_bindings(
 async def set_default_runner(
     data: SetDefaultRunnerRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """设置用户的默认 Runner"""
     # 验证 Runner 存在且属于当前用户
@@ -241,10 +260,7 @@ async def set_default_runner(
 
 
 @router.get("/apply/status")
-async def get_apply_status(
-    runner_name: str,
-    db: AsyncSession = Depends(get_db)
-):
+async def get_apply_status(runner_name: str, db: AsyncSession = Depends(get_db)):
     """Runner 端查询申请状态（公开接口）"""
     result = await db.execute(select(Runner).where(Runner.name == runner_name))
     runner = result.scalar_one_or_none()
@@ -256,7 +272,7 @@ async def get_apply_status(
 @router.get("/pending/count")
 async def get_pending_count(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取待审批 Runner 数量"""
     result = await db.execute(
@@ -266,10 +282,10 @@ async def get_pending_count(
     return {"pending_count": count}
 
 
-@router.get("/connected/list", response_model=List[RunnerResponse])
+@router.get("/connected/list", response_model=list[RunnerResponse])
 async def list_connected_runners(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取在线 Runner 列表"""
     result = await db.execute(
@@ -282,31 +298,35 @@ async def list_connected_runners(
 async def get_runner(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取单个 Runner 详情"""
     result = await db.execute(select(Runner).where(Runner.id == runner_id))
     runner = result.scalar_one_or_none()
-    
+
     if not runner:
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    
+
     return runner
 
 
-@router.post("", response_model=RunnerResponse, status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(PermissionChecker("runner:create"))])
+@router.post(
+    "",
+    response_model=RunnerResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(PermissionChecker("runner:create"))],
+)
 async def create_runner(
     runner_data: RunnerCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """手动注册 Runner"""
     # 检查名称是否已存在
     result = await db.execute(select(Runner).where(Runner.name == runner_data.name))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Runner 名称已存在")
-    
+
     runner = Runner(
         name=runner_data.name,
         display_name=runner_data.display_name,
@@ -324,15 +344,14 @@ async def create_runner(
     db.add(runner)
     await db.commit()
     await db.refresh(runner)
-    
+
     return runner
 
 
-@router.post("/apply", response_model=RunnerResponse, status_code=status.HTTP_201_CREATED)
-async def apply_runner(
-    runner_data: RunnerCreate,
-    db: AsyncSession = Depends(get_db)
-):
+@router.post(
+    "/apply", response_model=RunnerResponse, status_code=status.HTTP_201_CREATED
+)
+async def apply_runner(runner_data: RunnerCreate, db: AsyncSession = Depends(get_db)):
     """Runner 申请接入（公开接口，Runner 端调用）"""
     # 检查名称是否已存在
     result = await db.execute(select(Runner).where(Runner.name == runner_data.name))
@@ -346,7 +365,9 @@ async def apply_runner(
         if payload:
             user_id = payload.get("sub")
             if user_id:
-                user_result = await db.execute(select(User).where(User.id == int(user_id)))
+                user_result = await db.execute(
+                    select(User).where(User.id == int(user_id))
+                )
                 if user_result.scalar_one_or_none():
                     owner_id = int(user_id)
 
@@ -370,49 +391,55 @@ async def apply_runner(
     return runner
 
 
-@router.put("/{runner_id}", response_model=RunnerResponse,
-            dependencies=[Depends(PermissionChecker("runner:update"))])
+@router.put(
+    "/{runner_id}",
+    response_model=RunnerResponse,
+    dependencies=[Depends(PermissionChecker("runner:update"))],
+)
 async def update_runner(
     runner_id: int,
     runner_data: RunnerUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新 Runner"""
     result = await db.execute(select(Runner).where(Runner.id == runner_id))
     runner = result.scalar_one_or_none()
-    
+
     if not runner:
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    
+
     update_data = runner_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(runner, key, value)
-    
+
     await db.commit()
     await db.refresh(runner)
-    
+
     return runner
 
 
-@router.post("/{runner_id}/approve", response_model=RunnerResponse,
-               dependencies=[Depends(PermissionChecker("runner:approve"))])
+@router.post(
+    "/{runner_id}/approve",
+    response_model=RunnerResponse,
+    dependencies=[Depends(PermissionChecker("runner:approve"))],
+)
 async def approve_runner(
     runner_id: int,
     approve_data: RunnerApprove,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """审批 Runner"""
     result = await db.execute(select(Runner).where(Runner.id == runner_id))
     runner = result.scalar_one_or_none()
-    
+
     if not runner:
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    
+
     if runner.status != RunnerStatus.PENDING:
         raise HTTPException(status_code=400, detail="该 Runner 不在待审批状态")
-    
+
     if approve_data.approve:
         runner.status = RunnerStatus.APPROVED
         runner.approved_at = datetime.now(tz=timezone.utc)
@@ -425,33 +452,35 @@ async def approve_runner(
     else:
         runner.status = RunnerStatus.REJECTED
         runner.reject_reason = approve_data.reject_reason
-    
+
     await db.commit()
     await db.refresh(runner)
-    
+
     return runner
 
 
 @router.post("/{runner_id}/heartbeat", response_model=MessageResponse)
 async def runner_heartbeat(
-    runner_id: int,
-    heartbeat_data: RunnerHeartbeat,
-    db: AsyncSession = Depends(get_db)
+    runner_id: int, heartbeat_data: RunnerHeartbeat, db: AsyncSession = Depends(get_db)
 ):
     """Runner 心跳（Runner 调用）"""
     result = await db.execute(select(Runner).where(Runner.id == runner_id))
     runner = result.scalar_one_or_none()
-    
+
     if not runner:
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    
-    if runner.status not in [RunnerStatus.APPROVED, RunnerStatus.ONLINE, RunnerStatus.OFFLINE]:
+
+    if runner.status not in [
+        RunnerStatus.APPROVED,
+        RunnerStatus.ONLINE,
+        RunnerStatus.OFFLINE,
+    ]:
         raise HTTPException(status_code=400, detail="Runner 未被批准")
-    
+
     runner.last_heartbeat = datetime.now(tz=timezone.utc)
     runner.status = RunnerStatus.ONLINE
     runner.current_task = heartbeat_data.current_task
-    
+
     if heartbeat_data.capabilities:
         runner.capabilities = heartbeat_data.capabilities
 
@@ -463,22 +492,23 @@ async def runner_heartbeat(
 
 
 @router.post("/{runner_id}/offline", response_model=MessageResponse)
-async def set_runner_offline(
-    runner_id: int,
-    db: AsyncSession = Depends(get_db)
-):
+async def set_runner_offline(runner_id: int, db: AsyncSession = Depends(get_db)):
     """设置 Runner 离线"""
     result = await db.execute(select(Runner).where(Runner.id == runner_id))
     runner = result.scalar_one_or_none()
-    
+
     if not runner:
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    
+
     runner.status = RunnerStatus.OFFLINE
     runner.last_heartbeat = datetime.now(tz=timezone.utc)
 
     # Record connection event in the same transaction
-    db.add(ConnectionEvent(runner_id=runner_id, event_type="offline", detail="手动设置离线"))
+    db.add(
+        ConnectionEvent(
+            runner_id=runner_id, event_type="offline", detail="手动设置离线"
+        )
+    )
     await db.commit()
 
     return MessageResponse(message="Runner 已离线")
@@ -489,7 +519,7 @@ async def bind_user_to_runner(
     runner_id: int,
     bind_data: BindUserRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """绑定用户到 Runner（需管理员权限）"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -518,7 +548,7 @@ async def bind_user_to_runner(
 async def unbind_user_from_runner(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """解绑 Runner 的用户（需管理员权限）"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -538,7 +568,7 @@ async def unbind_user_from_runner(
 async def rotate_runner_token(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """轮换 Runner Token（需管理员权限）"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -575,11 +605,12 @@ async def rotate_runner_token(
 # 诊断与日志 API
 # ============================
 
+
 @router.get("/{runner_id}/diagnostics", response_model=DiagnosticsResponse)
 async def get_runner_diagnostics(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取 Runner 诊断信息"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -603,12 +634,12 @@ async def get_runner_diagnostics(
 @router.get("/{runner_id}/local-logs")
 async def get_runner_local_logs(
     runner_id: int,
-    category: Optional[str] = None,
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
+    category: str | None = None,
+    start_time: str | None = None,
+    end_time: str | None = None,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取 Runner 本地日志（当前为模拟数据，v2 接入 Runner 端上报）"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -628,7 +659,7 @@ async def get_runner_local_logs(
     ]
 
     if category:
-        all_logs = [l for l in all_logs if l["category"] == category]
+        all_logs = [log for log in all_logs if log["category"] == category]
 
     return all_logs[:limit]
 
@@ -637,7 +668,7 @@ async def get_runner_local_logs(
 async def get_log_categories(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取日志分类列表"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -650,12 +681,14 @@ async def get_log_categories(
     return ["agent", "task", "system", "error"]
 
 
-@router.get("/{runner_id}/connection-events", response_model=List[ConnectionEventResponse])
+@router.get(
+    "/{runner_id}/connection-events", response_model=list[ConnectionEventResponse]
+)
 async def get_connection_events(
     runner_id: int,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取 Runner 连接事件历史"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -674,20 +707,23 @@ async def get_connection_events(
     return events_result.scalars().all()
 
 
-@router.delete("/{runner_id}", response_model=MessageResponse,
-               dependencies=[Depends(PermissionChecker("runner:delete"))])
+@router.delete(
+    "/{runner_id}",
+    response_model=MessageResponse,
+    dependencies=[Depends(PermissionChecker("runner:delete"))],
+)
 async def delete_runner(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """删除 Runner"""
     result = await db.execute(select(Runner).where(Runner.id == runner_id))
     runner = result.scalar_one_or_none()
-    
+
     if not runner:
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    
+
     await db.delete(runner)
     await db.commit()
 
@@ -698,11 +734,12 @@ async def delete_runner(
 # 补充端点
 # ============================
 
+
 @router.post("/{runner_id}/disconnect", response_model=MessageResponse)
 async def disconnect_runner(
     runner_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """强制断开 Runner 连接（需管理员权限）"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -714,7 +751,11 @@ async def disconnect_runner(
         raise HTTPException(status_code=404, detail="Runner 不存在")
 
     runner.status = RunnerStatus.OFFLINE
-    db.add(ConnectionEvent(runner_id=runner_id, event_type="disconnect", detail="管理员强制断开"))
+    db.add(
+        ConnectionEvent(
+            runner_id=runner_id, event_type="disconnect", detail="管理员强制断开"
+        )
+    )
     await db.commit()
 
     return MessageResponse(message="Runner 已断开连接")
@@ -725,7 +766,7 @@ async def unbind_specific_user(
     runner_id: int,
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """解绑指定用户（需管理员权限）"""
     if not current_user.is_super_admin and not current_user.is_org_admin:
@@ -750,16 +791,15 @@ async def unbind_specific_user(
 
 _instruction_queues: dict[int, list[dict]] = {}
 _instruction_results: dict[str, dict] = {}
-import uuid as _uuid
 
 
 @router.post("/{runner_id}/instruction")
 async def send_instruction(
     runner_id: int,
     action: str,
-    path: Optional[str] = None,
-    content: Optional[str] = None,
-    command: Optional[str] = None,
+    path: str | None = None,
+    content: str | None = None,
+    command: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -770,9 +810,12 @@ async def send_instruction(
 
     task_id = str(_uuid.uuid4())[:8]
     params = {}
-    if path: params["path"] = path
-    if content: params["content"] = content
-    if command: params["command"] = command
+    if path:
+        params["path"] = path
+    if content:
+        params["content"] = content
+    if command:
+        params["command"] = command
 
     inst = {"task_id": task_id, "action": action, "params": params}
     _instruction_queues.setdefault(runner_id, []).append(inst)
@@ -782,7 +825,9 @@ async def send_instruction(
 @router.get("/{runner_id}/pending")
 async def get_pending_instructions(runner_id: int, db: AsyncSession = Depends(get_db)):
     """Runner 轮询待执行指令"""
-    if not (await db.execute(select(Runner).where(Runner.id == runner_id))).scalar_one_or_none():
+    if not (
+        await db.execute(select(Runner).where(Runner.id == runner_id))
+    ).scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Runner 不存在")
     queue = _instruction_queues.get(runner_id, [])
     instructions = queue.copy()
@@ -792,12 +837,22 @@ async def get_pending_instructions(runner_id: int, db: AsyncSession = Depends(ge
 
 @router.post("/{runner_id}/result")
 async def report_instruction_result(
-    runner_id: int, task_id: str, success: bool,
-    data: Optional[str] = None, error: Optional[str] = None,
+    runner_id: int,
+    task_id: str,
+    success: bool,
+    data: str | None = None,
+    error: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Runner 上报执行结果"""
-    if not (await db.execute(select(Runner).where(Runner.id == runner_id))).scalar_one_or_none():
+    if not (
+        await db.execute(select(Runner).where(Runner.id == runner_id))
+    ).scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Runner 不存在")
-    _instruction_results[task_id] = {"runner_id": runner_id, "success": success, "data": data, "error": error}
+    _instruction_results[task_id] = {
+        "runner_id": runner_id,
+        "success": success,
+        "data": data,
+        "error": error,
+    }
     return {"message": "结果已接收"}

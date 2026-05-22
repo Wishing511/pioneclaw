@@ -8,20 +8,17 @@
 """
 
 import json
-import os
 import tempfile
-import pytest
-from pathlib import Path
 
+from app.core.audit import SECRET_KEY_PATTERNS, AuditLogger
 from app.core.sandbox_policy import (
-    ToolPolicyConfig,
     ToolPolicy,
+    ToolPolicyConfig,
     resolve_tool_policy,
 )
-from app.core.audit import AuditLogger, SECRET_KEY_PATTERNS
-
 
 # ==================== 工具沙箱策略 ====================
+
 
 class TestToolPolicyConfig:
     def test_defaults(self):
@@ -132,6 +129,7 @@ class TestResolveToolPolicy:
 
 # ==================== 审计日志 ====================
 
+
 class TestAuditLogger:
     def test_log_basic(self):
         """基本日志记录"""
@@ -143,7 +141,7 @@ class TestAuditLogger:
             log_file = audit._current_file()
             assert log_file.exists()
 
-            with open(log_file, "r", encoding="utf-8") as f:
+            with open(log_file, encoding="utf-8") as f:
                 lines = f.readlines()
             assert len(lines) == 1
 
@@ -184,7 +182,9 @@ class TestAuditLogger:
             audit.log(
                 action="config_change",
                 actor="admin",
-                sensitive_args={"display_name": "this is a long value that should be partially redacted"},
+                sensitive_args={
+                    "display_name": "this is a long value that should be partially redacted"
+                },
             )
 
             entries = audit.read_logs()
@@ -258,14 +258,22 @@ class TestAuditLogger:
     def test_log_config_change(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             audit = AuditLogger(log_dir=tmpdir)
-            audit.log_config_change("admin", "api_key", old_value="sk-old-key-12345678", new_value="sk-new-key-12345678")
+            audit.log_config_change(
+                "admin",
+                "api_key",
+                old_value="sk-old-key-12345678",
+                new_value="sk-new-key-12345678",
+            )
 
             entries = audit.read_logs()
             assert entries[0]["action"] == "config_change"
             assert entries[0]["resource"] == "config:api_key"
             # api_key 在 sensitive_args 中，作为 key 传入 _redact_secrets
             # "old_value" 不是密钥 key，但值>8字符会部分脱敏
-            assert "****" in entries[0]["details"]["old_value"] or "[REDACTED]" in entries[0]["details"]["old_value"]
+            assert (
+                "****" in entries[0]["details"]["old_value"]
+                or "[REDACTED]" in entries[0]["details"]["old_value"]
+            )
 
     def test_log_agent_action(self):
         with tempfile.TemporaryDirectory() as tmpdir:

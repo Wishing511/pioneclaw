@@ -3,24 +3,23 @@
 """
 
 import asyncio
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock
+
 import pytest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, AsyncMock
 
 from app.core.auth_middleware import (
-    AuthMiddleware,
     PUBLIC_PATHS,
     PUBLIC_PREFIXES,
-    LOCAL_HOSTS,
-    is_local_bypass_enabled,
+    AuthMiddleware,
     get_client_type,
 )
 from app.core.cron_scheduler import CronScheduler
 
-
 # ============================================================
 # AuthMiddleware 测试
 # ============================================================
+
 
 class TestAuthMiddlewareHelpers:
     """测试 AuthMiddleware 辅助方法"""
@@ -151,6 +150,7 @@ class TestGetClientType:
 # ============================================================
 # CronScheduler 测试
 # ============================================================
+
 
 class TestCronSchedulerValidation:
     """测试 cron 表达式验证"""
@@ -401,7 +401,9 @@ class TestCronSchedulerAsyncCallback:
 
         scheduler.add_job("async_test", "* * * * *", async_callback)
         # 将 next_run 设为过去，触发立即执行
-        scheduler._jobs["async_test"]["next_run"] = scheduler._now() - timedelta(seconds=5)
+        scheduler._jobs["async_test"]["next_run"] = scheduler._now() - timedelta(
+            seconds=5
+        )
 
         await scheduler.start()
         await asyncio.sleep(2)

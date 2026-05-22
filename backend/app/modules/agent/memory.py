@@ -32,17 +32,18 @@ MemoryStore — 文件级记忆存储（三套记忆系统之一）
 import logging
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
 from enum import Enum
+from pathlib import Path
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
 class MemorySource(Enum):
     """记忆来源"""
+
     WEB_CHAT = "web-chat"
     TELEGRAM = "telegram"
     DINGTALK = "dingtalk"
@@ -57,6 +58,7 @@ class MemorySource(Enum):
 @dataclass
 class MemoryEntry:
     """记忆条目（一个段落）"""
+
     line_number: int  # 段落号（1-based）
     date: str  # 日期
     source: str  # 来源
@@ -69,7 +71,9 @@ class MemoryEntry:
         return "\n".join([first_line] + content_lines[1:])
 
     @classmethod
-    def from_paragraph(cls, para_number: int, lines: List[str]) -> Optional["MemoryEntry"]:
+    def from_paragraph(
+        cls, para_number: int, lines: list[str]
+    ) -> Optional["MemoryEntry"]:
         """从段落行列表解析"""
         if not lines:
             return None
@@ -97,11 +101,12 @@ class MemoryEntry:
 @dataclass
 class MemoryStats:
     """记忆统计"""
+
     total_entries: int
-    sources: Dict[str, int]
+    sources: dict[str, int]
     date_range: str
-    oldest_date: Optional[str]
-    newest_date: Optional[str]
+    oldest_date: str | None
+    newest_date: str | None
     total_chars: int
 
 
@@ -138,12 +143,12 @@ class MemoryStore:
 
     def _is_legacy_format(self, content: str) -> bool:
         """检测是否为旧的行式格式（每行都有 date|source| 前缀）"""
-        lines = [l for l in content.strip().split("\n") if l.strip()]
+        lines = [line for line in content.strip().split("\n") if line.strip()]
         if not lines:
             return False
         # 旧格式：所有行都以 YYYY-MM-DD|xxx| 开头
         legacy_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}\|[^|]+\|")
-        legacy_count = sum(1 for l in lines if legacy_pattern.match(l))
+        legacy_count = sum(1 for line in lines if legacy_pattern.match(line))
         # 如果大部分行匹配旧格式，则认为是旧格式
         return legacy_count > 0 and legacy_count / len(lines) > 0.5
 
@@ -153,7 +158,7 @@ class MemoryStore:
         规则：以 # 开头的行视为新段落起点，其他行合并到当前段落。
         段落内首行保留 date|source| 前缀，后续行去除前缀仅保留内容。
         """
-        lines = [l.strip() for l in content.strip().split("\n") if l.strip()]
+        lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
         if not lines:
             return content
 
@@ -164,8 +169,8 @@ class MemoryStore:
                 return parts[0], parts[1], parts[2]
             return None, None, line
 
-        paragraphs: List[List[str]] = []
-        current_para: List[str] = []
+        paragraphs: list[list[str]] = []
+        current_para: list[str] = []
 
         for line in lines:
             date_str, source, content_part = _extract_content(line)
@@ -192,10 +197,12 @@ class MemoryStore:
 
         blocks = ["\n".join(p) for p in paragraphs]
         result = "\n\n".join(blocks) + "\n"
-        logger.info(f"Migrated legacy format: {len(lines)} lines → {len(paragraphs)} paragraphs")
+        logger.info(
+            f"Migrated legacy format: {len(lines)} lines → {len(paragraphs)} paragraphs"
+        )
         return result
 
-    def _read_paragraphs(self) -> List[List[str]]:
+    def _read_paragraphs(self) -> list[list[str]]:
         """读取所有段落（每个段落是一组行）"""
         if not self.memory_file.exists():
             return []
@@ -211,7 +218,7 @@ class MemoryStore:
 
             paragraphs = []
             for block in content.strip().split("\n\n"):
-                lines = [l for l in block.strip().split("\n") if l.strip()]
+                lines = [line for line in block.strip().split("\n") if line.strip()]
                 if lines:
                     paragraphs.append(lines)
             return paragraphs
@@ -219,7 +226,7 @@ class MemoryStore:
             logger.error(f"Failed to read memory file: {e}")
             return []
 
-    def _write_paragraphs(self, paragraphs: List[List[str]]) -> None:
+    def _write_paragraphs(self, paragraphs: list[list[str]]) -> None:
         """写入所有段落"""
         try:
             if not paragraphs:
@@ -230,7 +237,7 @@ class MemoryStore:
         except Exception as e:
             logger.error(f"Failed to write memory file: {e}")
 
-    def _parse_all_entries(self) -> List[MemoryEntry]:
+    def _parse_all_entries(self) -> list[MemoryEntry]:
         """解析所有段落为 MemoryEntry 列表"""
         paragraphs = self._read_paragraphs()
         entries = []
@@ -246,7 +253,7 @@ class MemoryStore:
 
     # ==================== 写入 ====================
 
-    def append_entry(self, source: str, content: str, date: Optional[str] = None) -> int:
+    def append_entry(self, source: str, content: str, date: str | None = None) -> int:
         """
         追加一条记忆段落
 
@@ -272,10 +279,12 @@ class MemoryStore:
             self._write_paragraphs(paragraphs)
 
             para_num = len(paragraphs)
-            logger.info(f"Memory appended at paragraph {para_num}: {first_content[:80]}...")
+            logger.info(
+                f"Memory appended at paragraph {para_num}: {first_content[:80]}..."
+            )
             return para_num
 
-    def append_entries(self, source: str, entries: List[str]) -> List[int]:
+    def append_entries(self, source: str, entries: list[str]) -> list[int]:
         """
         批量追加记忆段落
 
@@ -304,7 +313,7 @@ class MemoryStore:
 
     # ==================== 读取 ====================
 
-    def read_paragraphs(self, start: int, end: Optional[int] = None) -> str:
+    def read_paragraphs(self, start: int, end: int | None = None) -> str:
         """
         按段落号读取记忆
 
@@ -335,14 +344,14 @@ class MemoryStore:
 
         return "\n".join(result)
 
-    def get_entry(self, para_number: int) -> Optional[MemoryEntry]:
+    def get_entry(self, para_number: int) -> MemoryEntry | None:
         """获取单条记忆段落"""
         paragraphs = self._read_paragraphs()
         if para_number < 1 or para_number > len(paragraphs):
             return None
         return MemoryEntry.from_paragraph(para_number, paragraphs[para_number - 1])
 
-    def get_entries(self, start: int, end: int) -> List[MemoryEntry]:
+    def get_entries(self, start: int, end: int) -> list[MemoryEntry]:
         """获取多条记忆段落"""
         paragraphs = self._read_paragraphs()
         entries = []
@@ -369,7 +378,7 @@ class MemoryStore:
 
         return "\n".join(result)
 
-    def get_recent_entries(self, count: int = 10) -> List[MemoryEntry]:
+    def get_recent_entries(self, count: int = 10) -> list[MemoryEntry]:
         """获取最近 N 条 MemoryEntry"""
         paragraphs = self._read_paragraphs()
         entries = []
@@ -385,10 +394,7 @@ class MemoryStore:
     # ==================== 搜索 ====================
 
     def search(
-        self,
-        keywords: List[str],
-        max_results: int = 15,
-        match_mode: str = "or"
+        self, keywords: list[str], max_results: int = 15, match_mode: str = "or"
     ) -> str:
         """
         关键词搜索记忆（在整个段落内容中搜索）
@@ -441,10 +447,10 @@ class MemoryStore:
 
     def search_entries(
         self,
-        keywords: List[str],
+        keywords: list[str],
         max_results: int = 15,
         match_mode: str = "or",
-    ) -> List[MemoryEntry]:
+    ) -> list[MemoryEntry]:
         """搜索并返回 MemoryEntry 列表"""
         paragraphs = self._read_paragraphs()
         keywords = [kw.strip().lower() for kw in keywords if kw.strip()]
@@ -470,7 +476,7 @@ class MemoryStore:
 
     # ==================== 删除 ====================
 
-    def delete_lines(self, para_numbers: List[int]) -> int:
+    def delete_lines(self, para_numbers: list[int]) -> int:
         """
         删除指定段落号的记忆
 
@@ -487,8 +493,7 @@ class MemoryStore:
 
             to_delete = set(para_numbers)
             new_paras = [
-                para for i, para in enumerate(paragraphs)
-                if (i + 1) not in to_delete
+                para for i, para in enumerate(paragraphs) if (i + 1) not in to_delete
             ]
 
             deleted = len(paragraphs) - len(new_paras)
@@ -529,8 +534,8 @@ class MemoryStore:
                 total_chars=0,
             )
 
-        sources: Dict[str, int] = {}
-        dates: List[str] = []
+        sources: dict[str, int] = {}
+        dates: list[str] = []
         total_chars = 0
 
         for para in paragraphs:
@@ -582,7 +587,7 @@ class MemoryStore:
             with self._lock:
                 existing = self._read_paragraphs()
                 for block in stripped.split("\n\n"):
-                    lines = [l for l in block.strip().split("\n") if l.strip()]
+                    lines = [line for line in block.strip().split("\n") if line.strip()]
                     if lines:
                         # 确保首行有前缀
                         if "|" not in lines[0] or lines[0].count("|") < 2:
@@ -593,7 +598,7 @@ class MemoryStore:
                 return len(existing)
 
         # 旧的行格式：按行处理
-        lines = [l.strip() for l in stripped.split("\n") if l.strip()]
+        lines = [line.strip() for line in stripped.split("\n") if line.strip()]
         count = 0
         for line in lines:
             if "|" in line and line.count("|") >= 2:
@@ -612,10 +617,10 @@ class MemoryStore:
 
 # ==================== 全局实例 ====================
 
-_global_memory_store: Optional[MemoryStore] = None
+_global_memory_store: MemoryStore | None = None
 
 
-def get_memory_store(memory_dir: Optional[Path] = None) -> MemoryStore:
+def get_memory_store(memory_dir: Path | None = None) -> MemoryStore:
     """获取全局记忆存储实例"""
     global _global_memory_store
 

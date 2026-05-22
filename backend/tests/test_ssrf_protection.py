@@ -3,16 +3,18 @@ SSRF 防护测试
 
 借鉴 OpenClaw ssrf.test.ts 的测试场景
 """
+
 import pytest
+
 from app.core.ssrf_protection import (
     SsrFBlockedError,
     SsrFPolicy,
+    _is_blocked_hostname,
+    _is_private_ip,
     is_blocked_hostname_or_ip,
     validate_hostname_ssrf,
     validate_url_ssrf,
     validate_url_ssrf_or_none,
-    _is_blocked_hostname,
-    _is_private_ip,
 )
 
 

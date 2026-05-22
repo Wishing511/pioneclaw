@@ -9,22 +9,22 @@ Phase R 测试：多租户权限 + Workspace + 用户上下文
 5. 资源归属过滤
 """
 
-import pytest
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
-from app.models.workspace import Workspace
-from app.models.approval import Approval, ApprovalStatus, ApprovalType
-from app.models.models import User, Skill, SkillScope
 from app.core.permissions import can_access_resource, can_manage_approval
+from app.models.approval import Approval, ApprovalStatus, ApprovalType
+from app.models.models import Skill, User
+from app.models.workspace import Workspace
 from app.modules.agent.context import PersonaConfig
-
 
 # ------------------------------------------------------------------
 # Workspace 测试
 # ------------------------------------------------------------------
+
 
 class TestWorkspaceModel:
     """Workspace 模型测试"""
@@ -47,7 +47,7 @@ class TestWorkspaceModel:
         assert workspace.name == "我的工作台"
         assert workspace.owner_id == 1
         assert workspace.settings["user_name"] == "小明"
-        assert workspace.is_default == True
+        assert workspace.is_default
 
     def test_workspace_settings_structure(self):
         """测试 Workspace settings 结构"""
@@ -88,6 +88,7 @@ class TestWorkspaceAPI:
 # ------------------------------------------------------------------
 # Approval 测试
 # ------------------------------------------------------------------
+
 
 class TestApprovalModel:
     """Approval 模型测试"""
@@ -138,6 +139,7 @@ class TestApprovalAPI:
 # 权限检查测试
 # ------------------------------------------------------------------
 
+
 class TestPermissionChecks:
     """权限检查函数测试"""
 
@@ -146,43 +148,59 @@ class TestPermissionChecks:
         super_admin = User(id=1, is_super_admin=True)
 
         # 系统级资源
-        assert can_access_resource(super_admin, "system", action="create") == True
-        assert can_access_resource(super_admin, "system", action="delete") == True
+        assert can_access_resource(super_admin, "system", action="create")
+        assert can_access_resource(super_admin, "system", action="delete")
 
         # 组织级资源
-        assert can_access_resource(super_admin, "org", resource_org_id="org_001", action="update") == True
+        assert can_access_resource(
+            super_admin, "org", resource_org_id="org_001", action="update"
+        )
 
         # 用户级资源
-        assert can_access_resource(super_admin, "user", resource_creator_id=999, action="delete") == True
+        assert can_access_resource(
+            super_admin, "user", resource_creator_id=999, action="delete"
+        )
 
     def test_org_admin_can_manage_org_resources(self):
         """组织管理员可以管理本组织资源"""
         org_admin = User(id=2, is_org_admin=True, organization_id="org_001")
 
         # 本组织资源
-        assert can_access_resource(org_admin, "org", resource_org_id="org_001", action="update") == True
-        assert can_access_resource(org_admin, "org", resource_org_id="org_001", action="delete") == True
+        assert can_access_resource(
+            org_admin, "org", resource_org_id="org_001", action="update"
+        )
+        assert can_access_resource(
+            org_admin, "org", resource_org_id="org_001", action="delete"
+        )
 
         # 其他组织资源（只读）
-        assert can_access_resource(org_admin, "org", resource_org_id="org_002", action="read") == True
-        assert can_access_resource(org_admin, "org", resource_org_id="org_002", action="update") == False
+        assert can_access_resource(
+            org_admin, "org", resource_org_id="org_002", action="read"
+        )
+        assert not can_access_resource(
+            org_admin, "org", resource_org_id="org_002", action="update"
+        )
 
         # 系统级资源（只读）
-        assert can_access_resource(org_admin, "system", action="read") == True
-        assert can_access_resource(org_admin, "system", action="update") == False
+        assert can_access_resource(org_admin, "system", action="read")
+        assert not can_access_resource(org_admin, "system", action="update")
 
     def test_user_can_manage_own_resources(self):
         """普通用户可以管理自己的资源"""
         user = User(id=3, is_super_admin=False, is_org_admin=False)
 
         # 自己的资源
-        assert can_access_resource(user, "user", resource_creator_id=3, action="read") == True
-        assert can_access_resource(user, "user", resource_creator_id=3, action="update") == True
-        assert can_access_resource(user, "user", resource_creator_id=3, action="delete") == True
+        assert can_access_resource(user, "user", resource_creator_id=3, action="read")
+        assert can_access_resource(user, "user", resource_creator_id=3, action="update")
+        assert can_access_resource(user, "user", resource_creator_id=3, action="delete")
 
         # 其他用户的资源（无权限）
-        assert can_access_resource(user, "user", resource_creator_id=999, action="read") == False
-        assert can_access_resource(user, "user", resource_creator_id=999, action="update") == False
+        assert not can_access_resource(
+            user, "user", resource_creator_id=999, action="read"
+        )
+        assert not can_access_resource(
+            user, "user", resource_creator_id=999, action="update"
+        )
 
     def test_org_admin_can_read_org_user_resources(self):
         """组织管理员可以读取本组织用户的资源"""
@@ -190,40 +208,53 @@ class TestPermissionChecks:
 
         # 假设 resource_creator_id=3 的用户属于 org_001
         # 这里 resource_org_id 传入的是创建者的组织 ID
-        assert can_access_resource(org_admin, "user", resource_creator_id=3, resource_org_id="org_001", action="read") == True
-        assert can_access_resource(org_admin, "user", resource_creator_id=3, resource_org_id="org_001", action="update") == False
+        assert can_access_resource(
+            org_admin,
+            "user",
+            resource_creator_id=3,
+            resource_org_id="org_001",
+            action="read",
+        )
+        assert not can_access_resource(
+            org_admin,
+            "user",
+            resource_creator_id=3,
+            resource_org_id="org_001",
+            action="update",
+        )
 
     def test_can_manage_approval_super_admin(self):
         """超管可以审批所有级别"""
         super_admin = User(id=1, is_super_admin=True)
 
-        assert can_manage_approval(super_admin, "org", "org_001") == True
-        assert can_manage_approval(super_admin, "system") == True
+        assert can_manage_approval(super_admin, "org", "org_001")
+        assert can_manage_approval(super_admin, "system")
 
     def test_can_manage_approval_org_admin(self):
         """组织管理员只能审批本组织的"""
         org_admin = User(id=2, is_org_admin=True, organization_id="org_001")
 
         # 本组织审批
-        assert can_manage_approval(org_admin, "org", "org_001") == True
+        assert can_manage_approval(org_admin, "org", "org_001")
 
         # 其他组织审批
-        assert can_manage_approval(org_admin, "org", "org_002") == False
+        assert not can_manage_approval(org_admin, "org", "org_002")
 
         # 系统级审批（无权限）
-        assert can_manage_approval(org_admin, "system") == False
+        assert not can_manage_approval(org_admin, "system")
 
     def test_can_manage_approval_normal_user(self):
         """普通用户不能审批"""
         user = User(id=3, is_super_admin=False, is_org_admin=False)
 
-        assert can_manage_approval(user, "org", "org_001") == False
-        assert can_manage_approval(user, "system") == False
+        assert not can_manage_approval(user, "org", "org_001")
+        assert not can_manage_approval(user, "system")
 
 
 # ------------------------------------------------------------------
 # PersonaConfig 测试
 # ------------------------------------------------------------------
+
 
 class TestPersonaConfig:
     """PersonaConfig 测试"""
@@ -307,28 +338,33 @@ class TestPersonaConfig:
 # 资源归属过滤测试
 # ------------------------------------------------------------------
 
+
 class TestResourceIsolation:
     """资源归属过滤测试"""
 
     def test_agent_has_workspace_field(self):
         """测试 Agent 有 workspace_id 字段"""
         from app.models.models import Agent
+
         # 验证字段存在
-        assert hasattr(Agent, 'workspace_id')
+        assert hasattr(Agent, "workspace_id")
 
     def test_skill_has_scope_field(self):
         """测试 Skill 有 scope 字段"""
         from app.models.models import Skill
+
         # 验证字段存在
-        assert hasattr(Skill, 'scope')
-        assert hasattr(Skill, 'organization_id')
+        assert hasattr(Skill, "scope")
+        assert hasattr(Skill, "organization_id")
 
     def test_skill_scope_filtering_logic(self):
         """测试 Skill scope 过滤逻辑"""
         # 用户级 Skill
         user_skill = Skill(id=1, name="用户 Skill", scope="user", creator_id=1)
         # 组织级 Skill
-        org_skill = Skill(id=2, name="组织 Skill", scope="org", organization_id="org_001")
+        org_skill = Skill(
+            id=2, name="组织 Skill", scope="org", organization_id="org_001"
+        )
         # 系统级 Skill
         system_skill = Skill(id=3, name="系统 Skill", scope="system")
 
@@ -341,6 +377,7 @@ class TestResourceIsolation:
 # ------------------------------------------------------------------
 # 系统提示词注入测试
 # ------------------------------------------------------------------
+
 
 class TestSystemPromptInjection:
     """系统提示词注入测试"""
@@ -368,8 +405,9 @@ class TestSystemPromptInjection:
 
     def test_context_builder_injects_persona(self):
         """测试 ContextBuilder 注入 PersonaConfig"""
-        from app.modules.agent.context import ContextBuilder
         from pathlib import Path
+
+        from app.modules.agent.context import ContextBuilder
 
         workspace_path = Path("/test/path")
 
@@ -396,6 +434,7 @@ class TestSystemPromptInjection:
 # ------------------------------------------------------------------
 # 完整审批流程测试
 # ------------------------------------------------------------------
+
 
 class TestApprovalWorkflow:
     """完整审批流程测试"""
@@ -471,12 +510,13 @@ class TestApprovalWorkflow:
 
         # 验证
         assert skill.scope == "system"
-        assert skill.is_public == True
+        assert skill.is_public
 
 
 # ------------------------------------------------------------------
 # 工具函数
 # ------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_db():

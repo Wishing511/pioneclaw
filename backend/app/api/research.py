@@ -3,55 +3,59 @@ Research + Consolidator API 端点
 研究会话和知识整合接口
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict, Any, Literal
 
 from app.api.auth import get_current_active_user
 from app.models import User
-from ..modules.agent.research import (
-    get_research_manager,
-    ResearchManager,
-    ResearchSession,
-)
+
 from ..modules.agent.consolidator import (
     get_consolidator,
-    Consolidator,
 )
-
+from ..modules.agent.research import (
+    get_research_manager,
+)
 
 router = APIRouter(prefix="/research", tags=["Research"])
 
 
 # ==================== 请求模型 ====================
 
+
 class CreateSessionRequest(BaseModel):
     """创建会话请求"""
+
     query: str
     session_type: Literal["research", "chat"] = "chat"
 
 
 class AddExplorationRequest(BaseModel):
     """添加探索请求"""
+
     exploration_type: Literal["thinking", "action", "result", "retrieved", "decision"]
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 class AddKnowledgeRequest(BaseModel):
     """添加知识引用请求"""
+
     source_name: str
     content: str
-    score: Optional[float] = None
+    score: float | None = None
 
 
 class CompleteSessionRequest(BaseModel):
     """完成会话请求"""
+
     solution: str
     success: bool
 
 
 # ==================== 统计 ====================
+
 
 @router.get("/stats")
 async def get_stats(
@@ -64,6 +68,7 @@ async def get_stats(
 
 # ==================== 会话管理 ====================
 
+
 @router.post("/sessions")
 async def create_session(
     request: CreateSessionRequest,
@@ -72,7 +77,7 @@ async def create_session(
     """创建研究会话"""
     manager = get_research_manager()
     session = manager.create_session(request.query, request.session_type)
-    
+
     return {"success": True, "session": session.to_dict()}
 
 
@@ -95,10 +100,10 @@ async def get_session(
     """获取会话详情"""
     manager = get_research_manager()
     session = manager.get_session(session_id)
-    
+
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     return session.to_dict()
 
 
@@ -110,17 +115,17 @@ async def add_exploration(
 ):
     """添加探索记录"""
     manager = get_research_manager()
-    
+
     success = manager.add_exploration(
         session_id=session_id,
         exploration_type=request.exploration_type,
         content=request.content,
         metadata=request.metadata,
     )
-    
+
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     return {"success": True}
 
 
@@ -132,15 +137,15 @@ async def add_knowledge(
 ):
     """添加知识引用"""
     manager = get_research_manager()
-    
+
     knowledge_ref = {
         "source_name": request.source_name,
         "content": request.content,
         "score": request.score,
     }
-    
+
     manager.add_knowledge_ref(session_id, knowledge_ref)
-    
+
     return {"success": True}
 
 
@@ -157,11 +162,12 @@ async def complete_session(
         solution=request.solution,
         success=request.success,
     )
-    
+
     return {"success": True}
 
 
 # ==================== 整合 ====================
+
 
 @router.get("/consolidation/stats")
 async def get_consolidation_stats(
@@ -180,7 +186,7 @@ async def get_pending_consolidations(
     """获取待整合的会话"""
     manager = get_research_manager()
     sessions = manager.get_sessions_for_consolidation(limit)
-    
+
     return {
         "sessions": [s.to_dict() for s in sessions],
         "count": len(sessions),
@@ -195,17 +201,18 @@ async def consolidate_session(
     """整合会话为知识文档"""
     manager = get_research_manager()
     consolidator = get_consolidator()
-    
+
     session = manager.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+
     result = consolidator.consolidate_session(session)
-    
+
     return {"success": True, "result": result.to_dict()}
 
 
 # ==================== 解决方案 ====================
+
 
 @router.get("/solutions")
 async def get_solutions(
@@ -226,10 +233,10 @@ async def get_solution(
     """获取解决方案详情"""
     consolidator = get_consolidator()
     solution = consolidator.get_solution(solution_id)
-    
+
     if not solution:
         raise HTTPException(status_code=404, detail="Solution not found")
-    
+
     return solution
 
 
@@ -241,10 +248,10 @@ async def get_solution_markdown(
     """获取解决方案 Markdown"""
     consolidator = get_consolidator()
     md = consolidator.get_solution_markdown(solution_id)
-    
+
     if not md:
         raise HTTPException(status_code=404, detail="Solution not found")
-    
+
     return {"markdown": md}
 
 
@@ -256,8 +263,8 @@ async def delete_solution(
     """删除解决方案"""
     consolidator = get_consolidator()
     success = consolidator.delete_solution(solution_id)
-    
+
     if not success:
         raise HTTPException(status_code=404, detail="Solution not found")
-    
+
     return {"success": True}

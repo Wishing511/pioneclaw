@@ -3,18 +3,24 @@ MCP 工具测试：MCPTool, ListMcpResourcesTool, ReadMcpResourceTool, McpAuthTo
 以及 MCPToolRegistry 客户端测试
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.modules.tools.mcp import (
-    MCPTool, ListMcpResourcesTool, ReadMcpResourceTool, McpAuthTool
+    ListMcpResourcesTool,
+    McpAuthTool,
+    MCPTool,
+    ReadMcpResourceTool,
 )
 from app.modules.tools.mcp_client import (
-    MCPServerConnection, MCPToolRegistry, get_mcp_registry
+    MCPServerConnection,
+    MCPToolRegistry,
+    get_mcp_registry,
 )
 
-
 # ── 辅助函数 ──────────────────────────────────────────────────
+
 
 def make_mock_conn(name="test_server", status="disconnected"):
     """创建模拟的 MCPServerConnection"""
@@ -29,7 +35,11 @@ def make_mock_conn(name="test_server", status="disconnected"):
             {"name": "mock_tool_2", "description": "测试工具2"},
         ],
         resources=[
-            {"uri": "file:///test/data.txt", "name": "data.txt", "description": "测试数据"},
+            {
+                "uri": "file:///test/data.txt",
+                "name": "data.txt",
+                "description": "测试数据",
+            },
         ],
         server_info={"name": "test-server", "version": "1.0.0"},
     )
@@ -38,6 +48,7 @@ def make_mock_conn(name="test_server", status="disconnected"):
 # ============================================================
 # MCPServerConnection 测试
 # ============================================================
+
 
 class TestMCPServerConnection:
     """测试 MCPServerConnection 数据类"""
@@ -62,6 +73,7 @@ class TestMCPServerConnection:
 # ============================================================
 # MCPToolRegistry 测试
 # ============================================================
+
 
 class TestMCPToolRegistry:
     """测试 MCPToolRegistry 注册表"""
@@ -110,6 +122,7 @@ class TestMCPToolRegistry:
 # McpAuthTool 测试
 # ============================================================
 
+
 class TestMcpAuthTool:
     """测试 McpAuthTool"""
 
@@ -125,7 +138,9 @@ class TestMcpAuthTool:
         mock_registry.list_servers.return_value = [conn]
         mock_registry.get_server.return_value = None
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="")
 
         assert "test_server" in result
@@ -139,7 +154,9 @@ class TestMcpAuthTool:
         mock_registry = MagicMock()
         mock_registry.get_server.return_value = conn
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="test_server")
 
         assert "test_server" in result
@@ -151,7 +168,9 @@ class TestMcpAuthTool:
         mock_registry = MagicMock()
         mock_registry.get_server.return_value = None
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="unknown")
 
         assert '"success": false' in result.lower()
@@ -160,6 +179,7 @@ class TestMcpAuthTool:
 # ============================================================
 # ListMcpResourcesTool 测试
 # ============================================================
+
 
 class TestListMcpResourcesTool:
     """测试 ListMcpResourcesTool"""
@@ -171,13 +191,17 @@ class TestListMcpResourcesTool:
     @pytest.mark.asyncio
     async def test_list_all_resources(self, tool):
         mock_registry = MagicMock()
-        mock_registry.list_resources = AsyncMock(return_value={
-            "servers": {
-                "server1": [{"uri": "file:///a.txt", "name": "a.txt"}],
+        mock_registry.list_resources = AsyncMock(
+            return_value={
+                "servers": {
+                    "server1": [{"uri": "file:///a.txt", "name": "a.txt"}],
+                }
             }
-        })
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="")
 
         assert "server1" in result
@@ -186,12 +210,16 @@ class TestListMcpResourcesTool:
     @pytest.mark.asyncio
     async def test_list_single_server_resources(self, tool):
         mock_registry = MagicMock()
-        mock_registry.list_resources = AsyncMock(return_value={
-            "server": "test_server",
-            "resources": [{"uri": "file:///data.csv", "name": "data.csv"}],
-        })
+        mock_registry.list_resources = AsyncMock(
+            return_value={
+                "server": "test_server",
+                "resources": [{"uri": "file:///data.csv", "name": "data.csv"}],
+            }
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="test_server")
 
         assert "test_server" in result
@@ -201,6 +229,7 @@ class TestListMcpResourcesTool:
 # ============================================================
 # ReadMcpResourceTool 测试
 # ============================================================
+
 
 class TestReadMcpResourceTool:
     """测试 ReadMcpResourceTool"""
@@ -212,14 +241,18 @@ class TestReadMcpResourceTool:
     @pytest.mark.asyncio
     async def test_read_resource_success(self, tool):
         mock_registry = MagicMock()
-        mock_registry.read_resource = AsyncMock(return_value={
-            "success": True,
-            "server": "test_server",
-            "uri": "file:///data.txt",
-            "contents": [{"uri": "file:///data.txt", "text": "Hello MCP"}],
-        })
+        mock_registry.read_resource = AsyncMock(
+            return_value={
+                "success": True,
+                "server": "test_server",
+                "uri": "file:///data.txt",
+                "contents": [{"uri": "file:///data.txt", "text": "Hello MCP"}],
+            }
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="test_server", uri="file:///data.txt")
 
         assert '"success": true' in result.lower()
@@ -228,12 +261,16 @@ class TestReadMcpResourceTool:
     @pytest.mark.asyncio
     async def test_read_resource_failure(self, tool):
         mock_registry = MagicMock()
-        mock_registry.read_resource = AsyncMock(return_value={
-            "success": False,
-            "error": "资源不存在",
-        })
+        mock_registry.read_resource = AsyncMock(
+            return_value={
+                "success": False,
+                "error": "资源不存在",
+            }
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="bad_server", uri="file:///missing.txt")
 
         assert '"success": false' in result.lower()
@@ -242,6 +279,7 @@ class TestReadMcpResourceTool:
 # ============================================================
 # MCPTool 测试
 # ============================================================
+
 
 class TestMCPTool:
     """测试 MCPTool"""
@@ -253,15 +291,19 @@ class TestMCPTool:
     @pytest.mark.asyncio
     async def test_call_tool_success(self, tool):
         mock_registry = MagicMock()
-        mock_registry.call_tool = AsyncMock(return_value={
-            "success": True,
-            "server": "test_server",
-            "tool": "mock_tool_1",
-            "content": [{"type": "text", "text": "工具执行结果"}],
-            "isError": False,
-        })
+        mock_registry.call_tool = AsyncMock(
+            return_value={
+                "success": True,
+                "server": "test_server",
+                "tool": "mock_tool_1",
+                "content": [{"type": "text", "text": "工具执行结果"}],
+                "isError": False,
+            }
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(
                 server="test_server",
                 tool="mock_tool_1",
@@ -277,12 +319,16 @@ class TestMCPTool:
     @pytest.mark.asyncio
     async def test_call_tool_server_not_found(self, tool):
         mock_registry = MagicMock()
-        mock_registry.call_tool = AsyncMock(return_value={
-            "success": False,
-            "error": "MCP 服务器未注册: unknown",
-        })
+        mock_registry.call_tool = AsyncMock(
+            return_value={
+                "success": False,
+                "error": "MCP 服务器未注册: unknown",
+            }
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="unknown", tool="some_tool")
 
         assert '"success": false' in result.lower()
@@ -290,12 +336,16 @@ class TestMCPTool:
     @pytest.mark.asyncio
     async def test_call_tool_without_arguments(self, tool):
         mock_registry = MagicMock()
-        mock_registry.call_tool = AsyncMock(return_value={
-            "success": True,
-            "content": [],
-        })
+        mock_registry.call_tool = AsyncMock(
+            return_value={
+                "success": True,
+                "content": [],
+            }
+        )
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="test_server", tool="no_arg_tool")
 
         assert '"success": true' in result.lower()
@@ -304,6 +354,7 @@ class TestMCPTool:
 # ============================================================
 # MCPToolRegistry connect_server 测试
 # ============================================================
+
 
 class TestMCPRegistryConnect:
     """测试 MCPToolRegistry.connect_server()"""
@@ -321,7 +372,9 @@ class TestMCPRegistryConnect:
 
     @pytest.mark.asyncio
     async def test_connect_unsupported_transport(self, registry):
-        conn = registry.register_server("bad_server", transport="grpc", url="grpc://localhost:8080")
+        registry.register_server(
+            "bad_server", transport="grpc", url="grpc://localhost:8080"
+        )
 
         result = await registry.connect_server("bad_server")
         assert result.status == "error"
@@ -338,6 +391,7 @@ class TestMCPRegistryConnect:
 # 边界情况测试
 # ============================================================
 
+
 class TestMCPEdgeCases:
     """MCP 工具边界情况"""
 
@@ -347,7 +401,9 @@ class TestMCPEdgeCases:
         mock_registry = MagicMock()
         mock_registry.call_tool = AsyncMock(return_value={"success": True})
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="s", tool="t")
             assert '"success": true' in result.lower()
 
@@ -357,7 +413,9 @@ class TestMCPEdgeCases:
         mock_registry = MagicMock()
         mock_registry.list_servers.return_value = []
 
-        with patch("app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry):
+        with patch(
+            "app.modules.tools.mcp_client.get_mcp_registry", return_value=mock_registry
+        ):
             result = await tool.execute(server="")
 
         assert '"total": 0' in result
@@ -366,6 +424,7 @@ class TestMCPEdgeCases:
 # ============================================================
 # P2: MCP Auth Headers 测试
 # ============================================================
+
 
 class TestMCPAuthHeaders:
     """测试 _build_auth_headers 方法"""
@@ -377,13 +436,17 @@ class TestMCPAuthHeaders:
         return reg
 
     def test_build_headers_empty(self, registry):
-        conn = MCPServerConnection(name="test", transport="sse", url="http://localhost:8080")
+        conn = MCPServerConnection(
+            name="test", transport="sse", url="http://localhost:8080"
+        )
         headers = registry._build_auth_headers(conn)
         assert headers == {}
 
     def test_build_headers_api_key_shorthand(self, registry):
         conn = MCPServerConnection(
-            name="test", transport="sse", url="http://localhost:8080",
+            name="test",
+            transport="sse",
+            url="http://localhost:8080",
             auth_config={"api_key": "sk-12345"},
         )
         headers = registry._build_auth_headers(conn)
@@ -391,7 +454,9 @@ class TestMCPAuthHeaders:
 
     def test_build_headers_custom(self, registry):
         conn = MCPServerConnection(
-            name="test", transport="sse", url="http://localhost:8080",
+            name="test",
+            transport="sse",
+            url="http://localhost:8080",
             auth_config={"headers": {"X-API-Key": "my-key", "X-Custom": "value"}},
         )
         headers = registry._build_auth_headers(conn)
@@ -400,7 +465,9 @@ class TestMCPAuthHeaders:
 
     def test_build_headers_explicit_auth_takes_priority(self, registry):
         conn = MCPServerConnection(
-            name="test", transport="sse", url="http://localhost:8080",
+            name="test",
+            transport="sse",
+            url="http://localhost:8080",
             auth_config={
                 "headers": {"Authorization": "Bearer explicit-token"},
                 "api_key": "sk-ignored",
@@ -413,6 +480,7 @@ class TestMCPAuthHeaders:
 # ============================================================
 # P2: MCP 命名空间工具测试
 # ============================================================
+
 
 class TestMCPNamespacedTools:
     """测试命名空间工具注册/注销"""
@@ -446,9 +514,9 @@ class TestMCPNamespacedTools:
 
     def test_register_and_unregister(self):
         from app.modules.tools.mcp_client import (
+            _namespace_tools,
             register_mcp_namespace_tools,
             unregister_mcp_namespace_tools,
-            _namespace_tools,
         )
         from app.modules.tools.registry import get_tool_registry
 
@@ -477,6 +545,7 @@ class TestMCPNamespacedTools:
 # ============================================================
 # P2: MCP 自动发现测试
 # ============================================================
+
 
 class TestMCPAutoDiscover:
     """测试 auto_discover_mcp_servers"""

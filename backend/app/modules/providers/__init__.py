@@ -8,10 +8,10 @@ Provider 模块 - 多模型提供商管理
 - Tool parser（工具调用解析）
 """
 
-from .factory import ProviderFactory, get_provider_factory, THINKING_PROFILES
+from .base import BaseProvider, ProviderConfig, ProviderType
+from .factory import THINKING_PROFILES, ProviderFactory, get_provider_factory
 from .registry import ProviderRegistry, register_provider
 from .runtime import KeyRotator, ModelOverride, RuntimeConfig
-from .base import BaseProvider, ProviderConfig, ProviderType
 
 __all__ = [
     "ProviderFactory",

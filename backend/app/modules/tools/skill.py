@@ -53,10 +53,13 @@ class SkillTool(BaseTool):
                 return self._handle_activate(loader, skill_name)
 
             else:
-                return json.dumps({
-                    "success": False,
-                    "error": f"未知操作: '{action}'。支持的操作: list, activate",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"未知操作: '{action}'。支持的操作: list, activate",
+                    },
+                    ensure_ascii=False,
+                )
 
         except Exception as e:
             logger.error(f"SkillTool execution error: {e}")
@@ -70,46 +73,60 @@ class SkillTool(BaseTool):
                 continue
             if not skill.check_requirements():
                 continue
-            skills.append({
-                "name": name,
-                "description": skill.metadata.description or "",
-                "title": skill.metadata.title or name,
-                "source": skill.source,
-                "always": skill.metadata.always,
-                "tags": skill.metadata.tags,
-            })
-        return json.dumps({
-            "success": True,
-            "skills": skills,
-            "total": len(skills),
-        }, ensure_ascii=False)
+            skills.append(
+                {
+                    "name": name,
+                    "description": skill.metadata.description or "",
+                    "title": skill.metadata.title or name,
+                    "source": skill.source,
+                    "always": skill.metadata.always,
+                    "tags": skill.metadata.tags,
+                }
+            )
+        return json.dumps(
+            {
+                "success": True,
+                "skills": skills,
+                "total": len(skills),
+            },
+            ensure_ascii=False,
+        )
 
     def _handle_activate(self, loader, skill_name: str) -> str:
         """激活指定技能，返回完整内容（不含 frontmatter）"""
         if not skill_name or not skill_name.strip():
-            return json.dumps({
-                "success": False,
-                "error": "activate 操作需要提供 skill_name 参数",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "activate 操作需要提供 skill_name 参数",
+                },
+                ensure_ascii=False,
+            )
 
         skill_name = skill_name.strip()
         skill = loader.get_skill(skill_name)
 
         if not skill:
             available = sorted(loader.skills.keys())
-            return json.dumps({
-                "success": False,
-                "error": f"技能不存在: '{skill_name}'",
-                "available_skills": available,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"技能不存在: '{skill_name}'",
+                    "available_skills": available,
+                },
+                ensure_ascii=False,
+            )
 
         content = loader._strip_frontmatter(skill.content)
 
-        return json.dumps({
-            "success": True,
-            "name": skill.name,
-            "title": skill.metadata.title or skill.name,
-            "description": skill.metadata.description or "",
-            "source": skill.source,
-            "content": content,
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": True,
+                "name": skill.name,
+                "title": skill.metadata.title or skill.name,
+                "description": skill.metadata.description or "",
+                "source": skill.source,
+                "content": content,
+            },
+            ensure_ascii=False,
+        )

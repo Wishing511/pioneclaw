@@ -11,7 +11,7 @@ MagicDocUpdater - Magic Docs 自动维护文档（VV.4，P2可选）
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +38,17 @@ class MagicDocUpdater:
     def __init__(
         self,
         workspace_path: str = "",
-        enabled: bool = False,              # P2 默认关闭
+        enabled: bool = False,  # P2 默认关闭
     ):
         self.workspace_path = Path(workspace_path) if workspace_path else Path.home()
         self.enabled = enabled
 
         # 缓存扫描结果
-        self._magic_docs: Dict[str, str] = {}  # file_path -> purpose
+        self._magic_docs: dict[str, str] = {}  # file_path -> purpose
 
     # ==================== 扫描 ====================
 
-    def scan_workspace(self) -> List[Path]:
+    def scan_workspace(self) -> list[Path]:
         """
         扫描 workspace 中所有包含 # MAGIC DOC: 头部的 .md 文件
 
@@ -87,7 +87,7 @@ class MagicDocUpdater:
             logger.error(f"MagicDocUpdater: scan failed: {e}")
             return []
 
-    def parse_purpose(self, file_path: Path) -> Optional[str]:
+    def parse_purpose(self, file_path: Path) -> str | None:
         """
         解析文件的 MAGIC DOC 头标记
 
@@ -98,16 +98,16 @@ class MagicDocUpdater:
             purpose 描述文本，非 magic doc 返回 None
         """
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 first_line = f.readline().strip()
                 # 也检查是否有 BOM
                 if first_line.startswith("\ufeff"):
                     first_line = first_line[1:].strip()
 
                 if first_line.startswith(self.MAGIC_HEADER):
-                    purpose = first_line[len(self.MAGIC_HEADER):].strip()
+                    purpose = first_line[len(self.MAGIC_HEADER) :].strip()
                     return purpose or "untitled"
-        except (IOError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError):
             pass
 
         return None
@@ -146,9 +146,10 @@ class MagicDocUpdater:
             if "<!-- Last updated by MagicDocs:" in content:
                 # 更新已有时间戳
                 import re
+
                 content = re.sub(
-                    r'<!-- Last updated by MagicDocs:.*?-->',
-                    f'<!-- Last updated by MagicDocs: {now} -->',
+                    r"<!-- Last updated by MagicDocs:.*?-->",
+                    f"<!-- Last updated by MagicDocs: {now} -->",
                     content,
                 )
             else:
@@ -156,9 +157,9 @@ class MagicDocUpdater:
                 header_end = content.find("\n")
                 if header_end > 0:
                     content = (
-                        content[:header_end + 1]
+                        content[: header_end + 1]
                         + f"<!-- Last updated by MagicDocs: {now} -->\n"
-                        + content[header_end + 1:]
+                        + content[header_end + 1 :]
                     )
 
             file_path.write_text(content, encoding="utf-8")
@@ -169,7 +170,7 @@ class MagicDocUpdater:
             logger.error(f"MagicDocUpdater: failed to update {file_path}: {e}")
             return False
 
-    async def update_all(self) -> List[str]:
+    async def update_all(self) -> list[str]:
         """
         扫描并更新所有 magic docs
 
@@ -194,7 +195,7 @@ class MagicDocUpdater:
 
     # ==================== 辅助方法 ====================
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取当前统计"""
         return {
             "enabled": self.enabled,

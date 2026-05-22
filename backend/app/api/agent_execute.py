@@ -7,22 +7,22 @@ Agent 执行 API - 调用 AgentLoop 执行 Agent
 - 执行历史记录
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from pydantic import BaseModel
-from typing import List, Optional
-import asyncio
 import json
 import time
 from datetime import datetime, timezone
 
-from app.core import get_db
-from app.models import Agent, AIModelConfig, User, AgentExecution, Workspace
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
+from app.models import Agent, AgentExecution, AIModelConfig, User, Workspace
 from app.modules.agent import AgentLoop, CancelToken
 from app.modules.agent.context import PersonaConfig
+from app.modules.llm import SimpleLLMProvider
 from app.modules.tools import ToolRegistry, register_builtin_tools
 
 router = APIRouter(prefix="/agents", tags=["Agent 执行"])
@@ -44,8 +44,10 @@ def _create_vv_post_turn_services(
     services = []
     memory_store = None
     try:
-        from app.modules.agent.memory import get_memory_store
         from pathlib import Path
+
+        from app.modules.agent.memory import get_memory_store
+
         ws_path = Path(workspace_path) / "memory" if workspace_path else None
         memory_store = get_memory_store(ws_path)
     except Exception:
@@ -85,7 +87,7 @@ def _create_vv_post_turn_services(
 
 
 async def _build_user_aware_system_prompt(
-    agent: Agent, user: User, db: AsyncSession, base_prompt: Optional[str] = None
+    agent: Agent, user: User, db: AsyncSession, base_prompt: str | None = None
 ) -> str:
     """
     构建包含用户信息的系统提示词
@@ -131,19 +133,21 @@ async def _build_user_aware_system_prompt(
 
 class AgentExecuteRequest(BaseModel):
     """Agent 执行请求"""
+
     message: str
-    context: Optional[List[dict]] = None
+    context: list[dict] | None = None
     stream: bool = True
 
 
 class AgentExecuteResponse(BaseModel):
     """Agent 执行响应"""
+
     success: bool
     message: str
-    response: Optional[str] = None
-    agent_id: Optional[int] = None
-    latency_ms: Optional[int] = None
-    approval_id: Optional[int] = None  # 安全网关审批ID
+    response: str | None = None
+    agent_id: int | None = None
+    latency_ms: int | None = None
+    approval_id: int | None = None  # 安全网关审批ID
     pending_approval: bool = False  # 是否等待审批
 
 
@@ -156,33 +160,34 @@ async def execute_agent(
     agent_id: int,
     request: AgentExecuteRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     执行 Agent（非流式）
-    
+
     Args:
         agent_id: Agent ID
         request: 执行请求
-    
+
     Returns:
         AgentExecuteResponse: 执行结果
     """
     import logging
+
     logger = logging.getLogger(__name__)
     logger.info(f"Executing agent {agent_id} with message: {request.message[:50]}")
-    
+
     try:
         # 获取 Agent
         result = await db.execute(select(Agent).where(Agent.id == agent_id))
         agent = result.scalar_one_or_none()
-        
+
         if not agent:
             logger.error(f"Agent {agent_id} not found")
             raise HTTPException(status_code=404, detail="Agent 不存在")
-        
+
         logger.info(f"Agent found: {agent.name}")
-        
+
         # 获取模型配置
         model_config = None
         if agent.model:
@@ -199,24 +204,21 @@ async def execute_agent(
                     select(AIModelConfig).where(AIModelConfig.model_name == agent.model)
                 )
                 model_config = result.scalar_one_or_none()
-        
+
         if not model_config:
             # 使用默认配置
             logger.info("No agent model config, using default")
             result = await db.execute(
-                select(AIModelConfig).where(AIModelConfig.is_default == True)
+                select(AIModelConfig).where(AIModelConfig.is_default)
             )
             model_config = result.scalar_one_or_none()
-        
+
         if not model_config:
             logger.error("No model config available")
-            return AgentExecuteResponse(
-                success=False,
-                message="没有可用的 AI 模型配置"
-            )
-        
+            return AgentExecuteResponse(success=False, message="没有可用的 AI 模型配置")
+
         logger.info(f"Using model: {model_config.model_name}")
-        
+
         # 创建执行记录
         execution = AgentExecution(
             agent_id=agent_id,
@@ -231,19 +233,20 @@ async def execute_agent(
         await db.commit()
         await db.refresh(execution)
         logger.info(f"Created execution record: {execution.id}")
-        
+
         # 创建工具注册表
         tool_registry = ToolRegistry()
         register_builtin_tools(tool_registry)
-        
+
         # 创建 LLM Provider（简化版，直接使用配置）
         provider = SimpleLLMProvider(config=model_config)
 
         # Context 压缩组件（Phase 1: 统一入口）
-        from app.modules.agent.context_pruner import ContextPruner
-        from app.modules.agent.compactor import Compactor, CompactionConfig
-        from app.modules.agent.token_budget import TokenBudget
+        from app.modules.agent.compactor import CompactionConfig, Compactor
         from app.modules.agent.compression_service import ContextCompressionService
+        from app.modules.agent.context_pruner import ContextPruner
+        from app.modules.agent.token_budget import TokenBudget
+
         context_pruner = ContextPruner()
         compactor = Compactor(
             config=CompactionConfig(context_window=model_config.context_window),
@@ -254,6 +257,7 @@ async def execute_agent(
         )
         token_budget = TokenBudget(context_window=model_config.context_window)
         from app.modules.agent.file_tracker import FileTracker
+
         file_tracker = FileTracker(max_files=5, max_tokens=50_000)
         compression_service = ContextCompressionService(
             budget=token_budget,
@@ -263,7 +267,8 @@ async def execute_agent(
         )
 
         # 安全网关：pre_input_call 输入过滤
-        from app.core.security_client import security_client, apply_input_filter
+        from app.core.security_client import apply_input_filter, security_client
+
         filtered_text, error = await apply_input_filter(
             security_client,
             request.message,
@@ -271,12 +276,13 @@ async def execute_agent(
                 "user_id": current_user.id,
                 "username": current_user.username,
                 "agent_id": str(agent.id),
-            }
+            },
         )
         if error:
             # 安全网关审批：创建审批记录
             if error.get("action") == "approve":
                 from app.models.approval import Approval, ApprovalStatus, ApprovalType
+
                 approval = Approval(
                     approval_type=ApprovalType.SECURITY_GATEWAY,
                     status=ApprovalStatus.PENDING,
@@ -338,7 +344,7 @@ async def execute_agent(
             user_id=current_user.id,
             session_id=str(execution.id),
             agent_id=agent.id,
-            workspace_path=getattr(agent, 'workspace_path', '') or '',
+            workspace_path=getattr(agent, "workspace_path", "") or "",
         )
         if vv_services:
             agent_loop.configure_post_turn(vv_services)
@@ -359,14 +365,14 @@ async def execute_agent(
             )
             latency_ms = int((time.time() - start_time) * 1000)
             logger.info(f"Agent loop completed in {latency_ms}ms")
-            
+
             # 更新执行记录
             execution.status = "completed"
             execution.response = response_text
             execution.latency_ms = latency_ms
             execution.completed_at = datetime.now(tz=timezone.utc)
             await db.commit()
-            
+
             return AgentExecuteResponse(
                 success=True,
                 message="执行成功",
@@ -376,13 +382,13 @@ async def execute_agent(
             )
         except Exception as e:
             logger.error(f"Agent execution failed: {e}", exc_info=True)
-            
+
             # 更新执行记录为失败
             execution.status = "failed"
             execution.error_message = str(e)
             execution.completed_at = datetime.now(tz=timezone.utc)
             await db.commit()
-            
+
             return AgentExecuteResponse(
                 success=False,
                 message=f"执行失败: {str(e)}",
@@ -404,20 +410,20 @@ async def execute_agent_stream(
     agent_id: int,
     request: AgentExecuteRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """
     执行 Agent（流式响应）
-    
+
     使用 Server-Sent Events (SSE) 返回流式响应
     """
     # 获取 Agent
     result = await db.execute(select(Agent).where(Agent.id == agent_id))
     agent = result.scalar_one_or_none()
-    
+
     if not agent:
         raise HTTPException(status_code=404, detail="Agent 不存在")
-    
+
     # 获取模型配置
     model_config = None
     if agent.model:
@@ -432,30 +438,31 @@ async def execute_agent_stream(
                 select(AIModelConfig).where(AIModelConfig.model_name == agent.model)
             )
             model_config = result.scalar_one_or_none()
-    
+
     if not model_config:
-        result = await db.execute(
-            select(AIModelConfig).where(AIModelConfig.is_default == True)
-        )
+        result = await db.execute(select(AIModelConfig).where(AIModelConfig.is_default))
         model_config = result.scalar_one_or_none()
-    
+
     if not model_config:
+
         async def error_stream():
             yield f"data: {json.dumps({'error': '没有可用的 AI 模型配置'})}\n\n"
+
         return StreamingResponse(error_stream(), media_type="text/event-stream")
-    
+
     # 创建工具注册表
     tool_registry = ToolRegistry()
     register_builtin_tools(tool_registry)
-    
+
     # 创建 LLM Provider
     provider = SimpleLLMProvider(config=model_config)
 
     # Context 压缩组件（Phase 1: 统一入口）
-    from app.modules.agent.context_pruner import ContextPruner
-    from app.modules.agent.compactor import Compactor, CompactionConfig
-    from app.modules.agent.token_budget import TokenBudget
+    from app.modules.agent.compactor import CompactionConfig, Compactor
     from app.modules.agent.compression_service import ContextCompressionService
+    from app.modules.agent.context_pruner import ContextPruner
+    from app.modules.agent.token_budget import TokenBudget
+
     context_pruner = ContextPruner()
     compactor = Compactor(
         config=CompactionConfig(context_window=model_config.context_window),
@@ -466,6 +473,7 @@ async def execute_agent_stream(
     )
     token_budget = TokenBudget(context_window=model_config.context_window)
     from app.modules.agent.file_tracker import FileTracker
+
     file_tracker = FileTracker(max_files=5, max_tokens=50_000)
     compression_service = ContextCompressionService(
         budget=token_budget,
@@ -499,7 +507,7 @@ async def execute_agent_stream(
         user_id=current_user.id,
         session_id=f"stream_{agent_id}_{int(time.time())}",
         agent_id=agent.id,
-        workspace_path=getattr(agent, 'workspace_path', '') or '',
+        workspace_path=getattr(agent, "workspace_path", "") or "",
     )
     if vv_services:
         agent_loop.configure_post_turn(vv_services)
@@ -518,20 +526,19 @@ async def execute_agent_stream(
                 cancel_token=cancel_token,
             ):
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
-            
+
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
             _active_cancellations.pop(agent_id, None)
-    
+
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 @router.post("/{agent_id}/cancel")
 async def cancel_agent_execution(
-    agent_id: int,
-    current_user: User = Depends(get_current_active_user)
+    agent_id: int, current_user: User = Depends(get_current_active_user)
 ):
     """取消 Agent 执行"""
     if agent_id in _active_cancellations:
@@ -540,10 +547,8 @@ async def cancel_agent_execution(
     return {"success": False, "message": "没有正在执行的任务"}
 
 
-from app.modules.llm import SimpleLLMProvider
-
-
 # ==================== 执行历史 API ====================
+
 
 @router.get("/{agent_id}/executions")
 async def list_agent_executions(
@@ -551,11 +556,11 @@ async def list_agent_executions(
     limit: int = 20,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取 Agent 执行历史"""
     from sqlalchemy import desc
-    
+
     result = await db.execute(
         select(AgentExecution)
         .where(AgentExecution.agent_id == agent_id)
@@ -564,22 +569,26 @@ async def list_agent_executions(
         .offset(offset)
     )
     executions = result.scalars().all()
-    
+
     # 获取总数
     from sqlalchemy import func
+
     count_result = await db.execute(
-        select(func.count(AgentExecution.id))
-        .where(AgentExecution.agent_id == agent_id)
+        select(func.count(AgentExecution.id)).where(AgentExecution.agent_id == agent_id)
     )
     total = count_result.scalar()
-    
+
     return {
         "total": total,
         "items": [
             {
                 "id": e.id,
-                "message": e.message[:100] + "..." if len(e.message) > 100 else e.message,
-                "response": e.response[:200] + "..." if e.response and len(e.response) > 200 else e.response,
+                "message": e.message[:100] + "..."
+                if len(e.message) > 100
+                else e.message,
+                "response": e.response[:200] + "..."
+                if e.response and len(e.response) > 200
+                else e.response,
                 "status": e.status,
                 "latency_ms": e.latency_ms,
                 "total_tokens": e.total_tokens,
@@ -587,7 +596,7 @@ async def list_agent_executions(
                 "created_at": e.created_at.isoformat() if e.created_at else None,
             }
             for e in executions
-        ]
+        ],
     }
 
 
@@ -595,17 +604,17 @@ async def list_agent_executions(
 async def get_execution_detail(
     execution_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取执行详情"""
     result = await db.execute(
         select(AgentExecution).where(AgentExecution.id == execution_id)
     )
     execution = result.scalar_one_or_none()
-    
+
     if not execution:
         raise HTTPException(status_code=404, detail="执行记录不存在")
-    
+
     return {
         "id": execution.id,
         "agent_id": execution.agent_id,
@@ -623,7 +632,13 @@ async def get_execution_detail(
         "tool_calls": execution.tool_calls,
         "error_message": execution.error_message,
         "model_name": execution.model_name,
-        "started_at": execution.started_at.isoformat() if execution.started_at else None,
-        "completed_at": execution.completed_at.isoformat() if execution.completed_at else None,
-        "created_at": execution.created_at.isoformat() if execution.created_at else None,
+        "started_at": execution.started_at.isoformat()
+        if execution.started_at
+        else None,
+        "completed_at": execution.completed_at.isoformat()
+        if execution.completed_at
+        else None,
+        "created_at": execution.created_at.isoformat()
+        if execution.created_at
+        else None,
     }

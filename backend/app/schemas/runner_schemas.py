@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+
+from pydantic import BaseModel
 
 
 class BindUserRequest(BaseModel):
@@ -22,13 +22,13 @@ class DiagnosticsResponse(BaseModel):
     memory_percent: float = 0
     disk_percent: float = 0
     processes: list = []
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class LocalLogQuery(BaseModel):
-    category: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
+    category: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
     limit: int = 100
 
 
@@ -43,7 +43,7 @@ class ConnectionEventResponse(BaseModel):
     id: int
     runner_id: int
     event_type: str
-    detail: Optional[str] = None
+    detail: str | None = None
     created_at: datetime
 
     class Config:
@@ -57,7 +57,7 @@ class RunnerReleaseResponse(BaseModel):
     file_size: int
     checksum: str
     platform: str
-    release_notes: Optional[str] = None
+    release_notes: str | None = None
     is_latest: bool
     uploaded_by: int
     created_at: datetime

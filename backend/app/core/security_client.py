@@ -8,10 +8,10 @@ PioneerClaw 安全网关 HTTP Client
     SECURITY_GATEWAY_TIMEOUT: 超时秒数 (默认 5.0)
 """
 
-import os
 import logging
-from typing import Optional, Dict, Any
+import os
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
@@ -26,10 +26,10 @@ class FilterResult:
     """安全过滤结果"""
 
     action: str  # allow / block / sanitize / approve
-    content: Optional[str] = None
-    reason: Optional[str] = None
+    content: str | None = None
+    reason: str | None = None
     risk_level: str = "low"
-    matched_rules: Optional[list] = None
+    matched_rules: list | None = None
 
 
 class SecurityClient:
@@ -51,10 +51,8 @@ class SecurityClient:
             return
         self._base_url = SECURITY_GATEWAY_URL.rstrip("/")
         self._timeout = SECURITY_GATEWAY_TIMEOUT
-        self._enabled = (
-            os.getenv("SECURITY_GATEWAY_ENABLED", "true").lower() == "true"
-        )
-        self._client: Optional[httpx.AsyncClient] = None
+        self._enabled = os.getenv("SECURITY_GATEWAY_ENABLED", "true").lower() == "true"
+        self._client: httpx.AsyncClient | None = None
         self._initialized = True
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -73,7 +71,7 @@ class SecurityClient:
         self._enabled = value
 
     async def filter_input(
-        self, text: str, context: Optional[Dict[str, Any]] = None
+        self, text: str, context: dict[str, Any] | None = None
     ) -> FilterResult:
         """pre_input_call: 输入过滤"""
         if not self._enabled:
@@ -95,7 +93,7 @@ class SecurityClient:
             )
 
     async def filter_output(
-        self, text: str, context: Optional[Dict[str, Any]] = None
+        self, text: str, context: dict[str, Any] | None = None
     ) -> FilterResult:
         """post_llm_call: 输出过滤"""
         if not self._enabled:
@@ -119,8 +117,8 @@ class SecurityClient:
     async def check_tool(
         self,
         tool_name: str,
-        arguments: Dict[str, Any],
-        context: Optional[Dict[str, Any]] = None,
+        arguments: dict[str, Any],
+        context: dict[str, Any] | None = None,
     ) -> FilterResult:
         """pre_tool_call: 工具调用安全检查"""
         if not self._enabled:
@@ -155,8 +153,8 @@ class SecurityClient:
 async def apply_input_filter(
     security_client: SecurityClient,
     text: str,
-    context: Optional[Dict[str, Any]] = None,
-) -> tuple[str, Optional[Dict[str, Any]]]:
+    context: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any] | None]:
     """统一封装 pre_input_call 安全过滤逻辑
 
     将重复的 block/approve/sanitize 处理封装为 helper，供各路由复用。

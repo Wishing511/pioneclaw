@@ -12,10 +12,11 @@ TaskFlow 持久化工作流管理器
 
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task_flow import TaskFlow, TaskFlowState
@@ -25,19 +26,28 @@ logger = logging.getLogger(__name__)
 
 class RevisionConflictError(Exception):
     """revision 冲突（乐观锁失败）"""
+
     pass
 
 
 class InvalidStateTransition(Exception):
     """非法状态转换"""
+
     pass
 
 
 # 合法状态转换表
-VALID_TRANSITIONS: Dict[str, set] = {
+VALID_TRANSITIONS: dict[str, set] = {
     TaskFlowState.CREATED.value: {TaskFlowState.RUNNING.value},
-    TaskFlowState.RUNNING.value: {TaskFlowState.WAITING.value, TaskFlowState.COMPLETED.value, TaskFlowState.FAILED.value},
-    TaskFlowState.WAITING.value: {TaskFlowState.RUNNING.value, TaskFlowState.FAILED.value},
+    TaskFlowState.RUNNING.value: {
+        TaskFlowState.WAITING.value,
+        TaskFlowState.COMPLETED.value,
+        TaskFlowState.FAILED.value,
+    },
+    TaskFlowState.WAITING.value: {
+        TaskFlowState.RUNNING.value,
+        TaskFlowState.FAILED.value,
+    },
     # 终态不可转换
     TaskFlowState.COMPLETED.value: set(),
     TaskFlowState.FAILED.value: set(),
@@ -64,9 +74,9 @@ class TaskFlowManager:
         self,
         name: str,
         goal: str,
-        owner_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None,
+        owner_id: str | None = None,
+        session_id: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> TaskFlow:
         """创建新的 TaskFlow
 
@@ -107,7 +117,7 @@ class TaskFlowManager:
         self,
         flow_id: str,
         step_name: str,
-        step_result: Optional[Dict[str, Any]] = None,
+        step_result: dict[str, Any] | None = None,
     ) -> TaskFlow:
         """执行一步并记录到 context
 
@@ -123,14 +133,16 @@ class TaskFlowManager:
             flow.context[f"step:{step_name}"] = step_result
         flow.updated_at = datetime.now()
         await self._safe_commit(flow)
-        logger.info(f"[TaskFlow] Step '{step_name}' on flow '{flow.name}' (rev={flow.revision})")
+        logger.info(
+            f"[TaskFlow] Step '{step_name}' on flow '{flow.name}' (rev={flow.revision})"
+        )
         return flow
 
     async def set_waiting(
         self,
         flow_id: str,
         wait_reason: str,
-        checkpoint: Optional[Dict[str, Any]] = None,
+        checkpoint: dict[str, Any] | None = None,
     ) -> TaskFlow:
         """暂停工作流等待外部输入/确认
 
@@ -144,14 +156,16 @@ class TaskFlowManager:
             flow.context["_checkpoint"] = checkpoint
         flow.updated_at = datetime.now()
         await self._safe_commit(flow)
-        logger.info(f"[TaskFlow] Flow '{flow.name}' waiting: {wait_reason} (rev={flow.revision})")
+        logger.info(
+            f"[TaskFlow] Flow '{flow.name}' waiting: {wait_reason} (rev={flow.revision})"
+        )
         return flow
 
     async def resume(
         self,
         flow_id: str,
-        resume_input: Optional[Dict[str, Any]] = None,
-        expected_revision: Optional[int] = None,
+        resume_input: dict[str, Any] | None = None,
+        expected_revision: int | None = None,
     ) -> TaskFlow:
         """恢复等待中的工作流
 
@@ -178,7 +192,9 @@ class TaskFlowManager:
         logger.info(f"[TaskFlow] Resumed flow '{flow.name}' (rev={flow.revision})")
         return flow
 
-    async def finish(self, flow_id: str, final_result: Optional[Dict[str, Any]] = None) -> TaskFlow:
+    async def finish(
+        self, flow_id: str, final_result: dict[str, Any] | None = None
+    ) -> TaskFlow:
         """完成工作流
 
         对应 OpenClaw finish
@@ -211,7 +227,9 @@ class TaskFlowManager:
         flow.revision += 1
         await self.db.commit()
         await self.db.refresh(flow)
-        logger.info(f"[TaskFlow] Failed flow '{flow.name}': {error} (rev={flow.revision})")
+        logger.info(
+            f"[TaskFlow] Failed flow '{flow.name}': {error} (rev={flow.revision})"
+        )
         return flow
 
     async def add_child_task(self, flow_id: str, child_task_id: str) -> TaskFlow:
@@ -223,18 +241,16 @@ class TaskFlowManager:
             await self._safe_commit(flow)
         return flow
 
-    async def get_flow(self, flow_id: str) -> Optional[TaskFlow]:
+    async def get_flow(self, flow_id: str) -> TaskFlow | None:
         """获取单个 TaskFlow"""
-        result = await self.db.execute(
-            select(TaskFlow).where(TaskFlow.id == flow_id)
-        )
+        result = await self.db.execute(select(TaskFlow).where(TaskFlow.id == flow_id))
         return result.scalars().first()
 
     async def list_flows(
         self,
-        owner_id: Optional[str] = None,
-        state: Optional[str] = None,
-        session_id: Optional[str] = None,
+        owner_id: str | None = None,
+        state: str | None = None,
+        session_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[Sequence[TaskFlow], int]:
@@ -255,13 +271,18 @@ class TaskFlowManager:
         total = count_result.scalar() or 0
 
         # 数据查询
-        query = select(TaskFlow).order_by(TaskFlow.created_at.desc()).offset(offset).limit(limit)
+        query = (
+            select(TaskFlow)
+            .order_by(TaskFlow.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         if conditions:
             query = query.where(and_(*conditions))
         result = await self.db.execute(query)
         return result.scalars().all(), total
 
-    async def recover_pending(self) -> List[TaskFlow]:
+    async def recover_pending(self) -> list[TaskFlow]:
         """恢复未完成的流程（启动时调用）
 
         将 RUNNING 状态的流程重置为 WAITING，
@@ -270,10 +291,12 @@ class TaskFlowManager:
         """
         result = await self.db.execute(
             select(TaskFlow).where(
-                TaskFlow.state.in_([
-                    TaskFlowState.RUNNING.value,
-                    TaskFlowState.CREATED.value,
-                ])
+                TaskFlow.state.in_(
+                    [
+                        TaskFlowState.RUNNING.value,
+                        TaskFlowState.CREATED.value,
+                    ]
+                )
             )
         )
         pending = result.scalars().all()

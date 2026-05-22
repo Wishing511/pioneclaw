@@ -9,8 +9,6 @@ Agent Prompts - 提示词模板库
 5. Cron 任务执行提示词
 """
 
-from typing import Optional
-
 
 # ==================== 对话总结提示词 ====================
 
@@ -226,6 +224,7 @@ TOOL_CALLING_SYSTEM_PROMPT = """你是一个智能助手，可以使用以下工
 
 # ==================== 提示词生成函数 ====================
 
+
 def get_conversation_to_memory_prompt(messages: str) -> str:
     """生成对话转记忆提示词"""
     return CONVERSATION_TO_MEMORY_PROMPT.format(messages=messages)
@@ -299,8 +298,8 @@ MEMORY_ENTRY_TEMPLATE = "{date}|{source}|{content}"
 def format_memory_entry(date: str, source: str, content: str) -> str:
     """格式化记忆条目"""
     # 清理内容：移除换行符，压缩空格
-    content = content.replace('\n', ' ').replace('\r', ' ')
-    content = ' '.join(content.split())
+    content = content.replace("\n", " ").replace("\r", " ")
+    content = " ".join(content.split())
     return MEMORY_ENTRY_TEMPLATE.format(
         date=date,
         source=source,

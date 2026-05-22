@@ -13,9 +13,18 @@ Tools 模块 - 工具系统（重构后）
 
 from app.modules.tools.base import (
     BaseTool,
-    ToolParameter,
     ToolDefinition,
+    ToolParameter,
 )
+from app.modules.tools.builtin import (
+    CalculatorTool,
+    CurrentTimeTool,
+    ReadFileTool,
+    WriteFileTool,
+    register_builtin_tools,
+)
+from app.modules.tools.hooks import HookManager
+from app.modules.tools.permissions import match_rule, resolve_permission
 from app.modules.tools.registry import (
     ToolRegistry,
     ToolSet,
@@ -23,47 +32,37 @@ from app.modules.tools.registry import (
     register_tool,
     register_tool_class,
 )
-from app.modules.tools.types import (
-    ToolContext,
-    ToolDef,
-    ToolDecorator,
-    ToolResult,
-    ToolUse,
-    PermissionResult,
-    PermissionRequest,
-    PermissionRule,
-    PermissionBehavior,
-    PermissionMode,
-    HookType,
-    HookContext,
-    HookResult,
-    ToolHook,
-)
-from app.modules.tools.permissions import resolve_permission, match_rule
 from app.modules.tools.scheduler import (
     Batch,
+    get_max_concurrency,
     partition_tool_calls,
     run_concurrent_batch,
     run_serial_batch,
-    get_max_concurrency,
 )
-from app.modules.tools.hooks import HookManager
-
-from app.modules.tools.builtin import (
-    CurrentTimeTool,
-    CalculatorTool,
-    ReadFileTool,
-    WriteFileTool,
-    register_builtin_tools,
-)
-from app.modules.tools.web import WebSearchTool
 from app.modules.tools.task_create import TaskCreateTool
 from app.modules.tools.task_get import TaskGetTool
 from app.modules.tools.task_list import TaskListTool
-from app.modules.tools.task_update import TaskUpdateTool
-from app.modules.tools.task_stop import TaskStopTool
 from app.modules.tools.task_output import TaskOutputTool
+from app.modules.tools.task_stop import TaskStopTool
+from app.modules.tools.task_update import TaskUpdateTool
 from app.modules.tools.todo_write import TodoWriteTool
+from app.modules.tools.types import (
+    HookContext,
+    HookResult,
+    HookType,
+    PermissionBehavior,
+    PermissionMode,
+    PermissionRequest,
+    PermissionResult,
+    PermissionRule,
+    ToolContext,
+    ToolDecorator,
+    ToolDef,
+    ToolHook,
+    ToolResult,
+    ToolUse,
+)
+from app.modules.tools.web import WebSearchTool
 
 __all__ = [
     # Base

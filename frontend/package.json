@@ -30,13 +30,13 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@vitejs/plugin-vue": "^5.0.4",
+    "@vitejs/plugin-vue": "^6.0.7",
     "@vitest/coverage-v8": "^4.1.7",
     "@vue/test-utils": "^2.4.10",
     "happy-dom": "^20.9.0",
     "sass": "^1.72.0",
     "typescript": "^5.4.2",
-    "vite": "^5.1.6",
+    "vite": "^8.0.14",
     "vitest": "^4.1.7",
     "vue-tsc": "^2.0.6"
   }

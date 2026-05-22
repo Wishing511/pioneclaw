@@ -4,20 +4,19 @@ Memory API - 记忆管理接口
 提供记忆的读写、搜索、统计等功能
 """
 
-import logging
 import functools
-from typing import Optional, List, Callable
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
+import logging
+from collections.abc import Callable
 from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.api.auth import get_current_active_user
 from app.models.models import User
 from app.modules.agent.memory import (
-    MemoryStore,
-    MemoryEntry,
-    MemoryStats,
     MemorySource,
+    MemoryStore,
     get_memory_store,
 )
 
@@ -27,6 +26,7 @@ router = APIRouter(prefix="/memory", tags=["记忆管理"])
 
 
 # ==================== 异常保护装饰器 ====================
+
 
 def _protected(operation: str):
     """装饰器：捕获 MemoryStore 操作中的异常，统一返回 500"""
@@ -50,6 +50,7 @@ def _protected(operation: str):
                     status_code=500,
                     detail=f"记忆操作失败 ({operation}): {e}",
                 )
+
         return wrapper
 
     return decorator
@@ -57,43 +58,51 @@ def _protected(operation: str):
 
 # ==================== 请求模型 ====================
 
+
 class AppendMemoryRequest(BaseModel):
     """追加记忆请求"""
+
     source: str
     content: str
-    date: Optional[str] = None
+    date: str | None = None
 
 
 class BatchAppendRequest(BaseModel):
     """批量追加请求"""
+
     source: str
-    entries: List[str]
+    entries: list[str]
 
 
 class SearchMemoryRequest(BaseModel):
     """搜索记忆请求"""
-    keywords: List[str]
+
+    keywords: list[str]
     max_results: int = 15
     match_mode: str = "or"  # "or" 或 "and"
 
 
 class DeleteMemoryRequest(BaseModel):
     """删除记忆请求"""
-    line_numbers: List[int]
+
+    line_numbers: list[int]
 
 
 class ImportMemoryRequest(BaseModel):
     """导入记忆请求"""
+
     content: str
     source: str = "import"
 
 
 class UpdateMemoryContentRequest(BaseModel):
     """全量更新记忆内容请求"""
+
     content: str
 
 
 # ==================== 依赖 ====================
+
 
 def get_store() -> MemoryStore:
     """获取记忆存储实例"""
@@ -103,6 +112,7 @@ def get_store() -> MemoryStore:
 
 
 # ==================== API 端点 ====================
+
 
 @router.get("")
 @_protected("get_info")
@@ -162,10 +172,10 @@ async def get_line(
 ):
     """获取单条记忆"""
     entry = store.get_entry(line_number)
-    
+
     if not entry:
         raise HTTPException(status_code=404, detail="Memory entry not found")
-    
+
     return entry.to_dict()
 
 
@@ -355,8 +365,5 @@ async def get_sources(
 ):
     """获取可用的记忆来源列表"""
     return {
-        "sources": [
-            {"value": s.value, "label": s.value}
-            for s in MemorySource
-        ],
+        "sources": [{"value": s.value, "label": s.value} for s in MemorySource],
     }

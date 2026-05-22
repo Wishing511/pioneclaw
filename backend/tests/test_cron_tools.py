@@ -2,14 +2,20 @@
 Cron 工具测试：CronCreateTool, CronDeleteTool, CronListTool
 """
 
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.modules.tools.builtin import CronCreateTool, CronDeleteTool, CronListTool, CronTool
+import pytest
 
+from app.modules.tools.builtin import (
+    CronCreateTool,
+    CronDeleteTool,
+    CronListTool,
+    CronTool,
+)
 
 # ── 辅助函数 ──────────────────────────────────────────────────
+
 
 def _make_async_db_session_mock(return_scalar=None):
     """构造完整的异步 DB session mock 链"""
@@ -34,6 +40,7 @@ def _make_async_db_session_mock(return_scalar=None):
 # ============================================================
 # CronCreateTool 测试
 # ============================================================
+
 
 class TestCronCreateTool:
     """测试 CronCreateTool"""
@@ -62,8 +69,13 @@ class TestCronCreateTool:
         """创建任务成功"""
         db_mock = _make_async_db_session_mock()
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler), \
-             patch("app.core.database.async_session_maker", db_mock):
+        with (
+            patch(
+                "app.core.cron_scheduler.get_cron_scheduler",
+                return_value=mock_scheduler,
+            ),
+            patch("app.core.database.async_session_maker", db_mock),
+        ):
             result = await tool.execute(
                 cron_expr="0 9 * * *",
                 prompt="每天早上 9 点发送日报",
@@ -78,7 +90,9 @@ class TestCronCreateTool:
         """无效 cron 表达式"""
         mock_scheduler.validate_cron_expr.return_value = False
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(
                 cron_expr="invalid",
                 prompt="测试",
@@ -91,9 +105,14 @@ class TestCronCreateTool:
         """创建任务时指定名称"""
         db_mock = _make_async_db_session_mock()
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler), \
-             patch("app.core.database.async_session_maker", db_mock):
-            result = await tool.execute(
+        with (
+            patch(
+                "app.core.cron_scheduler.get_cron_scheduler",
+                return_value=mock_scheduler,
+            ),
+            patch("app.core.database.async_session_maker", db_mock),
+        ):
+            await tool.execute(
                 cron_expr="*/5 * * * *",
                 prompt="每 5 分钟检查",
                 name="my_check",
@@ -108,7 +127,9 @@ class TestCronCreateTool:
         """调度器添加失败"""
         mock_scheduler.add_job.return_value = False
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(
                 cron_expr="0 9 * * *",
                 prompt="测试",
@@ -120,6 +141,7 @@ class TestCronCreateTool:
 # ============================================================
 # CronDeleteTool 测试
 # ============================================================
+
 
 class TestCronDeleteTool:
     """测试 CronDeleteTool"""
@@ -139,8 +161,13 @@ class TestCronDeleteTool:
         """删除存在的任务"""
         db_mock = _make_async_db_session_mock()
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler), \
-             patch("app.core.database.async_session_maker", db_mock):
+        with (
+            patch(
+                "app.core.cron_scheduler.get_cron_scheduler",
+                return_value=mock_scheduler,
+            ),
+            patch("app.core.database.async_session_maker", db_mock),
+        ):
             result = await tool.execute(job_id="cron_test123")
 
         assert '"success": true' in result.lower()
@@ -152,8 +179,13 @@ class TestCronDeleteTool:
         mock_scheduler.remove_job.return_value = False
         db_mock = _make_async_db_session_mock(return_scalar=None)
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler), \
-             patch("app.core.database.async_session_maker", db_mock):
+        with (
+            patch(
+                "app.core.cron_scheduler.get_cron_scheduler",
+                return_value=mock_scheduler,
+            ),
+            patch("app.core.database.async_session_maker", db_mock),
+        ):
             result = await tool.execute(job_id="nonexistent")
 
         assert '"success": false' in result.lower()
@@ -162,6 +194,7 @@ class TestCronDeleteTool:
 # ============================================================
 # CronListTool 测试
 # ============================================================
+
 
 class TestCronListTool:
     """测试 CronListTool"""
@@ -196,7 +229,9 @@ class TestCronListTool:
     @pytest.mark.asyncio
     async def test_list_all(self, tool, mock_scheduler):
         """列出所有任务"""
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute()
 
         assert '"total": 2' in result
@@ -206,7 +241,9 @@ class TestCronListTool:
     @pytest.mark.asyncio
     async def test_list_enabled_only(self, tool, mock_scheduler):
         """仅列出启用的任务"""
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(enabled_only=True)
 
         assert '"total": 1' in result
@@ -218,7 +255,9 @@ class TestCronListTool:
         """空任务列表"""
         mock_scheduler.list_jobs.return_value = []
 
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute()
 
         assert '"total": 0' in result
@@ -227,6 +266,7 @@ class TestCronListTool:
 # ============================================================
 # CronTool 向后兼容测试
 # ============================================================
+
 
 class TestCronToolBackwardCompat:
     """确保原 CronTool 仍正常工作"""
@@ -247,25 +287,33 @@ class TestCronToolBackwardCompat:
 
     @pytest.mark.asyncio
     async def test_list_action(self, tool, mock_scheduler):
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(action="list")
         assert "jobs" in result
 
     @pytest.mark.asyncio
     async def test_validate_action(self, tool, mock_scheduler):
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(action="validate", cron_expr="0 9 * * *")
         assert '"valid": true' in result.lower()
 
     @pytest.mark.asyncio
     async def test_status_action(self, tool, mock_scheduler):
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(action="status")
         assert "total_jobs" in result
 
     @pytest.mark.asyncio
     async def test_get_nonexistent(self, tool, mock_scheduler):
-        with patch("app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler):
+        with patch(
+            "app.core.cron_scheduler.get_cron_scheduler", return_value=mock_scheduler
+        ):
             result = await tool.execute(action="get", job_id="nonexistent")
         assert '"success": false' in result.lower()
 

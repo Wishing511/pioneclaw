@@ -17,15 +17,17 @@ import asyncio
 import logging
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class TaskComplexity(Enum):
     """任务复杂度"""
+
     SIMPLE = "simple"  # 单 Agent 可完成
     MODERATE = "moderate"  # 需要 2-3 个 Agent
     COMPLEX = "complex"  # 需要多 Agent 协作
@@ -33,6 +35,7 @@ class TaskComplexity(Enum):
 
 class AgentRole(Enum):
     """预定义 Agent 角色"""
+
     COORDINATOR = "coordinator"  # 协调者
     RESEARCHER = "researcher"  # 研究员
     ANALYST = "analyst"  # 分析师
@@ -44,14 +47,15 @@ class AgentRole(Enum):
 @dataclass
 class AgentTemplate:
     """Agent 模板"""
+
     role: AgentRole
     name: str
     description: str
     system_prompt: str
-    tools_filter: Optional[List[str]] = None  # 该角色可用的工具
+    tools_filter: list[str] | None = None  # 该角色可用的工具
     priority: int = 100
 
-    def create_agent_config(self) -> Dict[str, Any]:
+    def create_agent_config(self) -> dict[str, Any]:
         """创建 Agent 配置"""
         return {
             "name": self.name,
@@ -64,7 +68,7 @@ class AgentTemplate:
 
 
 # 预定义 Agent 模板
-DEFAULT_TEMPLATES: Dict[AgentRole, AgentTemplate] = {
+DEFAULT_TEMPLATES: dict[AgentRole, AgentTemplate] = {
     AgentRole.COORDINATOR: AgentTemplate(
         role=AgentRole.COORDINATOR,
         name="Coordinator",
@@ -117,23 +121,25 @@ DEFAULT_TEMPLATES: Dict[AgentRole, AgentTemplate] = {
 @dataclass
 class SubTask:
     """子任务"""
+
     id: str
     description: str
     assigned_role: AgentRole
-    assigned_agent: Optional[Any] = None
+    assigned_agent: Any | None = None
     status: str = "pending"  # pending, running, completed, failed
-    result: Optional[str] = None
-    dependencies: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    result: str | None = None
+    dependencies: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class TaskDecomposition:
     """任务分解结果"""
+
     original_task: str
     complexity: TaskComplexity
-    subtasks: List[SubTask]
-    execution_order: List[str]  # 子任务 ID 列表
+    subtasks: list[SubTask]
+    execution_order: list[str]  # 子任务 ID 列表
     estimated_agents: int
     reasoning: str = ""
 
@@ -141,13 +147,14 @@ class TaskDecomposition:
 @dataclass
 class AutoAgentResult:
     """自动编排结果"""
+
     task_id: str
     original_task: str
-    decomposition: Optional[TaskDecomposition] = None
-    agent_results: Dict[str, Any] = field(default_factory=dict)
-    final_result: Optional[str] = None
+    decomposition: TaskDecomposition | None = None
+    agent_results: dict[str, Any] = field(default_factory=dict)
+    final_result: str | None = None
     total_time: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class TaskAnalyzer:
@@ -156,39 +163,84 @@ class TaskAnalyzer:
     分析任务复杂度，识别需要的 Agent 角色
     """
 
-    def __init__(self, templates: Optional[Dict[AgentRole, AgentTemplate]] = None):
+    def __init__(self, templates: dict[AgentRole, AgentTemplate] | None = None):
         self.templates = templates or DEFAULT_TEMPLATES
 
         # 关键词 -> 角色映射
-        self.role_keywords: Dict[AgentRole, List[str]] = {
+        self.role_keywords: dict[AgentRole, list[str]] = {
             AgentRole.RESEARCHER: [
-                "搜索", "查找", "研究", "调研", "收集", "信息",
-                "search", "research", "find", "gather", "investigate",
+                "搜索",
+                "查找",
+                "研究",
+                "调研",
+                "收集",
+                "信息",
+                "search",
+                "research",
+                "find",
+                "gather",
+                "investigate",
             ],
             AgentRole.ANALYST: [
-                "分析", "统计", "对比", "洞察", "趋势", "数据",
-                "analyze", "analysis", "statistics", "trend", "insight",
+                "分析",
+                "统计",
+                "对比",
+                "洞察",
+                "趋势",
+                "数据",
+                "analyze",
+                "analysis",
+                "statistics",
+                "trend",
+                "insight",
             ],
             AgentRole.WRITER: [
-                "写", "撰写", "文档", "报告", "文章", "总结",
-                "write", "document", "report", "article", "summarize",
+                "写",
+                "撰写",
+                "文档",
+                "报告",
+                "文章",
+                "总结",
+                "write",
+                "document",
+                "report",
+                "article",
+                "summarize",
             ],
             AgentRole.CODER: [
-                "代码", "编程", "实现", "开发", "调试", "程序",
-                "code", "program", "develop", "implement", "debug",
+                "代码",
+                "编程",
+                "实现",
+                "开发",
+                "调试",
+                "程序",
+                "code",
+                "program",
+                "develop",
+                "implement",
+                "debug",
             ],
             AgentRole.REVIEWER: [
-                "审核", "检查", "验证", "评估", "审查",
-                "review", "check", "verify", "evaluate", "audit",
+                "审核",
+                "检查",
+                "验证",
+                "评估",
+                "审查",
+                "review",
+                "check",
+                "verify",
+                "evaluate",
+                "audit",
             ],
         }
 
     def analyze_complexity(self, task: str) -> TaskComplexity:
         """分析任务复杂度"""
         # 简单启发式规则
-        sentence_count = len(re.split(r'[。.!！?？]', task))
+        sentence_count = len(re.split(r"[。.!！?？]", task))
         keyword_count = sum(
-            1 for keywords in self.role_keywords.values()
+            1
+            for keywords in self.role_keywords.values()
             for kw in keywords
             if kw.lower() in task.lower()
         )
@@ -204,7 +256,7 @@ class TaskAnalyzer:
         else:
             return TaskComplexity.COMPLEX
 
-    def identify_roles(self, task: str) -> List[AgentRole]:
+    def identify_roles(self, task: str) -> list[AgentRole]:
         """识别任务需要的角色"""
         matched_roles = set()
         task_lower = task.lower()
@@ -233,33 +285,39 @@ class TaskAnalyzer:
             # 简单任务：单个子任务
             subtask_id = str(uuid.uuid4())[:8]
             role = roles[0] if roles else AgentRole.COORDINATOR
-            subtasks.append(SubTask(
-                id=subtask_id,
-                description=task,
-                assigned_role=role,
-            ))
+            subtasks.append(
+                SubTask(
+                    id=subtask_id,
+                    description=task,
+                    assigned_role=role,
+                )
+            )
             execution_order.append(subtask_id)
 
         elif complexity == TaskComplexity.MODERATE:
             # 中等复杂度：按角色分解
-            for i, role in enumerate(roles):
+            for _i, role in enumerate(roles):
                 subtask_id = str(uuid.uuid4())[:8]
-                subtasks.append(SubTask(
-                    id=subtask_id,
-                    description=f"作为{self.templates[role].name}完成任务",
-                    assigned_role=role,
-                ))
+                subtasks.append(
+                    SubTask(
+                        id=subtask_id,
+                        description=f"作为{self.templates[role].name}完成任务",
+                        assigned_role=role,
+                    )
+                )
                 execution_order.append(subtask_id)
 
         else:
             # 复杂任务：需要协调者 + 专业角色
             # 先添加协调任务
             coord_id = str(uuid.uuid4())[:8]
-            subtasks.append(SubTask(
-                id=coord_id,
-                description="分解任务并协调各 Agent",
-                assigned_role=AgentRole.COORDINATOR,
-            ))
+            subtasks.append(
+                SubTask(
+                    id=coord_id,
+                    description="分解任务并协调各 Agent",
+                    assigned_role=AgentRole.COORDINATOR,
+                )
+            )
             execution_order.append(coord_id)
 
             # 添加专业任务
@@ -267,22 +325,26 @@ class TaskAnalyzer:
                 if role == AgentRole.COORDINATOR:
                     continue
                 subtask_id = str(uuid.uuid4())[:8]
-                subtasks.append(SubTask(
-                    id=subtask_id,
-                    description=f"执行{self.templates[role].description}",
-                    assigned_role=role,
-                    dependencies=[coord_id],  # 依赖协调任务
-                ))
+                subtasks.append(
+                    SubTask(
+                        id=subtask_id,
+                        description=f"执行{self.templates[role].description}",
+                        assigned_role=role,
+                        dependencies=[coord_id],  # 依赖协调任务
+                    )
+                )
                 execution_order.append(subtask_id)
 
             # 添加审核任务
             review_id = str(uuid.uuid4())[:8]
-            subtasks.append(SubTask(
-                id=review_id,
-                description="审核并整合最终结果",
-                assigned_role=AgentRole.REVIEWER,
-                dependencies=[s.id for s in subtasks if s.id != coord_id],
-            ))
+            subtasks.append(
+                SubTask(
+                    id=review_id,
+                    description="审核并整合最终结果",
+                    assigned_role=AgentRole.REVIEWER,
+                    dependencies=[s.id for s in subtasks if s.id != coord_id],
+                )
+            )
             execution_order.append(review_id)
 
         return TaskDecomposition(
@@ -304,9 +366,9 @@ class AutoAgents:
     def __init__(
         self,
         provider: Any,
-        tools_registry: Optional[Any] = None,
-        templates: Optional[Dict[AgentRole, AgentTemplate]] = None,
-        agent_factory: Optional[Callable] = None,
+        tools_registry: Any | None = None,
+        templates: dict[AgentRole, AgentTemplate] | None = None,
+        agent_factory: Callable | None = None,
     ):
         """
         Args:
@@ -321,7 +383,7 @@ class AutoAgents:
         self.agent_factory = agent_factory
 
         self.analyzer = TaskAnalyzer(self.templates)
-        self._created_agents: Dict[str, Any] = {}
+        self._created_agents: dict[str, Any] = {}
 
     def create_agent(self, role: AgentRole) -> Any:
         """根据角色创建 Agent
@@ -354,7 +416,7 @@ class AutoAgents:
     async def run(
         self,
         task: str,
-        context: Optional[List[Dict]] = None,
+        context: list[dict] | None = None,
         max_iterations: int = 25,
     ) -> AutoAgentResult:
         """运行自动编排
@@ -368,6 +430,7 @@ class AutoAgents:
             AutoAgentResult: 编排结果
         """
         import time
+
         start_time = time.time()
         task_id = str(uuid.uuid4())[:8]
 
@@ -387,7 +450,7 @@ class AutoAgents:
             )
 
             # 2. 按顺序执行子任务
-            completed_results: Dict[str, str] = {}
+            completed_results: dict[str, str] = {}
 
             for subtask_id in decomposition.execution_order:
                 subtask = next(s for s in decomposition.subtasks if s.id == subtask_id)
@@ -395,11 +458,12 @@ class AutoAgents:
                 # 检查依赖
                 if subtask.dependencies:
                     pending = [
-                        d for d in subtask.dependencies
-                        if d not in completed_results
+                        d for d in subtask.dependencies if d not in completed_results
                     ]
                     if pending:
-                        logger.warning(f"Subtask {subtask_id} has unmet dependencies: {pending}")
+                        logger.warning(
+                            f"Subtask {subtask_id} has unmet dependencies: {pending}"
+                        )
                         subtask.status = "failed"
                         continue
 
@@ -454,8 +518,8 @@ class AutoAgents:
         self,
         agent: Any,
         subtask: SubTask,
-        context: Optional[List[Dict]],
-        previous_results: Dict[str, str],
+        context: list[dict] | None,
+        previous_results: dict[str, str],
         original_task: str = "",
     ) -> str:
         """执行单个子任务"""
@@ -473,13 +537,13 @@ class AutoAgents:
             prompt += f"\n\n前置任务结果:\n{results_text}"
 
         # 执行 Agent
-        if hasattr(agent, 'process_direct'):
+        if hasattr(agent, "process_direct"):
             result = await agent.process_direct(
                 message=prompt,
                 context=context,
             )
             return str(result)
-        elif hasattr(agent, 'run'):
+        elif hasattr(agent, "run"):
             result = agent.run(prompt)
             if asyncio.iscoroutine(result):
                 result = await result
@@ -494,7 +558,7 @@ class AutoAgents:
         self,
         task: str,
         decomposition: TaskDecomposition,
-        results: Dict[str, str],
+        results: dict[str, str],
     ) -> str:
         """聚合子任务结果"""
         if len(results) == 1:
@@ -511,7 +575,7 @@ class AutoAgents:
 
         return "\n".join(lines)
 
-    def get_created_agents(self) -> Dict[str, Any]:
+    def get_created_agents(self) -> dict[str, Any]:
         """获取已创建的 Agent"""
         return dict(self._created_agents)
 
@@ -522,11 +586,12 @@ class AutoAgents:
 
 # ==================== 便捷函数 ====================
 
+
 async def auto_run(
     task: str,
     provider: Any,
-    tools_registry: Optional[Any] = None,
-    context: Optional[List[Dict]] = None,
+    tools_registry: Any | None = None,
+    context: list[dict] | None = None,
 ) -> AutoAgentResult:
     """自动运行任务的便捷函数
 

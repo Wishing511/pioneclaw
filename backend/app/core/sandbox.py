@@ -16,13 +16,10 @@
 借鉴 OpenClaw/Claude Code 的 sandbox 设计。
 """
 
-import os
 from pathlib import Path
-from typing import List, Optional
-
 
 # 敏感文件模式：即使在工作区内，也需要用户确认才能访问
-SENSITIVE_PATTERNS: List[str] = [
+SENSITIVE_PATTERNS: list[str] = [
     ".env",
     ".env.*",
     "*.pem",
@@ -48,10 +45,10 @@ SENSITIVE_PATTERNS: List[str] = [
 
 class PathOutsideWorkspaceError(PermissionError):
     """路径超出工作区范围（硬拦截，仅用于写操作）"""
+
     def __init__(self, path: str, workspace: Path):
         super().__init__(
-            f"路径超出工作区范围: {path}。"
-            f"写操作仅限工作区内 ({workspace})。"
+            f"路径超出工作区范围: {path}。写操作仅限工作区内 ({workspace})。"
         )
         self.path = path
         self.workspace = workspace
@@ -65,6 +62,7 @@ class SensitiveFileAccessRequired(Exception):
     - "outside_workspace": 读操作访问工作区外的文件
     - "sensitive": 访问敏感文件（.env 等）
     """
+
     def __init__(self, path: Path, reason: str, pattern: str = ""):
         self.path = path
         self.reason = reason
@@ -80,7 +78,7 @@ class SensitiveFileAccessRequired(Exception):
         super().__init__(msg)
 
 
-def _is_sensitive(file_path: Path) -> Optional[str]:
+def _is_sensitive(file_path: Path) -> str | None:
     """检查文件是否匹配敏感模式，返回匹配的模式或 None"""
     from fnmatch import fnmatch
 
@@ -139,7 +137,9 @@ def validate_path_for_read(
     if not allow_sensitive:
         sensitive_pattern = _is_sensitive(full_path)
         if sensitive_pattern:
-            raise SensitiveFileAccessRequired(full_path, reason="sensitive", pattern=sensitive_pattern)
+            raise SensitiveFileAccessRequired(
+                full_path, reason="sensitive", pattern=sensitive_pattern
+            )
 
     return full_path
 
@@ -170,7 +170,9 @@ def validate_path_for_write(
     if not allow_sensitive:
         sensitive_pattern = _is_sensitive(full_path)
         if sensitive_pattern:
-            raise SensitiveFileAccessRequired(full_path, reason="sensitive", pattern=sensitive_pattern)
+            raise SensitiveFileAccessRequired(
+                full_path, reason="sensitive", pattern=sensitive_pattern
+            )
 
     # 自动创建父目录
     full_path.parent.mkdir(parents=True, exist_ok=True)

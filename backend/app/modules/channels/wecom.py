@@ -9,11 +9,8 @@
 文档：https://developer.work.weixin.qq.com/document/
 """
 
-import asyncio
-import json
 import logging
 import time
-from typing import Optional
 from xml.etree import ElementTree
 
 import httpx
@@ -25,7 +22,6 @@ from .base import (
     ChannelStatus,
     ChannelType,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +36,11 @@ class WeComChannel(BaseChannel):
         self.corp_id = config.extra.get("corp_id", config.app_id)
         self.corp_secret = config.app_secret
         self.agent_id = config.extra.get("agent_id", "")
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_expire: float = 0
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(self) -> str | None:
         """获取 access_token"""
         if self._access_token and time.time() < self._token_expire - 60:
             return self._access_token
@@ -64,7 +60,9 @@ class WeComChannel(BaseChannel):
                 self._token_expire = time.time() + data.get("expires_in", 7200)
                 return self._access_token
             else:
-                logger.error(f"[{self.channel_id}] Get token failed: {data.get('errmsg')}")
+                logger.error(
+                    f"[{self.channel_id}] Get token failed: {data.get('errmsg')}"
+                )
                 return None
 
         except Exception as e:
@@ -114,7 +112,7 @@ class WeComChannel(BaseChannel):
         chat_id: str,
         content: str,
         **kwargs,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """发送应用消息"""
         if not self._client or self.status != ChannelStatus.CONNECTED:
             return False, "Channel not connected"
@@ -165,7 +163,7 @@ class WeComChannel(BaseChannel):
         """企业微信不支持输入状态"""
         pass
 
-    async def handle_callback(self, xml_data: str) -> Optional[ChannelMessage]:
+    async def handle_callback(self, xml_data: str) -> ChannelMessage | None:
         """处理回调消息"""
         try:
             root = ElementTree.fromstring(xml_data)
@@ -202,5 +200,6 @@ class WeComChannel(BaseChannel):
 
 
 # 注册适配器
-from .manager import register_channel
+from .manager import register_channel  # noqa: E402
+
 register_channel(ChannelType.WECOM, WeComChannel)

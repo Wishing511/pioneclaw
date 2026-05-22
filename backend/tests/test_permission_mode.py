@@ -3,19 +3,19 @@ Permission Mode 测试
 
 测试权限模式层级、角色映射、权限检查器、工具门控。
 """
-import pytest
-from app.core.permission_mode import (
-    PermissionMode,
-    PermissionCheckResult,
-    PermissionChecker,
-    resolve_permission_mode,
-    get_max_mode_for_role,
-    get_default_mode_for_role,
-)
-from app.core.sandbox_policy import ToolPolicyConfig, ToolPolicy
 
+from app.core.permission_mode import (
+    PermissionChecker,
+    PermissionCheckResult,
+    PermissionMode,
+    get_default_mode_for_role,
+    get_max_mode_for_role,
+    resolve_permission_mode,
+)
+from app.core.sandbox_policy import ToolPolicy, ToolPolicyConfig
 
 # ==================== PermissionMode ====================
+
 
 class TestPermissionMode:
     """权限模式枚举"""
@@ -38,8 +38,14 @@ class TestPermissionMode:
 
     def test_at_least(self):
         assert PermissionMode.WORKSPACE_WRITE.at_least(PermissionMode.READ_ONLY) is True
-        assert PermissionMode.WORKSPACE_WRITE.at_least(PermissionMode.WORKSPACE_WRITE) is True
-        assert PermissionMode.WORKSPACE_WRITE.at_least(PermissionMode.DANGER_FULL_ACCESS) is False
+        assert (
+            PermissionMode.WORKSPACE_WRITE.at_least(PermissionMode.WORKSPACE_WRITE)
+            is True
+        )
+        assert (
+            PermissionMode.WORKSPACE_WRITE.at_least(PermissionMode.DANGER_FULL_ACCESS)
+            is False
+        )
 
     def test_allow_is_highest(self):
         assert PermissionMode.ALLOW.at_least(PermissionMode.READ_ONLY)
@@ -56,6 +62,7 @@ class TestPermissionMode:
 
 
 # ==================== Role → Mode Mapping ====================
+
 
 class TestRoleModeMapping:
     """角色 → 权限模式映射"""
@@ -81,14 +88,17 @@ class TestRoleModeMapping:
     def test_enum_input(self):
         """接受 UserRole 枚举"""
         import enum
+
         class MockRole(str, enum.Enum):
             SUPER_ADMIN = "super_admin"
             USER = "user"
+
         assert get_max_mode_for_role(MockRole.SUPER_ADMIN) == PermissionMode.ALLOW
         assert get_max_mode_for_role(MockRole.USER) == PermissionMode.WORKSPACE_WRITE
 
 
 # ==================== resolve_permission_mode ====================
+
 
 class TestResolvePermissionMode:
     """模式解析"""
@@ -166,6 +176,7 @@ class TestResolvePermissionMode:
 
 # ==================== PermissionCheckResult ====================
 
+
 class TestPermissionCheckResult:
     """检查结果构造"""
 
@@ -188,6 +199,7 @@ class TestPermissionCheckResult:
 
 # ==================== PermissionChecker ====================
 
+
 class TestPermissionCheckerCheckTool:
     """工具检查"""
 
@@ -206,10 +218,21 @@ class TestPermissionCheckerCheckTool:
 
     def test_read_only_denies_write_tools(self):
         checker = PermissionChecker(mode=PermissionMode.READ_ONLY)
-        for tool in ("exec", "shell", "filesystem", "write_file", "delete_file",
-                     "git", "task", "skill", "sub_agent"):
+        for tool in (
+            "exec",
+            "shell",
+            "filesystem",
+            "write_file",
+            "delete_file",
+            "git",
+            "task",
+            "skill",
+            "sub_agent",
+        ):
             result = checker.check_tool(tool)
-            assert not result.allowed, f"ReadOnly should deny {tool}, got allowed={result.allowed}"
+            assert not result.allowed, (
+                f"ReadOnly should deny {tool}, got allowed={result.allowed}"
+            )
 
     def test_workspace_write_allows_most(self):
         checker = PermissionChecker(mode=PermissionMode.WORKSPACE_WRITE)
@@ -272,6 +295,7 @@ class TestPermissionCheckerCheckTool:
 
 # ==================== Bash Check ====================
 
+
 class TestPermissionCheckerCheckBash:
     """Bash 命令检查"""
 
@@ -299,12 +323,14 @@ class TestPermissionCheckerCheckBash:
 
     def test_danger_level_blocked(self):
         from app.core.bash_safety import DangerLevel
+
         checker = PermissionChecker(mode=PermissionMode.DANGER_FULL_ACCESS)
         result = checker.check_bash("rm -rf /", danger_level=DangerLevel.BLOCKED)
         assert not result.allowed
 
     def test_danger_level_dangerous_with_full_access(self):
         from app.core.bash_safety import DangerLevel
+
         checker = PermissionChecker(
             mode=PermissionMode.DANGER_FULL_ACCESS,
             settings={"command_approval": "true"},
@@ -314,6 +340,7 @@ class TestPermissionCheckerCheckBash:
 
     def test_danger_level_caution(self):
         from app.core.bash_safety import DangerLevel
+
         checker = PermissionChecker(
             mode=PermissionMode.WORKSPACE_WRITE,
             settings={"command_approval": "true"},
@@ -323,6 +350,7 @@ class TestPermissionCheckerCheckBash:
 
 
 # ==================== File Write Check ====================
+
 
 class TestPermissionCheckerCheckFileWrite:
     """文件写检查"""
@@ -376,6 +404,7 @@ class TestPermissionCheckerCheckFileWrite:
 
 # ==================== Network Check ====================
 
+
 class TestPermissionCheckerCheckNetwork:
     """网络请求检查"""
 
@@ -404,6 +433,7 @@ class TestPermissionCheckerCheckNetwork:
 
 # ==================== Role Ceiling ====================
 
+
 class TestRoleCeiling:
     """角色上限裁剪"""
 
@@ -421,7 +451,9 @@ class TestRoleCeiling:
                 user_role="user",
                 agent_config={"permission_mode": agent_cfg},
             )
-            assert mode == expected, f"USER + {agent_cfg} should be {expected}, got {mode}"
+            assert mode == expected, (
+                f"USER + {agent_cfg} should be {expected}, got {mode}"
+            )
 
     def test_org_admin_clamped(self):
         """ORG_ADMIN 不能设为 Allow"""
@@ -448,6 +480,7 @@ class TestRoleCeiling:
 
 
 # ==================== Integration Tests ====================
+
 
 class TestIntegration:
     """集成测试"""
@@ -554,6 +587,7 @@ class TestIntegration:
 
 # ==================== Edge Cases ====================
 
+
 class TestEdgeCases:
     """边界情况"""
 
@@ -586,8 +620,11 @@ class TestEdgeCases:
         )
         # Windows 路径
         import os
+
         if os.name == "nt":
-            assert checker.check_file_write("C:\\Users\\test\\project\\file.txt").allowed
+            assert checker.check_file_write(
+                "C:\\Users\\test\\project\\file.txt"
+            ).allowed
         # POSIX 路径
         result = checker.check_file_write("C:/Users/test/project/file.txt")
         # 至少不崩溃

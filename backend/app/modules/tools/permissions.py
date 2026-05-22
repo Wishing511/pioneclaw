@@ -88,9 +88,6 @@ async def resolve_permission(
     return ask_result
 
 
-
-
-
 def match_rule(
     tool_id: str,
     input: dict[str, Any],

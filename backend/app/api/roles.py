@@ -1,33 +1,36 @@
-from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 from sqlalchemy import select
-from typing import List
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.api.auth import get_current_active_user
-from app.models.models import User, Role, UserRole
+from app.core.database import get_db
+from app.models.models import Role, User, UserRole
 from app.schemas.schemas import (
-    RoleCreate, RoleUpdate, RoleResponse, MessageResponse, UserResponse
+    MessageResponse,
+    RoleCreate,
+    RoleResponse,
+    RoleUpdate,
+    UserResponse,
 )
 
 router = APIRouter(prefix="/roles", tags=["角色管理"])
 
 
 class PermissionsBody(BaseModel):
-    permissions: List[str]
+    permissions: list[str]
 
 
 class RoleAssignBody(BaseModel):
     role_code: str
 
 
-@router.get("", response_model=List[RoleResponse])
+@router.get("", response_model=list[RoleResponse])
 async def list_roles(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取角色列表"""
     result = await db.execute(
@@ -40,34 +43,30 @@ async def list_roles(
 async def create_role(
     role_data: RoleCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """创建角色"""
     # 检查 code 是否已存在
-    result = await db.execute(
-        select(Role).where(Role.code == role_data.code)
-    )
+    result = await db.execute(select(Role).where(Role.code == role_data.code))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="角色代码已存在")
-    
+
     # 检查 name 是否已存在
-    result = await db.execute(
-        select(Role).where(Role.name == role_data.name)
-    )
+    result = await db.execute(select(Role).where(Role.name == role_data.name))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="角色名称已存在")
-    
+
     role = Role(
         name=role_data.name,
         code=role_data.code,
         description=role_data.description,
         permissions=role_data.permissions,
-        is_active=role_data.is_active
+        is_active=role_data.is_active,
     )
     db.add(role)
     await db.commit()
     await db.refresh(role)
-    
+
     return role
 
 
@@ -75,16 +74,14 @@ async def create_role(
 async def get_role(
     role_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取角色详情"""
-    result = await db.execute(
-        select(Role).where(Role.id == role_id)
-    )
+    result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
-    
+
     return role
 
 
@@ -144,20 +141,18 @@ async def update_role(
     role_id: int,
     role_data: RoleUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新角色"""
-    result = await db.execute(
-        select(Role).where(Role.id == role_id)
-    )
+    result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
-    
+
     # 只有超级管理员可以编辑系统角色
     if role.is_system and current_user.role != UserRole.SUPER_ADMIN:
         raise HTTPException(status_code=400, detail="系统角色不可修改")
-    
+
     if role_data.name is not None:
         # 检查名称是否重复
         result = await db.execute(
@@ -166,7 +161,7 @@ async def update_role(
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="角色名称已存在")
         role.name = role_data.name
-    
+
     if role_data.code is not None:
         # 检查代码是否重复
         result = await db.execute(
@@ -175,17 +170,17 @@ async def update_role(
         if result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="角色代码已存在")
         role.code = role_data.code
-    
+
     if role_data.description is not None:
         role.description = role_data.description
     if role_data.permissions is not None:
         role.permissions = role_data.permissions
     if role_data.is_active is not None:
         role.is_active = role_data.is_active
-    
+
     await db.commit()
     await db.refresh(role)
-    
+
     return role
 
 
@@ -193,19 +188,17 @@ async def update_role(
 async def delete_role(
     role_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """删除角色"""
-    result = await db.execute(
-        select(Role).where(Role.id == role_id)
-    )
+    result = await db.execute(select(Role).where(Role.id == role_id))
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="角色不存在")
-    
+
     if role.is_system:
         raise HTTPException(status_code=400, detail="系统角色不可删除")
-    
+
     await db.delete(role)
     await db.commit()
     return MessageResponse(message="角色已删除")

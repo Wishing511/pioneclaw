@@ -10,19 +10,20 @@ TaskFlow API - 持久化工作流接口
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
 from datetime import datetime
+from typing import Any
 
-from app.core import get_db
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
 from app.models import User
 from app.modules.agent.taskflow import (
-    TaskFlowManager,
-    RevisionConflictError,
     InvalidStateTransition,
+    RevisionConflictError,
+    TaskFlowManager,
 )
 
 router = APIRouter(prefix="/taskflow", tags=["持久化工作流"])
@@ -30,12 +31,13 @@ router = APIRouter(prefix="/taskflow", tags=["持久化工作流"])
 
 # ==================== 请求/响应模型 ====================
 
+
 class FlowCreateRequest(BaseModel):
     name: str
     goal: str
-    owner_id: Optional[str] = None
-    session_id: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
+    owner_id: str | None = None
+    session_id: str | None = None
+    context: dict[str, Any] | None = None
 
 
 class FlowStartRequest(BaseModel):
@@ -44,21 +46,21 @@ class FlowStartRequest(BaseModel):
 
 class FlowStepRequest(BaseModel):
     step_name: str
-    step_result: Optional[Dict[str, Any]] = None
+    step_result: dict[str, Any] | None = None
 
 
 class FlowWaitRequest(BaseModel):
     wait_reason: str
-    checkpoint: Optional[Dict[str, Any]] = None
+    checkpoint: dict[str, Any] | None = None
 
 
 class FlowResumeRequest(BaseModel):
-    resume_input: Optional[Dict[str, Any]] = None
-    expected_revision: Optional[int] = None
+    resume_input: dict[str, Any] | None = None
+    expected_revision: int | None = None
 
 
 class FlowFinishRequest(BaseModel):
-    final_result: Optional[Dict[str, Any]] = None
+    final_result: dict[str, Any] | None = None
 
 
 class FlowFailRequest(BaseModel):
@@ -75,24 +77,24 @@ class FlowResponse(BaseModel):
     goal: str
     current_step: str
     state: str
-    owner_id: Optional[str] = None
-    session_id: Optional[str] = None
-    context: Dict[str, Any] = {}
-    wait_reason: Optional[str] = None
+    owner_id: str | None = None
+    session_id: str | None = None
+    context: dict[str, Any] = {}
+    wait_reason: str | None = None
     revision: int = 1
-    child_task_ids: List[str] = []
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    child_task_ids: list[str] = []
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
 
 
 class FlowListResponse(BaseModel):
-    flows: List[FlowResponse]
+    flows: list[FlowResponse]
     total: int
 
 
 class FlowRecoverResponse(BaseModel):
-    recovered: List[FlowResponse]
+    recovered: list[FlowResponse]
     count: int
 
 
@@ -116,6 +118,7 @@ def _flow_to_response(flow) -> FlowResponse:
 
 
 # ==================== 接口 ====================
+
 
 @router.post("", response_model=FlowResponse)
 async def create_flow(
@@ -160,7 +163,9 @@ async def run_step(
 ):
     mgr = TaskFlowManager(db)
     try:
-        flow = await mgr.run_step(flow_id, step_name=req.step_name, step_result=req.step_result)
+        flow = await mgr.run_step(
+            flow_id, step_name=req.step_name, step_result=req.step_result
+        )
     except InvalidStateTransition as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
@@ -177,7 +182,9 @@ async def set_waiting(
 ):
     mgr = TaskFlowManager(db)
     try:
-        flow = await mgr.set_waiting(flow_id, wait_reason=req.wait_reason, checkpoint=req.checkpoint)
+        flow = await mgr.set_waiting(
+            flow_id, wait_reason=req.wait_reason, checkpoint=req.checkpoint
+        )
     except InvalidStateTransition as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
@@ -272,9 +279,9 @@ async def get_flow(
 
 @router.get("", response_model=FlowListResponse)
 async def list_flows(
-    owner_id: Optional[str] = None,
-    state: Optional[str] = None,
-    session_id: Optional[str] = None,
+    owner_id: str | None = None,
+    state: str | None = None,
+    session_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_db),

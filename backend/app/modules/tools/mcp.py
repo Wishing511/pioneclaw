@@ -10,12 +10,12 @@ MCP 工具 — Agent 可调用的 MCP 协议工具
 
 import json
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from app.modules.tools.base import BaseTool, ToolParameter
 
 if TYPE_CHECKING:
-    from app.modules.tools.mcp_client import MCPToolRegistry
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,9 @@ class MCPTool(BaseTool):
     }
     required = ["server", "tool"]
 
-    async def execute(self, server: str, tool: str, arguments: Optional[dict] = None, **kwargs) -> str:
+    async def execute(
+        self, server: str, tool: str, arguments: dict | None = None, **kwargs
+    ) -> str:
         try:
             from app.modules.tools.mcp_client import get_mcp_registry
 
@@ -145,17 +147,19 @@ class McpAuthTool(BaseTool):
             if server:
                 conn = registry.get_server(server)
                 if not conn:
-                    return json.dumps({
-                        "success": False,
-                        "error": f"MCP 服务器未注册: {server}"
-                    })
+                    return json.dumps(
+                        {"success": False, "error": f"MCP 服务器未注册: {server}"}
+                    )
                 return json.dumps(conn.to_dict(), ensure_ascii=False)
             else:
                 servers = [s.to_dict() for s in registry.list_servers()]
-                return json.dumps({
-                    "servers": servers,
-                    "total": len(servers),
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "servers": servers,
+                        "total": len(servers),
+                    },
+                    ensure_ascii=False,
+                )
 
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})

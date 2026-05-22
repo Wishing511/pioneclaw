@@ -12,25 +12,24 @@
 """
 
 import asyncio
+from unittest.mock import MagicMock
+
 import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.agent.interrupt import (
+    Checkpoint,
     InterruptManager,
+    InterruptOption,
     InterruptPoint,
     InterruptReason,
     InterruptStatus,
-    InterruptOption,
-    Checkpoint,
     get_interrupt_manager,
-    reset_interrupt_manager,
     interrupt_options,
+    reset_interrupt_manager,
 )
 
-
 # ==================== InterruptReason 测试 ====================
+
 
 class TestInterruptReason:
     def test_reason_values(self):
@@ -43,11 +42,19 @@ class TestInterruptReason:
 
     def test_all_reasons_exist(self):
         reasons = {r.value for r in InterruptReason}
-        expected = {"human_review", "sensitive", "error_recovery", "checkpoint", "timeout", "custom"}
+        expected = {
+            "human_review",
+            "sensitive",
+            "error_recovery",
+            "checkpoint",
+            "timeout",
+            "custom",
+        }
         assert reasons == expected
 
 
 # ==================== InterruptStatus 测试 ====================
+
 
 class TestInterruptStatus:
     def test_status_values(self):
@@ -60,6 +67,7 @@ class TestInterruptStatus:
 
 
 # ==================== InterruptOption 测试 ====================
+
 
 class TestInterruptOption:
     def test_defaults(self):
@@ -84,6 +92,7 @@ class TestInterruptOption:
 
 
 # ==================== InterruptPoint 测试 ====================
+
 
 class TestInterruptPoint:
     def test_defaults(self):
@@ -114,6 +123,7 @@ class TestInterruptPoint:
 
     def test_is_expired(self):
         import time
+
         point = InterruptPoint(
             id="test-3",
             reason=InterruptReason.HUMAN_REVIEW,
@@ -164,7 +174,14 @@ class TestInterruptPoint:
             "status": "approved",
             "message": "Test",
             "options": [
-                {"label": "OK", "value": "ok", "description": "", "requires_input": False, "input_placeholder": "", "style": "default"}
+                {
+                    "label": "OK",
+                    "value": "ok",
+                    "description": "",
+                    "requires_input": False,
+                    "input_placeholder": "",
+                    "style": "default",
+                }
             ],
         }
         point = InterruptPoint.from_dict(data)
@@ -174,6 +191,7 @@ class TestInterruptPoint:
 
 
 # ==================== Checkpoint 测试 ====================
+
 
 class TestCheckpoint:
     def test_defaults(self):
@@ -225,6 +243,7 @@ class TestCheckpoint:
 
 
 # ==================== InterruptManager 测试 ====================
+
 
 class TestInterruptManager:
     @pytest.mark.asyncio
@@ -310,7 +329,6 @@ class TestInterruptManager:
 
     @pytest.mark.asyncio
     async def test_interrupt_with_ttl(self):
-        import time
         manager = InterruptManager()
         interrupt = await manager.create_interrupt(
             reason=InterruptReason.HUMAN_REVIEW,
@@ -382,6 +400,7 @@ class TestInterruptManager:
 
 # ==================== 全局管理器测试 ====================
 
+
 class TestGlobalManager:
     def test_get_interrupt_manager(self):
         reset_interrupt_manager()
@@ -401,6 +420,7 @@ class TestGlobalManager:
 
 
 # ==================== 预置选项测试 ====================
+
 
 class TestInterruptOptions:
     def test_approve_reject(self):
@@ -427,6 +447,7 @@ class TestInterruptOptions:
 
 
 # ==================== AgentLoop 中断集成测试 ====================
+
 
 class TestAgentLoopInterrupt:
     def setup_method(self):
@@ -456,7 +477,12 @@ class TestAgentLoopInterrupt:
 
         provider = MagicMock()
         manager = InterruptManager()  # 使用独立管理器
-        loop = AgentLoop(provider=provider, agent_id="agent-1", agent_name="TestAgent", interrupt_manager=manager)
+        loop = AgentLoop(
+            provider=provider,
+            agent_id="agent-1",
+            agent_name="TestAgent",
+            interrupt_manager=manager,
+        )
 
         interrupt = await loop.interrupt(
             reason=InterruptReason.SENSITIVE_ACTION,
@@ -495,7 +521,9 @@ class TestAgentLoopInterrupt:
 
         provider = MagicMock()
         manager = InterruptManager()
-        loop = AgentLoop(provider=provider, agent_id="agent-1", interrupt_manager=manager)
+        loop = AgentLoop(
+            provider=provider, agent_id="agent-1", interrupt_manager=manager
+        )
 
         await loop.interrupt(reason=InterruptReason.HUMAN_REVIEW, message="审核1")
         await loop.interrupt(reason=InterruptReason.SENSITIVE_ACTION, message="审核2")
@@ -509,7 +537,9 @@ class TestAgentLoopInterrupt:
 
         provider = MagicMock()
         manager = InterruptManager()
-        loop = AgentLoop(provider=provider, agent_id="agent-1", interrupt_manager=manager)
+        loop = AgentLoop(
+            provider=provider, agent_id="agent-1", interrupt_manager=manager
+        )
 
         cp = await loop.save_checkpoint(
             name="Before action",
@@ -527,7 +557,9 @@ class TestAgentLoopInterrupt:
 
         provider = MagicMock()
         manager = InterruptManager()
-        loop = AgentLoop(provider=provider, agent_id="agent-1", interrupt_manager=manager)
+        loop = AgentLoop(
+            provider=provider, agent_id="agent-1", interrupt_manager=manager
+        )
 
         cp = await loop.save_checkpoint(
             state={"key": "value"},
@@ -545,7 +577,9 @@ class TestAgentLoopInterrupt:
 
         provider = MagicMock()
         manager = InterruptManager()
-        loop = AgentLoop(provider=provider, agent_id="agent-1", interrupt_manager=manager)
+        loop = AgentLoop(
+            provider=provider, agent_id="agent-1", interrupt_manager=manager
+        )
 
         await loop.save_checkpoint(state={}, messages=[])
         await loop.save_checkpoint(state={}, messages=[])

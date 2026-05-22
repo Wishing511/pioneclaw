@@ -14,46 +14,49 @@ Interrupt 中断与恢复机制
 """
 
 import asyncio
-import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class InterruptReason(Enum):
     """中断原因"""
-    HUMAN_REVIEW = "human_review"        # 需要人工审核
-    SENSITIVE_ACTION = "sensitive"       # 敏感操作确认
-    ERROR_RECOVERY = "error_recovery"    # 错误恢复
-    CHECKPOINT = "checkpoint"            # 检查点
-    TIMEOUT = "timeout"                  # 超时等待
-    CUSTOM = "custom"                    # 自定义
+
+    HUMAN_REVIEW = "human_review"  # 需要人工审核
+    SENSITIVE_ACTION = "sensitive"  # 敏感操作确认
+    ERROR_RECOVERY = "error_recovery"  # 错误恢复
+    CHECKPOINT = "checkpoint"  # 检查点
+    TIMEOUT = "timeout"  # 超时等待
+    CUSTOM = "custom"  # 自定义
 
 
 class InterruptStatus(Enum):
     """中断状态"""
-    PENDING = "pending"        # 待处理
-    APPROVED = "approved"      # 已批准
-    REJECTED = "rejected"      # 已拒绝
-    MODIFIED = "modified"      # 已修改
-    EXPIRED = "expired"        # 已过期
-    CANCELLED = "cancelled"    # 已取消
+
+    PENDING = "pending"  # 待处理
+    APPROVED = "approved"  # 已批准
+    REJECTED = "rejected"  # 已拒绝
+    MODIFIED = "modified"  # 已修改
+    EXPIRED = "expired"  # 已过期
+    CANCELLED = "cancelled"  # 已取消
 
 
 @dataclass
 class InterruptOption:
     """中断选项"""
-    label: str                           # 显示标签
-    value: str                           # 选项值
-    description: str = ""                # 选项描述
-    requires_input: bool = False         # 是否需要输入
-    input_placeholder: str = ""          # 输入占位符
-    style: str = "default"               # default, primary, danger, warning
+
+    label: str  # 显示标签
+    value: str  # 选项值
+    description: str = ""  # 选项描述
+    requires_input: bool = False  # 是否需要输入
+    input_placeholder: str = ""  # 输入占位符
+    style: str = "default"  # default, primary, danger, warning
 
 
 @dataclass
@@ -62,6 +65,7 @@ class InterruptPoint:
 
     记录 Agent 执行中断的位置和状态
     """
+
     id: str
     reason: InterruptReason
     status: InterruptStatus = InterruptStatus.PENDING
@@ -71,31 +75,31 @@ class InterruptPoint:
     agent_name: str = ""
     conversation_id: str = ""
     session_id: str = ""
-    user_id: Optional[int] = None
+    user_id: int | None = None
 
     # 状态快照
-    state_snapshot: Dict[str, Any] = field(default_factory=dict)
-    message_snapshot: List[Dict] = field(default_factory=list)
+    state_snapshot: dict[str, Any] = field(default_factory=dict)
+    message_snapshot: list[dict] = field(default_factory=list)
 
     # 中断信息
     title: str = ""
     message: str = ""
-    details: Dict[str, Any] = field(default_factory=dict)
-    options: List[InterruptOption] = field(default_factory=list)
+    details: dict[str, Any] = field(default_factory=dict)
+    options: list[InterruptOption] = field(default_factory=list)
 
     # 时间戳
     created_at: float = 0.0
-    expires_at: Optional[float] = None
-    resolved_at: Optional[float] = None
+    expires_at: float | None = None
+    resolved_at: float | None = None
 
     # 解决信息
-    resolution: Optional[str] = None
-    resolved_by: Optional[int] = None
+    resolution: str | None = None
+    resolved_by: int | None = None
     resolution_note: str = ""
-    modified_state: Dict[str, Any] = field(default_factory=dict)
+    modified_state: dict[str, Any] = field(default_factory=dict)
 
     # 元数据
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.created_at:
@@ -113,7 +117,7 @@ class InterruptPoint:
         """检查是否已解决"""
         return self.status != InterruptStatus.PENDING
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "id": self.id,
@@ -148,11 +152,9 @@ class InterruptPoint:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "InterruptPoint":
+    def from_dict(cls, data: dict[str, Any]) -> "InterruptPoint":
         """从字典创建"""
-        options = [
-            InterruptOption(**o) for o in data.pop("options", [])
-        ]
+        options = [InterruptOption(**o) for o in data.pop("options", [])]
         return cls(
             reason=InterruptReason(data.pop("reason")),
             status=InterruptStatus(data.pop("status", "pending")),
@@ -167,19 +169,20 @@ class Checkpoint:
 
     用于保存 Agent 执行状态，支持恢复
     """
+
     id: str
     agent_id: str
     name: str = ""
 
     # 状态快照
-    state: Dict[str, Any] = field(default_factory=dict)
-    messages: List[Dict] = field(default_factory=list)
+    state: dict[str, Any] = field(default_factory=dict)
+    messages: list[dict] = field(default_factory=list)
     iteration: int = 0
-    tool_calls: List[Dict] = field(default_factory=list)
+    tool_calls: list[dict] = field(default_factory=list)
 
     # 时间戳
     created_at: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.created_at:
@@ -187,7 +190,7 @@ class Checkpoint:
         if not self.id:
             self.id = str(uuid.uuid4())[:8]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "agent_id": self.agent_id,
@@ -201,7 +204,7 @@ class Checkpoint:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Checkpoint":
+    def from_dict(cls, data: dict[str, Any]) -> "Checkpoint":
         return cls(**data)
 
 
@@ -213,7 +216,7 @@ class InterruptManager:
 
     def __init__(
         self,
-        storage: Optional[Any] = None,
+        storage: Any | None = None,
         default_ttl: float = 3600.0,  # 默认 1 小时过期
     ):
         """
@@ -225,17 +228,17 @@ class InterruptManager:
         self.default_ttl = default_ttl
 
         # 内存缓存
-        self._pending_interrupts: Dict[str, InterruptPoint] = {}
-        self._checkpoints: Dict[str, List[Checkpoint]] = {}
+        self._pending_interrupts: dict[str, InterruptPoint] = {}
+        self._checkpoints: dict[str, list[Checkpoint]] = {}
 
         # 事件回调
-        self._on_interrupt: Optional[Callable] = None
-        self._on_resolve: Optional[Callable] = None
+        self._on_interrupt: Callable | None = None
+        self._on_resolve: Callable | None = None
 
     def set_callbacks(
         self,
-        on_interrupt: Optional[Callable] = None,
-        on_resolve: Optional[Callable] = None,
+        on_interrupt: Callable | None = None,
+        on_resolve: Callable | None = None,
     ) -> None:
         """设置事件回调"""
         self._on_interrupt = on_interrupt
@@ -249,14 +252,14 @@ class InterruptManager:
         agent_name: str = "",
         conversation_id: str = "",
         session_id: str = "",
-        user_id: Optional[int] = None,
+        user_id: int | None = None,
         title: str = "",
-        details: Dict[str, Any] = None,
-        options: List[InterruptOption] = None,
-        state_snapshot: Dict[str, Any] = None,
-        message_snapshot: List[Dict] = None,
-        ttl: Optional[float] = None,
-        metadata: Dict[str, Any] = None,
+        details: dict[str, Any] = None,
+        options: list[InterruptOption] = None,
+        state_snapshot: dict[str, Any] = None,
+        message_snapshot: list[dict] = None,
+        ttl: float | None = None,
+        metadata: dict[str, Any] = None,
     ) -> InterruptPoint:
         """创建中断点
 
@@ -323,7 +326,9 @@ class InterruptManager:
             except Exception as e:
                 logger.warning(f"Interrupt callback failed: {e}")
 
-        logger.info(f"Created interrupt {interrupt_id}: {reason.value} - {message[:50]}")
+        logger.info(
+            f"Created interrupt {interrupt_id}: {reason.value} - {message[:50]}"
+        )
         return interrupt
 
     def _default_title(self, reason: InterruptReason) -> str:
@@ -342,9 +347,9 @@ class InterruptManager:
         self,
         interrupt_id: str,
         resolution: str,
-        resolved_by: Optional[int] = None,
+        resolved_by: int | None = None,
         resolution_note: str = "",
-        modified_state: Dict[str, Any] = None,
+        modified_state: dict[str, Any] = None,
     ) -> InterruptPoint:
         """解决中断
 
@@ -410,7 +415,7 @@ class InterruptManager:
         logger.info(f"Resolved interrupt {interrupt_id}: {resolution}")
         return interrupt
 
-    async def get_interrupt(self, interrupt_id: str) -> Optional[InterruptPoint]:
+    async def get_interrupt(self, interrupt_id: str) -> InterruptPoint | None:
         """获取中断点"""
         # 先从内存获取
         interrupt = self._pending_interrupts.get(interrupt_id)
@@ -422,11 +427,11 @@ class InterruptManager:
 
     async def get_pending_interrupts(
         self,
-        conversation_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[int] = None,
-        agent_id: Optional[str] = None,
-    ) -> List[InterruptPoint]:
+        conversation_id: str | None = None,
+        session_id: str | None = None,
+        user_id: int | None = None,
+        agent_id: str | None = None,
+    ) -> list[InterruptPoint]:
         """获取待处理中断列表"""
         result = []
 
@@ -466,12 +471,12 @@ class InterruptManager:
     async def save_checkpoint(
         self,
         agent_id: str,
-        state: Dict[str, Any],
-        messages: List[Dict],
+        state: dict[str, Any],
+        messages: list[dict],
         iteration: int = 0,
-        tool_calls: List[Dict] = None,
+        tool_calls: list[dict] = None,
         name: str = "",
-        metadata: Dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ) -> Checkpoint:
         """保存检查点"""
         checkpoint = Checkpoint(
@@ -497,7 +502,7 @@ class InterruptManager:
         logger.debug(f"Saved checkpoint {checkpoint.id} for agent {agent_id}")
         return checkpoint
 
-    async def load_checkpoint(self, checkpoint_id: str) -> Optional[Checkpoint]:
+    async def load_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
         """加载检查点"""
         for checkpoints in self._checkpoints.values():
             for cp in checkpoints:
@@ -511,7 +516,7 @@ class InterruptManager:
         self,
         agent_id: str,
         limit: int = 10,
-    ) -> List[Checkpoint]:
+    ) -> list[Checkpoint]:
         """列出检查点"""
         checkpoints = self._checkpoints.get(agent_id, [])
         return checkpoints[-limit:]
@@ -519,7 +524,7 @@ class InterruptManager:
     async def restore_checkpoint(
         self,
         checkpoint_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """恢复到检查点
 
         Returns:
@@ -538,7 +543,7 @@ class InterruptManager:
 
     async def delete_checkpoint(self, checkpoint_id: str) -> None:
         """删除检查点"""
-        for agent_id, checkpoints in self._checkpoints.items():
+        for _agent_id, checkpoints in self._checkpoints.items():
             for i, cp in enumerate(checkpoints):
                 if cp.id == checkpoint_id:
                     del checkpoints[i]
@@ -555,7 +560,7 @@ class InterruptManager:
             except Exception as e:
                 logger.warning(f"Failed to persist interrupt: {e}")
 
-    async def _load_interrupt(self, interrupt_id: str) -> Optional[InterruptPoint]:
+    async def _load_interrupt(self, interrupt_id: str) -> InterruptPoint | None:
         """加载中断"""
         if self.storage:
             try:
@@ -572,7 +577,7 @@ class InterruptManager:
             except Exception as e:
                 logger.warning(f"Failed to persist checkpoint: {e}")
 
-    async def _load_checkpoint(self, checkpoint_id: str) -> Optional[Checkpoint]:
+    async def _load_checkpoint(self, checkpoint_id: str) -> Checkpoint | None:
         """加载检查点"""
         if self.storage:
             try:
@@ -592,7 +597,7 @@ class InterruptManager:
 
 # ==================== 全局实例 ====================
 
-_global_manager: Optional[InterruptManager] = None
+_global_manager: InterruptManager | None = None
 
 
 def get_interrupt_manager() -> InterruptManager:
@@ -611,11 +616,12 @@ def reset_interrupt_manager() -> None:
 
 # ==================== 预置选项 ====================
 
+
 class interrupt_options:
     """预置中断选项"""
 
     @staticmethod
-    def approve_reject() -> List[InterruptOption]:
+    def approve_reject() -> list[InterruptOption]:
         """批准/拒绝"""
         return [
             InterruptOption(label="批准", value="approve", style="primary"),
@@ -623,17 +629,22 @@ class interrupt_options:
         ]
 
     @staticmethod
-    def approve_reject_modify() -> List[InterruptOption]:
+    def approve_reject_modify() -> list[InterruptOption]:
         """批准/拒绝/修改"""
         return [
             InterruptOption(label="批准", value="approve", style="primary"),
-            InterruptOption(label="修改后批准", value="modify", style="warning",
-                          requires_input=True, input_placeholder="输入修改内容"),
+            InterruptOption(
+                label="修改后批准",
+                value="modify",
+                style="warning",
+                requires_input=True,
+                input_placeholder="输入修改内容",
+            ),
             InterruptOption(label="拒绝", value="reject", style="danger"),
         ]
 
     @staticmethod
-    def confirm_cancel() -> List[InterruptOption]:
+    def confirm_cancel() -> list[InterruptOption]:
         """确认/取消"""
         return [
             InterruptOption(label="确认", value="approve", style="primary"),
@@ -641,7 +652,7 @@ class interrupt_options:
         ]
 
     @staticmethod
-    def retry_skip_abort() -> List[InterruptOption]:
+    def retry_skip_abort() -> list[InterruptOption]:
         """重试/跳过/中止"""
         return [
             InterruptOption(label="重试", value="retry", style="primary"),

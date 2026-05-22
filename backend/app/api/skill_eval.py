@@ -1,8 +1,6 @@
 """Skill Evaluation API — 技能评估与优化"""
 
-import os
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_active_user
 from app.core import get_db
-from app.models import Skill as DBSkill, User
+from app.models import Skill as DBSkill
+from app.models import User
 from app.modules.agent.skills import get_skills_loader
 
 router = APIRouter(prefix="/skill-eval", tags=["技能评估"])
@@ -22,11 +21,11 @@ class FileEntry(BaseModel):
     path: str
     type: str  # "file" | "dir"
     size: int = 0
-    children: Optional[list["FileEntry"]] = None
+    children: list["FileEntry"] | None = None
 
 
 class SkillInfo(BaseModel):
-    id: Optional[int] = None
+    id: int | None = None
     name: str
     display_name: str = ""
     description: str = ""
@@ -37,14 +36,50 @@ class SkillInfo(BaseModel):
 
 
 BINARY_EXTENSIONS = {
-    ".pyc", ".pyo", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z",
-    ".exe", ".dll", ".so", ".pyd", ".dylib",
-    ".db", ".sqlite", ".sqlite3",
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".webp",
-    ".woff", ".woff2", ".ttf", ".otf", ".eot",
-    ".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm",
-    ".bin", ".dat", ".pickle", ".pkl", ".pth",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx",
+    ".pyc",
+    ".pyo",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".bz2",
+    ".xz",
+    ".7z",
+    ".exe",
+    ".dll",
+    ".so",
+    ".pyd",
+    ".dylib",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".eot",
+    ".mp3",
+    ".mp4",
+    ".wav",
+    ".avi",
+    ".mov",
+    ".webm",
+    ".bin",
+    ".dat",
+    ".pickle",
+    ".pkl",
+    ".pth",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
 }
 
 
@@ -53,12 +88,45 @@ def _is_text_file(path: Path) -> bool:
     if path.suffix.lower() in BINARY_EXTENSIONS:
         return False
     # 无后缀或已知文本后缀直接放行
-    text_extensions = {".md", ".py", ".js", ".ts", ".jsx", ".tsx", ".vue",
-                       ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
-                       ".html", ".css", ".scss", ".less", ".xml", ".svg",
-                       ".sh", ".bat", ".ps1", ".txt", ".rst", ".csv",
-                       ".sql", ".go", ".rs", ".java", ".c", ".cpp", ".h",
-                       ".rb", ".php", ".swift", ".kt", ".scala"}
+    text_extensions = {
+        ".md",
+        ".py",
+        ".js",
+        ".ts",
+        ".jsx",
+        ".tsx",
+        ".vue",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".html",
+        ".css",
+        ".scss",
+        ".less",
+        ".xml",
+        ".svg",
+        ".sh",
+        ".bat",
+        ".ps1",
+        ".txt",
+        ".rst",
+        ".csv",
+        ".sql",
+        ".go",
+        ".rs",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".rb",
+        ".php",
+        ".swift",
+        ".kt",
+        ".scala",
+    }
     if path.suffix.lower() in text_extensions:
         return True
     # 无后缀或无明确类型：尝试读前 256 字节判断
@@ -81,20 +149,24 @@ def _walk_dir(root: Path, base: Path) -> list[FileEntry]:
     for item in items:
         if item.is_dir():
             rel = str(item.relative_to(base)).replace("\\", "/")
-            entries.append(FileEntry(
-                name=item.name,
-                path=rel,
-                type="dir",
-                children=_walk_dir(item, base),
-            ))
+            entries.append(
+                FileEntry(
+                    name=item.name,
+                    path=rel,
+                    type="dir",
+                    children=_walk_dir(item, base),
+                )
+            )
         elif _is_text_file(item):
             rel = str(item.relative_to(base)).replace("\\", "/")
-            entries.append(FileEntry(
-                name=item.name,
-                path=rel,
-                type="file",
-                size=item.stat().st_size,
-            ))
+            entries.append(
+                FileEntry(
+                    name=item.name,
+                    path=rel,
+                    type="file",
+                    size=item.stat().st_size,
+                )
+            )
     return entries
 
 
@@ -109,27 +181,32 @@ async def list_eval_skills(
 
     # 1. DB 技能
     from app.models.models import SkillScope
+
     conditions = [DBSkill.scope == SkillScope.SYSTEM.value]
     if current_user.organization_id:
         conditions.append(DBSkill.scope == SkillScope.ORG.value)
     conditions.append(
-        (DBSkill.scope == SkillScope.USER.value) & (DBSkill.creator_id == current_user.id)
+        (DBSkill.scope == SkillScope.USER.value)
+        & (DBSkill.creator_id == current_user.id)
     )
     from sqlalchemy import or_
+
     result = await db.execute(
         select(DBSkill).where(or_(*conditions)).order_by(DBSkill.name)
     )
     for s in result.scalars().all():
-        skills.append(SkillInfo(
-            id=s.id,
-            name=s.name,
-            display_name=s.display_name or s.name,
-            description=s.description or "",
-            source="db",
-            scope=s.scope,
-            enabled=s.is_active,
-            skill_format=s.skill_format or "inline",
-        ))
+        skills.append(
+            SkillInfo(
+                id=s.id,
+                name=s.name,
+                display_name=s.display_name or s.name,
+                description=s.description or "",
+                source="db",
+                scope=s.scope,
+                enabled=s.is_active,
+                skill_format=s.skill_format or "inline",
+            )
+        )
         seen.add(s.name)
 
     # 2. 文件系统技能（仅 workspace 用户技能，排除 builtin 和 openclaw）
@@ -140,14 +217,16 @@ async def list_eval_skills(
                 continue
             if skill.source in ("openclaw", "builtin"):
                 continue  # 不引入外部技能和内置技能
-            skills.append(SkillInfo(
-                name=name,
-                display_name=skill.metadata.title or name,
-                description=skill.metadata.description or "",
-                source="file",
-                scope="system",  # center 端 skills/ 即为系统级
-                enabled=skill.enabled,
-            ))
+            skills.append(
+                SkillInfo(
+                    name=name,
+                    display_name=skill.metadata.title or name,
+                    description=skill.metadata.description or "",
+                    source="file",
+                    scope="system",  # center 端 skills/ 即为系统级
+                    enabled=skill.enabled,
+                )
+            )
     except Exception:
         pass
 
@@ -172,17 +251,20 @@ async def get_skill_tree(
             "display_name": skill.metadata.title or skill_name,
             "source": "file",
             "skill_dir": str(skill_dir),
-            "tree": [FileEntry(
-                name="SKILL.md",
-                path="SKILL.md",
-                type="file",
-                size=skill.path.stat().st_size if skill.path.exists() else 0,
-            )] + [f for f in tree if f.name != "SKILL.md"],
+            "tree": [
+                FileEntry(
+                    name="SKILL.md",
+                    path="SKILL.md",
+                    type="file",
+                    size=skill.path.stat().st_size if skill.path.exists() else 0,
+                )
+            ]
+            + [f for f in tree if f.name != "SKILL.md"],
         }
 
     # 再尝试 DB
-    from app.models.models import SkillScope
     from sqlalchemy import or_
+
     conditions = [DBSkill.name == skill_name]
     result = await db.execute(select(DBSkill).where(or_(*conditions)))
     db_skill = result.scalar_one_or_none()
@@ -198,8 +280,12 @@ async def get_skill_tree(
         "skill_id": db_skill.id,
         "skill_dir": None,
         "tree": [
-            FileEntry(name="SKILL.md", path="SKILL.md", type="file",
-                      size=len(db_skill.content.encode()) if db_skill.content else 0),
+            FileEntry(
+                name="SKILL.md",
+                path="SKILL.md",
+                type="file",
+                size=len(db_skill.content.encode()) if db_skill.content else 0,
+            ),
         ],
         "content": db_skill.content or "",
     }
@@ -238,8 +324,8 @@ async def get_skill_file(
         }
 
     # DB 技能
-    from app.models.models import SkillScope
     from sqlalchemy import or_
+
     conditions = [DBSkill.name == skill_name]
     result = await db.execute(select(DBSkill).where(or_(*conditions)))
     db_skill = result.scalar_one_or_none()

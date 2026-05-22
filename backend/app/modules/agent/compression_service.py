@@ -14,10 +14,10 @@ ContextCompressionService — 唯一压缩入口
 """
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any
 
-from app.modules.agent.compactor import Compactor, CompactionResult
+from app.modules.agent.compactor import CompactionResult, Compactor
 from app.modules.agent.context_pruner import ContextPruner, estimate_tokens
 from app.modules.agent.token_budget import TokenBudget, TokenUsage
 
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CompressionReport:
     """压缩报告"""
+
     summary: str = ""
     removed_messages: int = 0
     kept_messages: int = 0
@@ -44,8 +45,8 @@ class ContextCompressionService:
     def __init__(
         self,
         budget: TokenBudget,
-        compactor: Optional[Compactor] = None,
-        context_pruner: Optional[ContextPruner] = None,
+        compactor: Compactor | None = None,
+        context_pruner: ContextPruner | None = None,
         file_tracker=None,
     ):
         self.budget = budget
@@ -55,7 +56,7 @@ class ContextCompressionService:
 
     def estimate_or_read_usage(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         provider,
     ) -> TokenUsage:
         """
@@ -104,9 +105,9 @@ class ContextCompressionService:
 
     def build_usage_info(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         provider,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """返回前端可用的上下文使用率信息"""
         usage = self.estimate_or_read_usage(messages, provider)
         info = self.budget.to_dict(usage.input_tokens)
@@ -116,9 +117,9 @@ class ContextCompressionService:
 
     async def auto_prune(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         provider,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         AgentLoop 每轮自动调用。
 
@@ -170,9 +171,9 @@ class ContextCompressionService:
 
     async def manual_compact(
         self,
-        messages: List[Dict[str, Any]],
-        instruction: Optional[str] = None,
-    ) -> Tuple[CompressionReport, List[Dict[str, Any]]]:
+        messages: list[dict[str, Any]],
+        instruction: str | None = None,
+    ) -> tuple[CompressionReport, list[dict[str, Any]]]:
         """
         手动压缩 — Web UI 按钮或 /compact 命令调用。
 
@@ -183,27 +184,34 @@ class ContextCompressionService:
             Tuple[CompressionReport, List[Dict]]: (压缩报告, 压缩后的消息列表)
         """
         if not self.compactor:
-            report = CompressionReport(strategy="compact", summary="Compactor not configured")
+            report = CompressionReport(
+                strategy="compact", summary="Compactor not configured"
+            )
             return report, messages
 
-        before_tokens = self.estimate_or_read_usage(messages, provider=None).input_tokens
+        before_tokens = self.estimate_or_read_usage(
+            messages, provider=None
+        ).input_tokens
 
         # 注入自定义指令（如果有）
-        custom_prompt = ""
         if instruction:
-            custom_prompt = f"\n\n用户自定义压缩要求：{instruction}"
+            pass
 
         try:
             # 先走 MicroCompact 减少 token 压力
             if self.context_pruner:
                 messages, _ = self.context_pruner.micro_compact(messages)
 
-            result = await self.compactor.compact(messages, instruction=instruction, force=True)
+            result = await self.compactor.compact(
+                messages, instruction=instruction, force=True
+            )
 
             if result.summary and result.removed_messages > 0:
                 messages = self._rebuild_after_compact(messages, result)
 
-            after_tokens = self.estimate_or_read_usage(messages, provider=None).input_tokens
+            after_tokens = self.estimate_or_read_usage(
+                messages, provider=None
+            ).input_tokens
 
             report = CompressionReport(
                 summary=result.summary or "",
@@ -226,9 +234,9 @@ class ContextCompressionService:
 
     async def emergency_compact(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         attempt: int = 1,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         prompt_too_long 时的应急压缩。
 
@@ -244,9 +252,12 @@ class ContextCompressionService:
             if self.context_pruner:
                 # 临时创建保留 0 个的 MicroCompacter
                 from app.modules.agent.context_pruner import MicroCompacter
+
                 emergency_micro = MicroCompacter(keep_recent=0)
                 messages, saved = emergency_micro.prune(messages)
-                logger.info(f"Emergency L1: cleared all tool results, saved ~{saved} chars")
+                logger.info(
+                    f"Emergency L1: cleared all tool results, saved ~{saved} chars"
+                )
             return messages
 
         elif attempt == 2:
@@ -254,7 +265,9 @@ class ContextCompressionService:
             for msg in messages:
                 if msg.get("role") == "tool":
                     tool_name = msg.get("tool_name", msg.get("name", ""))
-                    msg["content"] = f"[tool_result: {tool_name}, content stripped for emergency]"
+                    msg["content"] = (
+                        f"[tool_result: {tool_name}, content stripped for emergency]"
+                    )
             logger.info("Emergency L2: stripped all tool result content")
             return messages
 
@@ -265,16 +278,18 @@ class ContextCompressionService:
             keep_recent = min(10, len(other_msgs))
             kept = other_msgs[-keep_recent:] if keep_recent > 0 else []
             dropped = len(other_msgs) - keep_recent
-            logger.info(f"Emergency L3: dropped {dropped} old messages, kept {keep_recent}")
+            logger.info(
+                f"Emergency L3: dropped {dropped} old messages, kept {keep_recent}"
+            )
             return system_msgs + kept
 
         return messages
 
     def _rebuild_after_compact(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         result: CompactionResult,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """压缩后重建消息列表"""
         if not result.summary:
             return messages
@@ -295,10 +310,12 @@ class ContextCompressionService:
         if system_prompts:
             rebuilt.extend(system_prompts)
 
-        rebuilt.append({
-            "role": "user",
-            "content": f"[Previous conversation summary]\n{result.summary}",
-        })
+        rebuilt.append(
+            {
+                "role": "user",
+                "content": f"[Previous conversation summary]\n{result.summary}",
+            }
+        )
         rebuilt.extend(recent)
 
         # Phase 6: 恢复关键文件内容（如果 FileTracker 已注入）
@@ -314,10 +331,12 @@ class ContextCompressionService:
                         f"(edited={record.was_edited}, "
                         f"tokens={record.estimated_tokens})"
                     )
-                rebuilt.append({
-                    "role": "system",
-                    "content": "\n".join(restored_lines),
-                })
+                rebuilt.append(
+                    {
+                        "role": "system",
+                        "content": "\n".join(restored_lines),
+                    }
+                )
                 logger.info(
                     f"Restored {len(restored_files)} files after compaction via service: "
                     f"{[r.path for r in restored_files]}"

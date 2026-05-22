@@ -17,7 +17,6 @@
 
 import logging
 from enum import Enum
-from typing import Dict, Union
 
 from app.core.sandbox_policy import ToolPolicy, ToolPolicyConfig
 
@@ -26,10 +25,11 @@ logger = logging.getLogger(__name__)
 
 class ToolPoolMode(str, Enum):
     """工具池模式枚举"""
-    DEFAULT = "default"          # 全部工具可用（无限制）
-    PLAN = "plan"                # 只读工具（搜索/读取/计划）
+
+    DEFAULT = "default"  # 全部工具可用（无限制）
+    PLAN = "plan"  # 只读工具（搜索/读取/计划）
     CODE_REVIEW = "code_review"  # 代码审查（只读代码工具）
-    BARE = "bare"                # 最小集（拒绝所有工具）
+    BARE = "bare"  # 最小集（拒绝所有工具）
 
 
 # ── 预设定义 ──────────────────────────────────────────────────
@@ -38,25 +38,39 @@ class ToolPoolMode(str, Enum):
 
 _PLAN_ALLOW = [
     # 文件读取
-    "read_file", "grep", "file_search", "list_dir",
+    "read_file",
+    "grep",
+    "file_search",
+    "list_dir",
     # 信息获取
-    "web_search", "web_fetch", "current_time", "calculator",
+    "web_search",
+    "web_fetch",
+    "current_time",
+    "calculator",
     # 交互
     "ask_user_question",
     # 计划模式
-    "enter_plan_mode", "exit_plan_mode",
+    "enter_plan_mode",
+    "exit_plan_mode",
     # 知识/记忆（只读）
-    "knowledge_search", "vector_memory_recall", "file_memory_read",
+    "knowledge_search",
+    "vector_memory_recall",
+    "file_memory_read",
     # 图片（只读）
     "image",
 ]
 
 _CODE_REVIEW_ALLOW = [
-    "read_file", "grep", "file_search", "list_dir",
-    "web_search", "current_time", "calculator",
+    "read_file",
+    "grep",
+    "file_search",
+    "list_dir",
+    "web_search",
+    "current_time",
+    "calculator",
 ]
 
-TOOL_POOL_PRESETS: Dict[ToolPoolMode, dict] = {
+TOOL_POOL_PRESETS: dict[ToolPoolMode, dict] = {
     ToolPoolMode.DEFAULT: {
         "allow": [],
         "deny": [],
@@ -80,7 +94,7 @@ TOOL_POOL_PRESETS: Dict[ToolPoolMode, dict] = {
 }
 
 
-def get_pool_tool_policy(mode: Union[ToolPoolMode, str]) -> ToolPolicy:
+def get_pool_tool_policy(mode: ToolPoolMode | str) -> ToolPolicy:
     """从预设模式生成 ToolPolicy
 
     复用现有的 ToolPolicy 过滤引擎，不重写逻辑。
@@ -108,6 +122,7 @@ def get_pool_tool_policy(mode: Union[ToolPoolMode, str]) -> ToolPolicy:
     if "*" in deny_list:
         try:
             from app.modules.tools.registry import get_tool_registry
+
             all_tools = get_tool_registry().list_tools()
             deny_list = all_tools  # deny 所有已知工具
         except Exception:
@@ -121,7 +136,7 @@ def get_pool_tool_policy(mode: Union[ToolPoolMode, str]) -> ToolPolicy:
     return ToolPolicy(config)
 
 
-def get_pool_mode_description(mode: Union[ToolPoolMode, str]) -> str:
+def get_pool_mode_description(mode: ToolPoolMode | str) -> str:
     """获取预设模式的描述文字"""
     if isinstance(mode, str):
         try:
@@ -132,6 +147,6 @@ def get_pool_mode_description(mode: Union[ToolPoolMode, str]) -> str:
     return preset.get("description", "未知")
 
 
-def list_pool_modes() -> Dict[str, str]:
+def list_pool_modes() -> dict[str, str]:
     """列出所有可用的预设模式及其描述"""
     return {m.value: TOOL_POOL_PRESETS[m]["description"] for m in ToolPoolMode}

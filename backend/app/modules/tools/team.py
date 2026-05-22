@@ -11,7 +11,6 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from app.modules.tools.base import BaseTool, ToolParameter
 
@@ -21,11 +20,14 @@ logger = logging.getLogger(__name__)
 # 团队注册表（运行时状态）
 # ═══════════════════════════════════════════════════════════
 
-_teams: Dict[str, dict] = {}  # team_id → {name, member_agent_ids, created_at, description}
+_teams: dict[
+    str, dict
+] = {}  # team_id → {name, member_agent_ids, created_at, description}
 
 
-def register_team(team_id: str, name: str, member_ids: Optional[List[str]] = None,
-                  description: str = "") -> None:
+def register_team(
+    team_id: str, name: str, member_ids: list[str] | None = None, description: str = ""
+) -> None:
     """注册团队到运行时注册表"""
     _teams[team_id] = {
         "team_id": team_id,
@@ -34,7 +36,9 @@ def register_team(team_id: str, name: str, member_ids: Optional[List[str]] = Non
         "description": description,
         "created_at": datetime.now().isoformat(),
     }
-    logger.info(f"Team '{name}' ({team_id}) registered with {len(member_ids or [])} members")
+    logger.info(
+        f"Team '{name}' ({team_id}) registered with {len(member_ids or [])} members"
+    )
 
 
 def unregister_team(team_id: str) -> bool:
@@ -71,7 +75,7 @@ def list_teams() -> list:
     return list(_teams.values())
 
 
-def get_team(team_id: str) -> Optional[dict]:
+def get_team(team_id: str) -> dict | None:
     """获取团队信息"""
     return _teams.get(team_id)
 
@@ -104,6 +108,7 @@ def send_to_team(team_id: str, message: dict) -> dict:
 # TeamCreateTool
 # ═══════════════════════════════════════════════════════════
 
+
 class TeamCreateTool(BaseTool):
     """创建 Agent 团队 — 多个 Agent 可以在一个团队中协作"""
 
@@ -125,14 +130,15 @@ class TeamCreateTool(BaseTool):
         ),
         "member_agent_ids": ToolParameter(
             type="string",
-            description="成员 Agent ID 列表，JSON 数组格式，如 '[\"a1\",\"a2\"]'（可选）",
+            description='成员 Agent ID 列表，JSON 数组格式，如 \'["a1","a2"]\'（可选）',
             default="",
         ),
     }
     required = ["name"]
 
-    async def execute(self, name: str, description: str = "",
-                      member_agent_ids: str = "", **kwargs) -> str:
+    async def execute(
+        self, name: str, description: str = "", member_agent_ids: str = "", **kwargs
+    ) -> str:
         try:
             # 解析成员列表
             members = []
@@ -140,15 +146,21 @@ class TeamCreateTool(BaseTool):
                 try:
                     members = json.loads(member_agent_ids)
                     if not isinstance(members, list):
-                        return json.dumps({
-                            "success": False,
-                            "error": "member_agent_ids 必须是 JSON 数组格式",
-                        }, ensure_ascii=False)
+                        return json.dumps(
+                            {
+                                "success": False,
+                                "error": "member_agent_ids 必须是 JSON 数组格式",
+                            },
+                            ensure_ascii=False,
+                        )
                 except json.JSONDecodeError as e:
-                    return json.dumps({
-                        "success": False,
-                        "error": f"member_agent_ids JSON 解析失败: {e}",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"member_agent_ids JSON 解析失败: {e}",
+                        },
+                        ensure_ascii=False,
+                    )
 
             # 在 DB 创建 Organization(type="team")
             from app.core.database import async_session_maker
@@ -174,15 +186,18 @@ class TeamCreateTool(BaseTool):
             # 注册到运行时
             register_team(team_id, name, members, description)
 
-            return json.dumps({
-                "success": True,
-                "team_id": team_id,
-                "name": name,
-                "description": description,
-                "members": members,
-                "member_count": len(members),
-                "message": f"团队 '{name}' 创建成功，{len(members)} 名成员",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "team_id": team_id,
+                    "name": name,
+                    "description": description,
+                    "members": members,
+                    "member_count": len(members),
+                    "message": f"团队 '{name}' 创建成功，{len(members)} 名成员",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TeamCreateTool execution error: {e}")
@@ -193,13 +208,12 @@ class TeamCreateTool(BaseTool):
 # TeamDeleteTool
 # ═══════════════════════════════════════════════════════════
 
+
 class TeamDeleteTool(BaseTool):
     """删除 Agent 团队"""
 
     name = "team_delete"
-    description = (
-        "删除一个 Agent 团队。从数据库和运行时注册表中移除。"
-    )
+    description = "删除一个 Agent 团队。从数据库和运行时注册表中移除。"
     parameters = {
         "team_id": ToolParameter(
             type="string",
@@ -210,8 +224,9 @@ class TeamDeleteTool(BaseTool):
 
     async def execute(self, team_id: str, **kwargs) -> str:
         try:
-            from app.core.database import async_session_maker
             from sqlalchemy import select
+
+            from app.core.database import async_session_maker
             from app.models.organization import Organization
 
             # 检查 DB 中是否存在
@@ -230,18 +245,24 @@ class TeamDeleteTool(BaseTool):
             rt_removed = unregister_team(team_id)
 
             if not db_deleted and not rt_removed:
-                return json.dumps({
-                    "success": False,
-                    "error": f"团队不存在: '{team_id}'",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"团队不存在: '{team_id}'",
+                    },
+                    ensure_ascii=False,
+                )
 
-            return json.dumps({
-                "success": True,
-                "team_id": team_id,
-                "db_deleted": db_deleted,
-                "runtime_removed": rt_removed,
-                "message": f"团队 '{team_id}' 已删除",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "team_id": team_id,
+                    "db_deleted": db_deleted,
+                    "runtime_removed": rt_removed,
+                    "message": f"团队 '{team_id}' 已删除",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TeamDeleteTool execution error: {e}")

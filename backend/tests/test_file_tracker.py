@@ -7,9 +7,8 @@ Test FileTracker — 压缩后关键文件恢复
 3. 优先级：编辑过的 > 最近读取的
 4. Token 预算控制
 """
-import pytest
 
-from app.modules.agent.file_tracker import FileTracker, FileAccessRecord
+from app.modules.agent.file_tracker import FileTracker
 
 
 class TestFileTracker:
@@ -80,7 +79,9 @@ class TestFileTracker:
     def test_max_files_limits(self):
         tracker = FileTracker(max_files=2, max_tokens=50_000)
         for i in range(5):
-            tracker.record_access(path=f"/app/f{i}.py", content="x" * 100, was_edited=False)
+            tracker.record_access(
+                path=f"/app/f{i}.py", content="x" * 100, was_edited=False
+            )
 
         records = tracker.get_recent()
         assert len(records) == 2

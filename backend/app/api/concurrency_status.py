@@ -1,10 +1,12 @@
 """
 并发状态 API
 """
+
 from fastapi import APIRouter, Depends
+
 from app.api.auth import get_current_active_user
-from app.models import User
 from app.core.concurrency import concurrency_manager
+from app.models import User
 
 router = APIRouter(prefix="/concurrency", tags=["并发管理"])
 

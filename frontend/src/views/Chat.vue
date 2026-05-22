@@ -412,7 +412,6 @@ const {
   addMessage,
   cacheSessionMessages,
   readSessionMessages,
-  restoreSessionMessages,
 } = useMessageStreaming()
 
 let lastScrollTime = 0
@@ -1138,12 +1137,6 @@ async function deleteConversationById(convId: string) {
   } catch (e) {
     ElMessage.warning($t('chat.deleteBackendFailed'))
   }
-}
-
-// 删除当前对话（复用 deleteConversationById）
-async function deleteCurrentConversation() {
-  if (!currentConversation.value) return
-  await deleteConversationById(currentConversation.value.id)
 }
 
 // 清空当前对话

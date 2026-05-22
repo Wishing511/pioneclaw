@@ -16,15 +16,16 @@ Permission Mode 权限模式层级
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.models.models import UserRole
+    pass
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== PermissionMode Enum ====================
+
 
 class PermissionMode(str, Enum):
     """
@@ -32,6 +33,7 @@ class PermissionMode(str, Enum):
 
     ReadOnly < WorkspaceWrite < DangerFullAccess < Prompt < Allow
     """
+
     READ_ONLY = "read_only"
     WORKSPACE_WRITE = "workspace_write"
     DANGER_FULL_ACCESS = "danger_full_access"
@@ -63,9 +65,11 @@ class PermissionMode(str, Enum):
 
 # ==================== PermissionCheckResult ====================
 
+
 @dataclass
 class PermissionCheckResult:
     """权限检查结果"""
+
     allowed: bool
     reason: str = ""
     require_confirmation: bool = False
@@ -86,6 +90,7 @@ class PermissionCheckResult:
 
 # ==================== PermissionChecker ====================
 
+
 @dataclass
 class PermissionChecker:
     """
@@ -98,9 +103,9 @@ class PermissionChecker:
     """
 
     mode: PermissionMode = PermissionMode.WORKSPACE_WRITE
-    tool_policy: Optional[Any] = None  # ToolPolicy | None
-    settings: Dict[str, str] = field(default_factory=dict)
-    workspace_root: Optional[str] = None
+    tool_policy: Any | None = None  # ToolPolicy | None
+    settings: dict[str, str] = field(default_factory=dict)
+    workspace_root: str | None = None
 
     # ========== 设置读取 helpers ==========
 
@@ -131,26 +136,32 @@ class PermissionChecker:
 
         # 3. ReadOnly 模式 —— 禁止写类工具
         if self.mode == PermissionMode.READ_ONLY:
-            write_tools = {"exec", "shell", "filesystem", "write_file",
-                           "replace_in_file", "delete_file", "git",
-                           "create_directory", "move_file", "copy_file",
-                           "task", "skill", "sub_agent"}
+            write_tools = {
+                "exec",
+                "shell",
+                "filesystem",
+                "write_file",
+                "replace_in_file",
+                "delete_file",
+                "git",
+                "create_directory",
+                "move_file",
+                "copy_file",
+                "task",
+                "skill",
+                "sub_agent",
+            }
             if tool_name in write_tools:
                 return PermissionCheckResult.denied(
                     f"ReadOnly 模式禁止使用工具 '{tool_name}'"
                 )
 
         # 4. 需要确认的工具（高安全设置下）
-        if tool_name == "exec":
-            if self._setting_bool("command_approval", True):
-                return PermissionCheckResult.confirmation_required(
-                    f"命令执行需要审批"
-                )
+        if tool_name == "exec" and self._setting_bool("command_approval", True):
+            return PermissionCheckResult.confirmation_required("命令执行需要审批")
         if tool_name in ("filesystem", "write_file", "delete_file", "replace_in_file"):
             if self._setting_bool("file_approval", False):
-                return PermissionCheckResult.confirmation_required(
-                    f"文件操作需要审批"
-                )
+                return PermissionCheckResult.confirmation_required("文件操作需要审批")
 
         return PermissionCheckResult.ok()
 
@@ -159,7 +170,7 @@ class PermissionChecker:
     def check_bash(
         self,
         command: str,
-        danger_level: Optional[Any] = None,
+        danger_level: Any | None = None,
     ) -> PermissionCheckResult:
         """
         检查 Bash 命令是否可执行。
@@ -174,13 +185,12 @@ class PermissionChecker:
 
         # ReadOnly —— 拒绝所有 Bash
         if self.mode == PermissionMode.READ_ONLY:
-            return PermissionCheckResult.denied(
-                "ReadOnly 模式禁止执行 Bash 命令"
-            )
+            return PermissionCheckResult.denied("ReadOnly 模式禁止执行 Bash 命令")
 
         # 如果传入了 danger_level，按级别处理
         if danger_level is not None:
             from app.core.bash_safety import DangerLevel
+
             if danger_level == DangerLevel.BLOCKED:
                 return PermissionCheckResult.denied("命令被安全策略拦截")
             if danger_level == DangerLevel.DANGEROUS:
@@ -213,13 +223,12 @@ class PermissionChecker:
             return PermissionCheckResult.ok()
 
         if self.mode == PermissionMode.READ_ONLY:
-            return PermissionCheckResult.denied(
-                "ReadOnly 模式禁止写文件"
-            )
+            return PermissionCheckResult.denied("ReadOnly 模式禁止写文件")
 
         # WorkspaceWrite: workspace 内直接放行，workspace 外需确认
         if self.workspace_root:
             import os
+
             abs_path = os.path.abspath(path)
             abs_ws = os.path.abspath(self.workspace_root)
             if not abs_path.startswith(abs_ws):
@@ -239,9 +248,7 @@ class PermissionChecker:
     def check_network(self, url: str) -> PermissionCheckResult:
         """检查是否可以进行网络请求"""
         if self.mode == PermissionMode.READ_ONLY:
-            return PermissionCheckResult.denied(
-                "ReadOnly 模式仅允许只读网络请求"
-            )
+            return PermissionCheckResult.denied("ReadOnly 模式仅允许只读网络请求")
 
         if self._setting_bool("network_approval", False):
             return PermissionCheckResult.confirmation_required(
@@ -254,14 +261,14 @@ class PermissionChecker:
 # ==================== 模式解析 ====================
 
 # 角色 → 上限映射
-_ROLE_MAX_MODE: Dict[str, str] = {
+_ROLE_MAX_MODE: dict[str, str] = {
     "super_admin": "allow",
     "org_admin": "danger_full_access",
     "user": "workspace_write",
 }
 
 # 角色 → 默认映射
-_ROLE_DEFAULT_MODE: Dict[str, str] = {
+_ROLE_DEFAULT_MODE: dict[str, str] = {
     "super_admin": "allow",
     "org_admin": "danger_full_access",
     "user": "workspace_write",
@@ -278,7 +285,7 @@ def get_max_mode_for_role(role) -> PermissionMode:
     if isinstance(role, str):
         role_key = role.lower()
     else:
-        role_key = role.value if hasattr(role, 'value') else str(role).lower()
+        role_key = role.value if hasattr(role, "value") else str(role).lower()
 
     mode_str = _ROLE_MAX_MODE.get(role_key, "workspace_write")
     return PermissionMode(mode_str)
@@ -291,16 +298,16 @@ def get_default_mode_for_role(role) -> PermissionMode:
     if isinstance(role, str):
         role_key = role.lower()
     else:
-        role_key = role.value if hasattr(role, 'value') else str(role).lower()
+        role_key = role.value if hasattr(role, "value") else str(role).lower()
 
     mode_str = _ROLE_DEFAULT_MODE.get(role_key, "workspace_write")
     return PermissionMode(mode_str)
 
 
 def resolve_permission_mode(
-    user_role: Optional[Any] = None,
-    agent_config: Optional[Dict[str, Any]] = None,
-    db_settings: Optional[Dict[str, str]] = None,
+    user_role: Any | None = None,
+    agent_config: dict[str, Any] | None = None,
+    db_settings: dict[str, str] | None = None,
 ) -> PermissionMode:
     """
     解析最终权限模式。

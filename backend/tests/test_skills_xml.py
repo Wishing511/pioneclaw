@@ -15,30 +15,31 @@
 
 import os
 import tempfile
-import pytest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from app.modules.agent.skills import (
-    SkillsLoader,
     Skill,
     SkillMetadata,
+    SkillsLoader,
     _xml_escape,
 )
 from app.modules.plugins.sdk import (
-    PioneClawPlugin,
-    plugin_metadata,
-    PluginEvent,
     EventType,
-    get_event_bus,
+    PioneClawPlugin,
+    PluginEvent,
+    clear_runtime_context,
     get_config,
     get_db_session,
+    get_event_bus,
+    plugin_metadata,
     set_runtime_context,
-    clear_runtime_context,
 )
 
-
 # ==================== XML 转义 ====================
+
 
 class TestXmlEscape:
     def test_ampersand(self):
@@ -65,6 +66,7 @@ class TestXmlEscape:
 
 
 # ==================== build_skills_xml ====================
+
 
 class TestBuildSkillsXml:
     def _make_loader_with_skills(self, skills_data):
@@ -94,9 +96,9 @@ class TestBuildSkillsXml:
             assert loader.build_skills_xml() == ""
 
     def test_single_skill_xml(self):
-        xml = self._make_loader_with_skills({
-            "weather": {"title": "Weather", "description": "查询天气", "always": True}
-        })
+        xml = self._make_loader_with_skills(
+            {"weather": {"title": "Weather", "description": "查询天气", "always": True}}
+        )
         assert "<available_skills>" in xml
         assert "</available_skills>" in xml
         assert 'name="weather"' in xml
@@ -104,29 +106,31 @@ class TestBuildSkillsXml:
         assert "<always>true</always>" in xml
 
     def test_multiple_skills(self):
-        xml = self._make_loader_with_skills({
-            "weather": {"description": "天气查询"},
-            "translator": {"description": "翻译工具"},
-        })
+        xml = self._make_loader_with_skills(
+            {
+                "weather": {"description": "天气查询"},
+                "translator": {"description": "翻译工具"},
+            }
+        )
         assert 'name="weather"' in xml
         assert 'name="translator"' in xml
 
     def test_skill_with_tags(self):
-        xml = self._make_loader_with_skills({
-            "weather": {"description": "天气", "tags": ["weather", "查询"]}
-        })
+        xml = self._make_loader_with_skills(
+            {"weather": {"description": "天气", "tags": ["weather", "查询"]}}
+        )
         assert "<tags>weather, 查询</tags>" in xml
 
     def test_no_always_when_false(self):
-        xml = self._make_loader_with_skills({
-            "tool": {"description": "A tool", "always": False}
-        })
+        xml = self._make_loader_with_skills(
+            {"tool": {"description": "A tool", "always": False}}
+        )
         assert "<always>" not in xml
 
     def test_xml_escape_in_description(self):
-        xml = self._make_loader_with_skills({
-            "test": {"description": "Use a <b>bold</b> & \"quote\""}
-        })
+        xml = self._make_loader_with_skills(
+            {"test": {"description": 'Use a <b>bold</b> & "quote"'}}
+        )
         assert "&lt;b&gt;" in xml
         assert "&amp;" in xml
         assert "&quot;" in xml
@@ -148,6 +152,7 @@ class TestBuildSkillsXml:
 
 # ==================== SkillMetadata.install ====================
 
+
 class TestSkillMetadataInstall:
     def test_default_empty(self):
         meta = SkillMetadata()
@@ -160,6 +165,7 @@ class TestSkillMetadataInstall:
 
 
 # ==================== check_install_status ====================
+
 
 class TestCheckInstallStatus:
     def test_installed_no_requires(self):
@@ -222,6 +228,7 @@ class TestCheckInstallStatus:
 
 # ==================== _parse_metadata install ====================
 
+
 class TestParseInstallMetadata:
     def test_parse_install_json(self):
         content = '---\ninstall: [{"run": "pip install requests"}]\n---\nBody'
@@ -231,19 +238,22 @@ class TestParseInstallMetadata:
         assert meta.install[0]["run"] == "pip install requests"
 
     def test_parse_install_via_metadata_json(self):
-        content = '---\nmetadata: {"PioneClaw": {"install": [{"run": "echo hi"}]}}\n---\nBody'
+        content = (
+            '---\nmetadata: {"PioneClaw": {"install": [{"run": "echo hi"}]}}\n---\nBody'
+        )
         loader = SkillsLoader(Path(tempfile.mkdtemp()) / "skills")
         meta = loader._parse_metadata(content)
         assert len(meta.install) == 1
 
     def test_invalid_install_ignored(self):
-        content = '---\ninstall: not a list\n---\nBody'
+        content = "---\ninstall: not a list\n---\nBody"
         loader = SkillsLoader(Path(tempfile.mkdtemp()) / "skills")
         meta = loader._parse_metadata(content)
         assert meta.install == []
 
 
 # ==================== PioneClawPlugin 基类 ====================
+
 
 class TestPioneClawPlugin:
     def test_default_metadata(self):
@@ -293,6 +303,7 @@ class TestPioneClawPlugin:
 
 # ==================== plugin_metadata 装饰器 ====================
 
+
 class TestPluginMetadata:
     def test_decorator_sets_metadata(self):
         @plugin_metadata(id="test", name="Test Plugin", version="1.2.3")
@@ -322,6 +333,7 @@ class TestPluginMetadata:
 
 # ==================== EventType ====================
 
+
 class TestEventType:
     def test_values(self):
         assert EventType.AGENT_START.value == "agent.start"
@@ -338,6 +350,7 @@ class TestEventType:
 
 
 # ==================== PluginEvent ====================
+
 
 class TestPluginEvent:
     def test_basic(self):
@@ -366,6 +379,7 @@ class TestPluginEvent:
 
 # ==================== plugin_runtime ====================
 
+
 class TestPluginRuntime:
     def setup_method(self):
         clear_runtime_context()
@@ -388,7 +402,10 @@ class TestPluginRuntime:
 
     def test_get_db_session(self):
         assert get_db_session() is None
-        factory = lambda: "session"
+
+        def factory():
+            return "session"
+
         set_runtime_context(db_session_factory=factory)
         assert get_db_session() is factory
 

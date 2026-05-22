@@ -14,23 +14,23 @@
 import hashlib
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 # ==================== 上下文文件优先级（借鉴 OpenClaw system-prompt.ts）====================
 
-CONTEXT_FILE_ORDER: Dict[str, int] = {
-    "agents.md": 10,        # Agent 行为规范
-    "soul.md": 20,          # 核心人格/灵魂
-    "identity.md": 30,      # 身份信息（名称、emoji、vibe）
-    "user.md": 40,          # 用户信息（姓名、偏好）
-    "tools.md": 50,         # 工具使用规范
-    "bootstrap.md": 60,     # 引导/启动指令
-    "memory.md": 70,        # 记忆注入（动态层）
+CONTEXT_FILE_ORDER: dict[str, int] = {
+    "agents.md": 10,  # Agent 行为规范
+    "soul.md": 20,  # 核心人格/灵魂
+    "identity.md": 30,  # 身份信息（名称、emoji、vibe）
+    "user.md": 40,  # 用户信息（姓名、偏好）
+    "tools.md": 50,  # 工具使用规范
+    "bootstrap.md": 60,  # 引导/启动指令
+    "memory.md": 70,  # 记忆注入（动态层）
 }
 
 # 稳定层文件（变化少，适合 prompt caching）
@@ -41,6 +41,7 @@ DYNAMIC_FILES = {"memory.md", "bootstrap.md"}
 
 
 # ==================== IDENTITY.md 文件解析（借鉴 OpenClaw identity-file.ts）====================
+
 
 @dataclass
 class IdentityFile:
@@ -54,12 +55,13 @@ class IdentityFile:
     - vibe: 氛围/态度
     - avatar: 头像（URL 或文件路径）
     """
-    name: Optional[str] = None
-    emoji: Optional[str] = None
-    theme: Optional[str] = None
-    creature: Optional[str] = None
-    vibe: Optional[str] = None
-    avatar: Optional[str] = None
+
+    name: str | None = None
+    emoji: str | None = None
+    theme: str | None = None
+    creature: str | None = None
+    vibe: str | None = None
+    avatar: str | None = None
     raw_content: str = ""
 
     def to_prompt(self) -> str:
@@ -77,7 +79,7 @@ class IdentityFile:
             lines.append(f"- 氛围: {self.vibe}")
         return "\n".join(lines) if len(lines) > 2 else ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "emoji": self.emoji,
@@ -118,7 +120,7 @@ def parse_identity_md(content: str) -> IdentityFile:
             continue
 
         # 匹配 "- Key: Value" 或 "Key: Value"
-        match = re.match(r'^(?:-\s+)?(\w+)\s*:\s*(.+)$', line)
+        match = re.match(r"^(?:-\s+)?(\w+)\s*:\s*(.+)$", line)
         if match:
             key = match.group(1).lower()
             value = match.group(2).strip()
@@ -128,7 +130,7 @@ def parse_identity_md(content: str) -> IdentityFile:
     return identity
 
 
-def merge_identity_content(existing: str, updates: Dict[str, str]) -> str:
+def merge_identity_content(existing: str, updates: dict[str, str]) -> str:
     """合并 IDENTITY.md 内容（更新指定字段，保留其余）
 
     借鉴 OpenClaw mergeIdentityMarkdownContent
@@ -138,7 +140,7 @@ def merge_identity_content(existing: str, updates: Dict[str, str]) -> str:
     new_lines = []
 
     for line in lines:
-        match = re.match(r'^(?:-\s+)?(\w+)\s*:\s*(.+)$', line.strip())
+        match = re.match(r"^(?:-\s+)?(\w+)\s*:\s*(.+)$", line.strip())
         if match:
             key = match.group(1).lower()
             if key in updates:
@@ -158,6 +160,7 @@ def merge_identity_content(existing: str, updates: Dict[str, str]) -> str:
 
 # ==================== 分层上下文文件加载器 ====================
 
+
 class ContextFileLoader:
     """分层上下文文件加载器
 
@@ -167,7 +170,9 @@ class ContextFileLoader:
     - 按优先级排序组装
     """
 
-    def __init__(self, workspace_path: Optional[str] = None, builtin_path: Optional[str] = None):
+    def __init__(
+        self, workspace_path: str | None = None, builtin_path: str | None = None
+    ):
         """
         Args:
             workspace_path: 用户工作空间目录（优先加载）
@@ -175,9 +180,9 @@ class ContextFileLoader:
         """
         self.workspace_path = Path(workspace_path) if workspace_path else None
         self.builtin_path = builtin_path or str(Path(__file__).parent / "contexts")
-        self._cache: Dict[str, str] = {}
+        self._cache: dict[str, str] = {}
 
-    def load_file(self, filename: str) -> Optional[str]:
+    def load_file(self, filename: str) -> str | None:
         """加载单个上下文文件（workspace 优先于 builtin）"""
         if filename in self._cache:
             return self._cache[filename]
@@ -199,7 +204,7 @@ class ContextFileLoader:
 
         return None
 
-    def load_all(self) -> List[Tuple[str, str, int]]:
+    def load_all(self) -> list[tuple[str, str, int]]:
         """加载所有上下文文件
 
         Returns:
@@ -213,7 +218,7 @@ class ContextFileLoader:
         results.sort(key=lambda x: x[2])
         return results
 
-    def load_stable(self) -> List[Tuple[str, str, int]]:
+    def load_stable(self) -> list[tuple[str, str, int]]:
         """加载稳定层文件（适合 prompt caching）"""
         results = []
         for filename, priority in CONTEXT_FILE_ORDER.items():
@@ -224,7 +229,7 @@ class ContextFileLoader:
         results.sort(key=lambda x: x[2])
         return results
 
-    def load_dynamic(self) -> List[Tuple[str, str, int]]:
+    def load_dynamic(self) -> list[tuple[str, str, int]]:
         """加载动态层文件（每次请求可能变化）"""
         results = []
         for filename, priority in CONTEXT_FILE_ORDER.items():
@@ -235,7 +240,7 @@ class ContextFileLoader:
         results.sort(key=lambda x: x[2])
         return results
 
-    def load_identity(self) -> Optional[IdentityFile]:
+    def load_identity(self) -> IdentityFile | None:
         """加载并解析 IDENTITY.md 文件"""
         content = self.load_file("identity.md")
         if content:
@@ -251,7 +256,7 @@ class ContextFileLoader:
         persona_prompt: str = "",
         skills_text: str = "",
         memory_text: str = "",
-        dynamic_sections: Optional[List[str]] = None,
+        dynamic_sections: list[str] | None = None,
     ) -> str:
         """组装完整系统提示词
 
@@ -277,7 +282,9 @@ class ContextFileLoader:
                 parts.append(f"## {filename}\n{content}")
 
         # 如果没有 identity.md 但有 persona_prompt，追加
-        if persona_prompt and not any(f == "identity.md" for f, _, _ in self.load_stable()):
+        if persona_prompt and not any(
+            f == "identity.md" for f, _, _ in self.load_stable()
+        ):
             parts.append(persona_prompt)
 
         # 技能注入
@@ -297,6 +304,7 @@ class ContextFileLoader:
 
 # ==================== Prompt Caching 策略 ====================
 
+
 class PromptCacheStrategy:
     """Prompt Caching 策略
 
@@ -308,13 +316,15 @@ class PromptCacheStrategy:
     """
 
     def __init__(self):
-        self._stable_prefix_hash: Optional[str] = None
+        self._stable_prefix_hash: str | None = None
 
     @property
-    def stable_prefix_hash(self) -> Optional[str]:
+    def stable_prefix_hash(self) -> str | None:
         return self._stable_prefix_hash
 
-    def compute_stable_prefix(self, system_prompt: str, cache_boundary: str = "## memory.md") -> str:
+    def compute_stable_prefix(
+        self, system_prompt: str, cache_boundary: str = "## memory.md"
+    ) -> str:
         """计算稳定前缀
 
         Args:
@@ -333,7 +343,9 @@ class PromptCacheStrategy:
         self._stable_prefix_hash = hashlib.md5(stable.encode("utf-8")).hexdigest()
         return stable
 
-    def split_for_caching(self, system_prompt: str, cache_boundary: str = "## memory.md") -> Dict[str, str]:
+    def split_for_caching(
+        self, system_prompt: str, cache_boundary: str = "## memory.md"
+    ) -> dict[str, str]:
         """将系统提示词分为稳定层和动态层
 
         Args:
@@ -351,7 +363,9 @@ class PromptCacheStrategy:
             }
         return {"stable": system_prompt, "dynamic": ""}
 
-    def has_stable_prefix_changed(self, system_prompt: str, cache_boundary: str = "## memory.md") -> bool:
+    def has_stable_prefix_changed(
+        self, system_prompt: str, cache_boundary: str = "## memory.md"
+    ) -> bool:
         """检查稳定前缀是否变化
 
         Returns:

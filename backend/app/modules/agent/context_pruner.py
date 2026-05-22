@@ -7,17 +7,26 @@ Context Pruner — 渐进式 context 压缩（零成本/低成本）
 """
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # 可压缩的工具名白名单（与 Claude Code COMPACTABLE_TOOLS 对齐）
-COMPACTABLE_TOOLS = frozenset({
-    "read_file", "write_file", "edit_file",
-    "grep", "glob", "file_search",
-    "exec", "bash",
-    "web_search", "web_fetch", "browser",
-})
+COMPACTABLE_TOOLS = frozenset(
+    {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "grep",
+        "glob",
+        "file_search",
+        "exec",
+        "bash",
+        "web_search",
+        "web_fetch",
+        "browser",
+    }
+)
 
 CLEAR_PLACEHOLDER = "[Old tool result content cleared]"
 
@@ -56,7 +65,7 @@ class MicroCompacter:
         self.max_chars = max_chars
         self.compactable_tools = compactable_tools
 
-    def prune(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    def prune(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         """裁剪旧工具结果，返回 (新消息列表, 节省的字符数)。
 
         不修改原列表，返回深拷贝后的新列表。
@@ -66,10 +75,11 @@ class MicroCompacter:
 
         # 深拷贝消息列表，避免修改原列表（M3）
         import copy
+
         new_messages = copy.deepcopy(messages)
 
         # 收集所有可压缩的工具结果位置
-        tool_result_indices: List[Tuple[int, str, str]] = []
+        tool_result_indices: list[tuple[int, str, str]] = []
         for i, msg in enumerate(new_messages):
             if msg.get("role") != "tool":
                 continue
@@ -97,9 +107,11 @@ class MicroCompacter:
                     chars_saved += old_len - len(placeholder)
             # 大小触发：即使保留的消息也截断超长内容
             elif len(content) > self.max_chars:
-                tail = content[-self.max_chars:]
+                tail = content[-self.max_chars :]
                 old_len = len(content)
-                new_messages[msg_idx]["content"] = f"[Result truncated, showing last {self.max_chars} chars]\n{tail}"
+                new_messages[msg_idx]["content"] = (
+                    f"[Result truncated, showing last {self.max_chars} chars]\n{tail}"
+                )
                 chars_saved += old_len - len(new_messages[msg_idx]["content"])
 
         if chars_saved > 0:
@@ -127,7 +139,7 @@ class Snip:
     def __init__(self, max_reasoning_chars: int = 2000):
         self.max_reasoning_chars = max_reasoning_chars
 
-    def prune(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    def prune(self, messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         """裁剪消息，返回 (新消息列表, 节省的字符数)。
 
         返回新列表，不修改原列表。
@@ -135,7 +147,7 @@ class Snip:
         if not messages:
             return messages, 0
 
-        pruned: List[Dict[str, Any]] = []
+        pruned: list[dict[str, Any]] = []
         chars_saved = 0
 
         for msg in messages:
@@ -160,7 +172,8 @@ class Snip:
                     chars_saved += len(rc) - (self.max_reasoning_chars + 18)
                     msg = {
                         **msg,
-                        "reasoning_content": rc[:self.max_reasoning_chars] + "...[truncated]",
+                        "reasoning_content": rc[: self.max_reasoning_chars]
+                        + "...[truncated]",
                     }
 
             pruned.append(msg)
@@ -174,7 +187,7 @@ class Snip:
         return pruned, chars_saved
 
 
-def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
+def estimate_tokens(messages: list[dict[str, Any]]) -> int:
     """粗略估算消息列表的 token 数。
 
     中文字符按 1.5 token/字符，英文按 0.25 token/字符。
@@ -239,14 +252,14 @@ class ContextPruner:
 
     def snip_prune(
         self,
-        messages: List[Dict[str, Any]],
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
         """零成本裁剪：空消息移除 + reasoning 截断"""
         return self._snip.prune(messages)
 
     def micro_compact(
         self,
-        messages: List[Dict[str, Any]],
-    ) -> Tuple[List[Dict[str, Any]], int]:
+        messages: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], int]:
         """清除旧工具结果内容"""
         return self._micro.prune(messages)

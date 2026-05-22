@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+
+import bcrypt
 import jwt
 from jwt import PyJWTError
-import bcrypt
+
 from app.core.config import settings
 
 
@@ -16,26 +17,34 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """创建 Access Token"""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def create_refresh_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_refresh_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """创建 Refresh Token"""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
     to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, settings.REFRESH_SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(
+        to_encode, settings.REFRESH_SECRET_KEY, algorithm=settings.ALGORITHM
+    )
 
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_access_token(token: str) -> dict | None:
     """解码 Access Token"""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
         if payload.get("type") != "access":
             return None
         return payload
@@ -43,10 +52,12 @@ def decode_access_token(token: str) -> Optional[dict]:
         return None
 
 
-def decode_refresh_token(token: str) -> Optional[dict]:
+def decode_refresh_token(token: str) -> dict | None:
     """解码 Refresh Token"""
     try:
-        payload = jwt.decode(token, settings.REFRESH_SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.REFRESH_SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
         if payload.get("type") != "refresh":
             return None
         return payload
@@ -54,18 +65,24 @@ def decode_refresh_token(token: str) -> Optional[dict]:
         return None
 
 
-def create_reset_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_reset_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """创建密码重置 Token（使用独立密钥）"""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES))
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES)
+    )
     to_encode.update({"exp": expire, "type": "password_reset"})
-    return jwt.encode(to_encode, settings.RESET_SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(
+        to_encode, settings.RESET_SECRET_KEY, algorithm=settings.ALGORITHM
+    )
 
 
-def decode_reset_token(token: str) -> Optional[dict]:
+def decode_reset_token(token: str) -> dict | None:
     """解码密码重置 Token"""
     try:
-        payload = jwt.decode(token, settings.RESET_SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token, settings.RESET_SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
         if payload.get("type") != "password_reset":
             return None
         return payload

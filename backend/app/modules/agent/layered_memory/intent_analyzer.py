@@ -10,10 +10,8 @@ IntentAnalyzer — 查询意图分析
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List
 
 from loguru import logger
-
 
 INTENT_ANALYSIS_PROMPT = """分析以下查询的意图，返回 JSON 格式：
 
@@ -35,11 +33,12 @@ INTENT_ANALYSIS_PROMPT = """分析以下查询的意图，返回 JSON 格式：
 @dataclass
 class IntentResult:
     """意图分析结果"""
-    intent: str = "query"           # query/action/navigation/comparison
-    optimized_query: str = ""       # 优化后的查询
-    context_type: str = "all"       # memory/resource/skill/all
-    scope: str = "global"           # session/user/agent/global
-    entities: List[str] = field(default_factory=list)
+
+    intent: str = "query"  # query/action/navigation/comparison
+    optimized_query: str = ""  # 优化后的查询
+    context_type: str = "all"  # memory/resource/skill/all
+    scope: str = "global"  # session/user/agent/global
+    entities: list[str] = field(default_factory=list)
     confidence: float = 0.5
 
 
@@ -54,7 +53,7 @@ class IntentAnalyzer:
         """
         self.llm_caller = llm_caller
 
-    async def analyze(self, query: str, context: Optional[str] = None) -> IntentResult:
+    async def analyze(self, query: str, context: str | None = None) -> IntentResult:
         """分析查询意图"""
         if self.llm_caller:
             try:
@@ -118,10 +117,11 @@ class IntentAnalyzer:
 
         # 简单实体提取（提取引号内或明显的关键词）
         import re
+
         entities = re.findall(r'["""]([^"""]+)["""]', query)
         if not entities:
             # 提取 2 字以上的中文词
-            entities = re.findall(r'[\u4e00-\u9fff]{2,}', query)[:3]
+            entities = re.findall(r"[\u4e00-\u9fff]{2,}", query)[:3]
         result.entities = entities
 
         return result

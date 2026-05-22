@@ -6,23 +6,25 @@ UU.1 任务工具测试
 """
 
 import json
+
 import pytest
 
 from app.modules.tools.task_create import TaskCreateTool
 from app.modules.tools.task_get import TaskGetTool
 from app.modules.tools.task_list import TaskListTool
-from app.modules.tools.task_update import TaskUpdateTool
-from app.modules.tools.task_stop import TaskStopTool
 from app.modules.tools.task_output import TaskOutputTool
+from app.modules.tools.task_stop import TaskStopTool
+from app.modules.tools.task_update import TaskUpdateTool
 from app.modules.tools.todo_write import TodoWriteTool
 
-
 # ── Fixtures: 清理共享状态 ────────────────────────────────────
+
 
 @pytest.fixture(autouse=True)
 def _clean_task_store():
     """每个测试前后清理 _background_tasks"""
     from app.modules.tools.task_store import _background_tasks
+
     _background_tasks.clear()
     yield
     _background_tasks.clear()
@@ -32,6 +34,7 @@ def _clean_task_store():
 def _clean_todo_store():
     """每个测试前后清理 _agent_todos"""
     from app.modules.tools.todo_write import _agent_todos
+
     _agent_todos.clear()
     yield
     _agent_todos.clear()
@@ -39,13 +42,17 @@ def _clean_todo_store():
 
 # ── 辅助函数 ──────────────────────────────────────────────────
 
-def _create_test_task(task_id="test001", label="Test Task",
-                      tool_name="exec", status="pending"):
+
+def _create_test_task(
+    task_id="test001", label="Test Task", tool_name="exec", status="pending"
+):
     """直接在 task_store 中创建测试任务"""
     from app.modules.tools.task_store import create_task
+
     create_task(task_id, label, tool_name)
     if status != "pending":
         from app.modules.tools.task_store import update_task_status
+
         if status == "running":
             update_task_status(task_id, "running")
         elif status in ("done", "failed", "cancelled"):
@@ -57,6 +64,7 @@ def _create_test_task(task_id="test001", label="Test Task",
 # TaskCreateTool 测试
 # ============================================================
 
+
 class TestTaskCreateTool:
     """测试 TaskCreateTool"""
 
@@ -66,8 +74,9 @@ class TestTaskCreateTool:
 
     @pytest.mark.asyncio
     async def test_create_success(self, tool):
-        result = await tool.execute(label="My Task", tool_name="exec",
-                                     args='{"command": "dir"}')
+        result = await tool.execute(
+            label="My Task", tool_name="exec", args='{"command": "dir"}'
+        )
         data = json.loads(result)
         assert data["success"] is True
         assert "task_id" in data
@@ -113,6 +122,7 @@ class TestTaskCreateTool:
 # TaskGetTool 测试
 # ============================================================
 
+
 class TestTaskGetTool:
     """测试 TaskGetTool"""
 
@@ -147,6 +157,7 @@ class TestTaskGetTool:
 # ============================================================
 # TaskListTool 测试
 # ============================================================
+
 
 class TestTaskListTool:
     """测试 TaskListTool"""
@@ -192,6 +203,7 @@ class TestTaskListTool:
 # ============================================================
 # TaskUpdateTool 测试
 # ============================================================
+
 
 class TestTaskUpdateTool:
     """测试 TaskUpdateTool"""
@@ -243,6 +255,7 @@ class TestTaskUpdateTool:
 # TaskStopTool 测试
 # ============================================================
 
+
 class TestTaskStopTool:
     """测试 TaskStopTool"""
 
@@ -278,6 +291,7 @@ class TestTaskStopTool:
 # TaskOutputTool 测试
 # ============================================================
 
+
 class TestTaskOutputTool:
     """测试 TaskOutputTool"""
 
@@ -288,6 +302,7 @@ class TestTaskOutputTool:
     @pytest.mark.asyncio
     async def test_output_done_task(self, tool):
         from app.modules.tools.task_store import get_task
+
         _create_test_task("task001", "Done Task", status="done")
         # 手动设置 result
         task = get_task("task001")
@@ -309,6 +324,7 @@ class TestTaskOutputTool:
     @pytest.mark.asyncio
     async def test_output_truncate(self, tool):
         from app.modules.tools.task_store import get_task
+
         _create_test_task("task001", "Task", status="done")
         task = get_task("task001")
         task["result"] = "A" * 200
@@ -324,6 +340,7 @@ class TestTaskOutputTool:
 # TodoWriteTool 测试
 # ============================================================
 
+
 class TestTodoWriteTool:
     """测试 TodoWriteTool"""
 
@@ -336,10 +353,12 @@ class TestTodoWriteTool:
 
     @pytest.mark.asyncio
     async def test_create_todos(self, tool):
-        todos = json.dumps([
-            {"id": "1", "subject": "Fix bug", "status": "in_progress"},
-            {"id": "2", "subject": "Add feature", "status": "pending"},
-        ])
+        todos = json.dumps(
+            [
+                {"id": "1", "subject": "Fix bug", "status": "in_progress"},
+                {"id": "2", "subject": "Add feature", "status": "pending"},
+            ]
+        )
         result = await tool.execute(todos=todos)
         data = json.loads(result)
         assert data["success"] is True
@@ -354,10 +373,12 @@ class TestTodoWriteTool:
         await tool.execute(todos=todos)
 
         # Then update
-        todos2 = json.dumps([
-            {"id": "1", "subject": "Task A", "status": "completed"},
-            {"id": "2", "subject": "Task B", "status": "in_progress"},
-        ])
+        todos2 = json.dumps(
+            [
+                {"id": "1", "subject": "Task A", "status": "completed"},
+                {"id": "2", "subject": "Task B", "status": "in_progress"},
+            ]
+        )
         result = await tool.execute(todos=todos2)
         data = json.loads(result)
         assert data["total"] == 2
@@ -399,13 +420,16 @@ class TestTodoWriteTool:
     @pytest.mark.asyncio
     async def test_session_isolation(self, tool):
         todos_a = json.dumps([{"id": "1", "subject": "Session A", "status": "pending"}])
-        todos_b = json.dumps([{"id": "2", "subject": "Session B", "status": "completed"}])
+        todos_b = json.dumps(
+            [{"id": "2", "subject": "Session B", "status": "completed"}]
+        )
 
         await tool.execute(todos=todos_a, session_id="session-a")
         await tool.execute(todos=todos_b, session_id="session-b")
 
         # Verify isolation
         from app.modules.tools.todo_write import _agent_todos
+
         assert len(_agent_todos["session-a"]) == 1
         assert _agent_todos["session-a"][0]["subject"] == "Session A"
         assert len(_agent_todos["session-b"]) == 1
@@ -416,23 +440,27 @@ class TestTodoWriteTool:
 # TaskStore 单元测试
 # ============================================================
 
+
 class TestTaskStoreUnit:
     """测试 task_store 状态转换"""
 
     def test_valid_transition_pending_to_running(self):
         from app.modules.tools.task_store import create_task, update_task_status
+
         create_task("t1", "Task")
         ok = update_task_status("t1", "running")
         assert ok is True
 
     def test_invalid_transition_pending_to_done(self):
         from app.modules.tools.task_store import create_task, update_task_status
+
         create_task("t2", "Task")
         ok = update_task_status("t2", "done")
         assert ok is False
 
     def test_terminal_no_update(self):
         from app.modules.tools.task_store import create_task, update_task_status
+
         create_task("t3", "Task")
         update_task_status("t3", "running")
         update_task_status("t3", "done")
@@ -442,13 +470,15 @@ class TestTaskStoreUnit:
 
     def test_get_task_count(self):
         from app.modules.tools.task_store import create_task, get_task_count
+
         create_task("t1", "Task 1")
         create_task("t2", "Task 2")
         stats = get_task_count()
         assert stats["total"] == 2
 
     def test_remove_task(self):
-        from app.modules.tools.task_store import create_task, remove_task, get_task
+        from app.modules.tools.task_store import create_task, get_task, remove_task
+
         create_task("t1", "Task")
         assert remove_task("t1") is True
         assert get_task("t1") is None

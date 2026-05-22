@@ -5,14 +5,15 @@ Track 1 — MEMORY.md 纯文本记忆存储
 
 import json
 import tempfile
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app.modules.agent.memory import MemoryStore
 from app.modules.tools.builtin import (
-    FileMemoryWriteTool,
-    FileMemorySearchTool,
     FileMemoryReadTool,
+    FileMemorySearchTool,
+    FileMemoryWriteTool,
 )
 
 
@@ -37,6 +38,7 @@ def populated_store(memory_store):
 # ============================================================
 # FileMemoryWriteTool 测试
 # ============================================================
+
 
 class TestFileMemoryWriteTool:
     @pytest.mark.asyncio
@@ -77,7 +79,7 @@ class TestFileMemoryWriteTool:
         )
         tool = FileMemoryWriteTool()
         for i in range(3):
-            result_str = await tool.execute(content=f"记忆条目{i+1}", source="test")
+            result_str = await tool.execute(content=f"记忆条目{i + 1}", source="test")
             result = json.loads(result_str)
             assert result["success"] is True
             assert result["line_number"] == i + 1
@@ -98,6 +100,7 @@ class TestFileMemoryWriteTool:
 # ============================================================
 # FileMemorySearchTool 测试
 # ============================================================
+
 
 class TestFileMemorySearchTool:
     @pytest.mark.asyncio
@@ -155,13 +158,14 @@ class TestFileMemorySearchTool:
         )
         tool = FileMemorySearchTool()
         result = await tool.execute(keywords="的", max_results=2)
-        lines = [l for l in result.split("\n") if l.startswith("[")]
+        lines = [line for line in result.split("\n") if line.startswith("[")]
         assert len(lines) <= 3
 
 
 # ============================================================
 # FileMemoryReadTool 测试
 # ============================================================
+
 
 class TestFileMemoryReadTool:
     @pytest.mark.asyncio
@@ -173,7 +177,7 @@ class TestFileMemoryReadTool:
         )
         tool = FileMemoryReadTool()
         result = await tool.execute(recent=2)
-        lines = [l for l in result.split("\n") if l.startswith("[")]
+        lines = [line for line in result.split("\n") if line.startswith("[")]
         assert len(lines) == 2
 
     @pytest.mark.asyncio
@@ -207,7 +211,7 @@ class TestFileMemoryReadTool:
         )
         tool = FileMemoryReadTool()
         result = await tool.execute(start=1, end=2)
-        lines = [l for l in result.split("\n") if l.startswith("[")]
+        lines = [line for line in result.split("\n") if line.startswith("[")]
         assert len(lines) == 2
         assert "[1]" in lines[0]
         assert "[2]" in lines[1]
@@ -228,6 +232,7 @@ class TestFileMemoryReadTool:
 # ============================================================
 # MemoryStore 底层单元测试
 # ============================================================
+
 
 class TestMemoryStore:
     def test_append_and_read(self, memory_store):
@@ -291,7 +296,9 @@ class TestMemoryStore:
         memory_store.append_entry("system", "System maintenance log")
         results = memory_store.search_entries(["Python"], match_mode="or")
         assert len(results) == 2
-        results_and = memory_store.search_entries(["Python", "backup"], match_mode="and")
+        results_and = memory_store.search_entries(
+            ["Python", "backup"], match_mode="and"
+        )
         assert len(results_and) == 1
 
     def test_write_all(self, memory_store):

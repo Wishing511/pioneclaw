@@ -36,27 +36,36 @@ class TaskOutputTool(BaseTool):
     async def execute(self, task_id: str, truncate: int = 5000, **kwargs) -> str:
         try:
             if not task_id or not task_id.strip():
-                return json.dumps({
-                    "success": False,
-                    "error": "task_id 不能为空",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "task_id 不能为空",
+                    },
+                    ensure_ascii=False,
+                )
 
             task = _store_get_task(task_id.strip())
             if not task:
-                return json.dumps({
-                    "success": False,
-                    "error": f"任务不存在: '{task_id}'",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"任务不存在: '{task_id}'",
+                    },
+                    ensure_ascii=False,
+                )
 
             current_status = task.get("status", "unknown")
 
             if current_status != "done":
-                return json.dumps({
-                    "success": False,
-                    "error": f"任务 '{task_id}' 尚未完成（当前状态: {current_status}）。"
-                             f"请等待任务完成后再获取输出。",
-                    "status": current_status,
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"任务 '{task_id}' 尚未完成（当前状态: {current_status}）。"
+                        f"请等待任务完成后再获取输出。",
+                        "status": current_status,
+                    },
+                    ensure_ascii=False,
+                )
 
             output = task.get("result", "")
             truncated = False
@@ -64,14 +73,17 @@ class TaskOutputTool(BaseTool):
                 output = output[:truncate] + "...(已截断)"
                 truncated = True
 
-            return json.dumps({
-                "success": True,
-                "task_id": task_id.strip(),
-                "task_label": task.get("label", ""),
-                "output": output if output else "(无输出)",
-                "truncated": truncated,
-                "output_length": len(output) if output else 0,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "task_id": task_id.strip(),
+                    "task_label": task.get("label", ""),
+                    "output": output if output else "(无输出)",
+                    "truncated": truncated,
+                    "output_length": len(output) if output else 0,
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TaskOutputTool execution error: {e}")

@@ -2,29 +2,28 @@
 Workspace 管理 API
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from typing import List, Optional
 from datetime import datetime, timezone
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
+from app.core.database import get_db
 from app.models import User, Workspace
-from app.schemas.workspace import (
-    WorkspaceCreate,
-    WorkspaceUpdate,
-    WorkspaceSettingsUpdate,
-    WorkspaceResponse,
-    WorkspaceBrief,
-    WorkspaceSettings,
-)
 from app.schemas import MessageResponse
+from app.schemas.workspace import (
+    WorkspaceBrief,
+    WorkspaceCreate,
+    WorkspaceResponse,
+    WorkspaceSettingsUpdate,
+    WorkspaceUpdate,
+)
 
 router = APIRouter(prefix="/workspaces", tags=["工作空间"])
 
 
-@router.get("", response_model=List[WorkspaceResponse])
+@router.get("", response_model=list[WorkspaceResponse])
 async def list_workspaces(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -32,7 +31,7 @@ async def list_workspaces(
     """获取当前用户的 workspace 列表"""
     result = await db.execute(
         select(Workspace)
-        .where(Workspace.owner_id == current_user.id, Workspace.is_active == True)
+        .where(Workspace.owner_id == current_user.id, Workspace.is_active)
         .order_by(Workspace.is_default.desc(), Workspace.updated_at.desc())
     )
     workspaces = result.scalars().all()
@@ -61,7 +60,7 @@ async def create_workspace(
     return workspace
 
 
-@router.get("/brief", response_model=List[WorkspaceBrief])
+@router.get("/brief", response_model=list[WorkspaceBrief])
 async def list_workspaces_brief(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -69,7 +68,7 @@ async def list_workspaces_brief(
     """获取简要 workspace 列表（下拉选择用）"""
     result = await db.execute(
         select(Workspace)
-        .where(Workspace.owner_id == current_user.id, Workspace.is_active == True)
+        .where(Workspace.owner_id == current_user.id, Workspace.is_active)
         .order_by(Workspace.is_default.desc())
     )
     return result.scalars().all()
@@ -171,7 +170,7 @@ async def activate_workspace(
     result = await db.execute(
         select(Workspace).where(
             Workspace.owner_id == current_user.id,
-            Workspace.is_default == True,
+            Workspace.is_default,
         )
     )
     for ws in result.scalars().all():
@@ -204,9 +203,11 @@ async def delete_workspace(
 
     # 检查是否是唯一 workspace
     count_result = await db.execute(
-        select(func.count()).select_from(Workspace).where(
+        select(func.count())
+        .select_from(Workspace)
+        .where(
             Workspace.owner_id == current_user.id,
-            Workspace.is_active == True,
+            Workspace.is_active,
         )
     )
     count = count_result.scalar() or 0

@@ -1,6 +1,5 @@
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
-from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -35,7 +34,7 @@ class Settings(BaseSettings):
     BRAVE_API_KEY: str = ""  # Brave Search API Key（可选）
 
     # Redis 配置 (可选)
-    REDIS_URL: Optional[str] = None
+    REDIS_URL: str | None = None
 
     # CORS 配置
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
@@ -62,7 +61,7 @@ class Settings(BaseSettings):
     # Stage VV: 持久化记忆增强
     VV_MEMORY_EXTRACTION_ENABLED: bool = True
     VV_SESSION_MEMORY_ENABLED: bool = True
-    VV_DREAM_ENABLED: bool = False      # P2 可选，默认关闭
+    VV_DREAM_ENABLED: bool = False  # P2 可选，默认关闭
     VV_MAGIC_DOCS_ENABLED: bool = False  # P2 可选，默认关闭
 
     # Stage QQ: Provider 预检（启动时验证 LLM provider 连通性）

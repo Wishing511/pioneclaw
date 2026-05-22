@@ -14,15 +14,10 @@
 - QQ
 """
 
+# 导入所有渠道适配器以触发注册
+from . import dingtalk, feishu, qq, wechat, wecom  # noqa: F401
 from .base import BaseChannel, ChannelConfig, ChannelMessage, ChannelType
 from .manager import ChannelManager, get_channel_manager
-
-# 导入所有渠道适配器以触发注册
-from . import feishu
-from . import dingtalk
-from . import wecom
-from . import qq
-from . import wechat
 
 __all__ = [
     "BaseChannel",

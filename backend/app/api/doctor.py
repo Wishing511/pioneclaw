@@ -1,16 +1,18 @@
 """
 Doctor 系统诊断 — DB / 模型 / 磁盘 / 配置健康检查
 """
+
 import os
 import shutil
-import socket
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.auth import get_current_active_user
 from app.core import get_db
 from app.models import User
-from app.api.auth import get_current_active_user
 
 router = APIRouter(prefix="/doctor", tags=["系统诊断"])
 
@@ -46,58 +48,75 @@ async def run_doctor(
         total_gb = usage.total / (1024**3)
         pct = (1 - usage.free / usage.total) * 100
         status = "ok" if free_gb > 5 else ("warn" if free_gb > 1 else "error")
-        checks.append({
-            "name": "磁盘空间",
-            "status": status,
-            "detail": f"已用 {pct:.1f}%，剩余 {free_gb:.1f} GB / {total_gb:.1f} GB",
-        })
+        checks.append(
+            {
+                "name": "磁盘空间",
+                "status": status,
+                "detail": f"已用 {pct:.1f}%，剩余 {free_gb:.1f} GB / {total_gb:.1f} GB",
+            }
+        )
     except Exception as e:
         checks.append({"name": "磁盘空间", "status": "error", "detail": str(e)})
 
     # 4. 配置完整性
     try:
         from app.core.config import settings
+
         issues = []
         if not settings.SECRET_KEY or len(settings.SECRET_KEY) < 16:
             issues.append("SECRET_KEY 未配置或过短")
         if not settings.DATABASE_URL:
             issues.append("DATABASE_URL 未配置")
-        checks.append({
-            "name": "配置完整性",
-            "status": "error" if issues else "ok",
-            "detail": "; ".join(issues) if issues else "关键配置完整",
-        })
+        checks.append(
+            {
+                "name": "配置完整性",
+                "status": "error" if issues else "ok",
+                "detail": "; ".join(issues) if issues else "关键配置完整",
+            }
+        )
     except Exception as e:
         checks.append({"name": "配置完整性", "status": "error", "detail": str(e)})
 
     # 5. 模型可用性（快速检查）
     try:
-        from app.models import AIModelConfig
         from sqlalchemy import select
-        r = await db.execute(select(AIModelConfig).where(AIModelConfig.is_active == True).limit(1))
+
+        from app.models import AIModelConfig
+
+        r = await db.execute(
+            select(AIModelConfig).where(AIModelConfig.is_active).limit(1)
+        )
         config = r.scalar_one_or_none()
         if config:
-            checks.append({
-                "name": "AI 模型配置",
-                "status": "ok",
-                "detail": f"默认模型: {config.model_name} ({config.provider})",
-            })
+            checks.append(
+                {
+                    "name": "AI 模型配置",
+                    "status": "ok",
+                    "detail": f"默认模型: {config.model_name} ({config.provider})",
+                }
+            )
         else:
-            checks.append({"name": "AI 模型配置", "status": "warn", "detail": "无活跃模型配置"})
+            checks.append(
+                {"name": "AI 模型配置", "status": "warn", "detail": "无活跃模型配置"}
+            )
     except Exception as e:
         checks.append({"name": "AI 模型配置", "status": "warn", "detail": str(e)})
 
     # 6. Runner 状态
     try:
-        r = await db.execute(text("SELECT COUNT(*) FROM runners WHERE status = 'online'"))
+        r = await db.execute(
+            text("SELECT COUNT(*) FROM runners WHERE status = 'online'")
+        )
         online = r.scalar() or 0
         r2 = await db.execute(text("SELECT COUNT(*) FROM runners"))
         total = r2.scalar() or 0
-        checks.append({
-            "name": "Runner 状态",
-            "status": "ok",
-            "detail": f"{online}/{total} 在线",
-        })
+        checks.append(
+            {
+                "name": "Runner 状态",
+                "status": "ok",
+                "detail": f"{online}/{total} 在线",
+            }
+        )
     except Exception as e:
         checks.append({"name": "Runner 状态", "status": "warn", "detail": str(e)})
 

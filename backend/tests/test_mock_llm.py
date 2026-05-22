@@ -3,13 +3,16 @@ MockLLMProvider 单元测试（Stage NN）
 
 覆盖：脚本化响应、规则匹配、延迟模拟、错误注入、Stream/Non-stream、调用追踪
 """
+
 import asyncio
 import time
+
 import pytest
+
 from app.modules.llm import MockLLMProvider
 
-
 # ==================== 脚本化响应 ====================
+
 
 class TestScriptedResponses:
     """测试 add_response / add_responses 脚本化响应队列"""
@@ -17,9 +20,11 @@ class TestScriptedResponses:
     @pytest.mark.asyncio
     async def test_single_response_yielded(self):
         mock = MockLLMProvider()
-        mock.add_response([
-            {"content": "Hello, world!", "finish_reason": "stop"},
-        ])
+        mock.add_response(
+            [
+                {"content": "Hello, world!", "finish_reason": "stop"},
+            ]
+        )
         result = await mock.chat(messages=[{"role": "user", "content": "hi"}])
         assert result["content"] == "Hello, world!"
         assert result["finish_reason"] == "stop"
@@ -27,10 +32,12 @@ class TestScriptedResponses:
     @pytest.mark.asyncio
     async def test_multi_chunk_response(self):
         mock = MockLLMProvider()
-        mock.add_response([
-            {"content": "Hello "},
-            {"content": "World", "finish_reason": "stop"},
-        ])
+        mock.add_response(
+            [
+                {"content": "Hello "},
+                {"content": "World", "finish_reason": "stop"},
+            ]
+        )
         result = await mock.chat(messages=[{"role": "user", "content": "hi"}])
         assert result["content"] == "Hello World"
 
@@ -59,7 +66,9 @@ class TestScriptedResponses:
     @pytest.mark.asyncio
     async def test_add_empty_chunks_defaults_to_stop(self):
         mock = MockLLMProvider()
-        mock.add_response([])  # empty list → defaults to [{"content": "", "finish_reason": "stop"}]
+        mock.add_response(
+            []
+        )  # empty list → defaults to [{"content": "", "finish_reason": "stop"}]
         result = await mock.chat(messages=[{"role": "user", "content": "hi"}])
         assert result["content"] == ""
         assert result["finish_reason"] == "stop"
@@ -67,11 +76,13 @@ class TestScriptedResponses:
     @pytest.mark.asyncio
     async def test_batch_add_responses(self):
         mock = MockLLMProvider()
-        mock.add_responses([
-            [{"content": "a", "finish_reason": "stop"}],
-            [{"content": "b", "finish_reason": "stop"}],
-            [{"content": "c", "finish_reason": "stop"}],
-        ])
+        mock.add_responses(
+            [
+                [{"content": "a", "finish_reason": "stop"}],
+                [{"content": "b", "finish_reason": "stop"}],
+                [{"content": "c", "finish_reason": "stop"}],
+            ]
+        )
         for expected in ["a", "b", "c"]:
             r = await mock.chat(messages=[{"role": "user", "content": "x"}])
             assert r["content"] == expected
@@ -87,6 +98,7 @@ class TestScriptedResponses:
 
 # ==================== 规则匹配 ====================
 
+
 class TestRuleBasedMatching:
     """测试 add_rule 正则匹配响应"""
 
@@ -97,7 +109,9 @@ class TestRuleBasedMatching:
             pattern=r"weather",
             responses=[[{"content": "It's sunny!", "finish_reason": "stop"}]],
         )
-        result = await mock.chat(messages=[{"role": "user", "content": "What's the weather?"}])
+        result = await mock.chat(
+            messages=[{"role": "user", "content": "What's the weather?"}]
+        )
         assert result["content"] == "It's sunny!"
 
     @pytest.mark.asyncio
@@ -109,7 +123,9 @@ class TestRuleBasedMatching:
             responses=[[{"content": "rule response", "finish_reason": "stop"}]],
         )
         # Even though queue has a response, rule matches first
-        result = await mock.chat(messages=[{"role": "user", "content": "urgent message"}])
+        result = await mock.chat(
+            messages=[{"role": "user", "content": "urgent message"}]
+        )
         assert result["content"] == "rule response"
         # Queue response still available
         result2 = await mock.chat(messages=[{"role": "user", "content": "normal"}])
@@ -124,7 +140,9 @@ class TestRuleBasedMatching:
         )
         mock.add_response([{"content": "default", "finish_reason": "stop"}])
 
-        result = await mock.chat(messages=[{"role": "user", "content": "tell me a joke"}])
+        result = await mock.chat(
+            messages=[{"role": "user", "content": "tell me a joke"}]
+        )
         assert result["content"] == "default"
 
     @pytest.mark.asyncio
@@ -145,6 +163,7 @@ class TestRuleBasedMatching:
 
 # ==================== 延迟模拟 ====================
 
+
 class TestLatencySimulation:
     """测试 set_latency 延迟模拟"""
 
@@ -163,6 +182,7 @@ class TestLatencySimulation:
 
 
 # ==================== 错误注入 ====================
+
 
 class TestErrorInjection:
     """测试 inject_error 错误注入"""
@@ -199,20 +219,25 @@ class TestErrorInjection:
 
 # ==================== Stream / Non-stream ====================
 
+
 class TestStreamAndNonStream:
     """测试 chat_stream 和 chat 双模式"""
 
     @pytest.mark.asyncio
     async def test_chat_stream_yields_individual_chunks(self):
         mock = MockLLMProvider()
-        mock.add_response([
-            {"content": "Hello "},
-            {"content": "World"},
-            {"content": "", "finish_reason": "stop"},
-        ])
+        mock.add_response(
+            [
+                {"content": "Hello "},
+                {"content": "World"},
+                {"content": "", "finish_reason": "stop"},
+            ]
+        )
 
         chunks = []
-        async for chunk in mock.chat_stream(messages=[{"role": "user", "content": "hi"}]):
+        async for chunk in mock.chat_stream(
+            messages=[{"role": "user", "content": "hi"}]
+        ):
             chunks.append(chunk)
 
         assert len(chunks) == 3
@@ -223,11 +248,13 @@ class TestStreamAndNonStream:
     @pytest.mark.asyncio
     async def test_chat_merges_all_chunks(self):
         mock = MockLLMProvider()
-        mock.add_response([
-            {"content": "part1 "},
-            {"content": "part2 "},
-            {"content": "part3", "finish_reason": "stop"},
-        ])
+        mock.add_response(
+            [
+                {"content": "part1 "},
+                {"content": "part2 "},
+                {"content": "part3", "finish_reason": "stop"},
+            ]
+        )
 
         result = await mock.chat(messages=[{"role": "user", "content": "hi"}])
         assert result["content"] == "part1 part2 part3"
@@ -239,7 +266,7 @@ class TestStreamAndNonStream:
         mock = MockLLMProvider()
         mock.add_response([{"content": "ok", "finish_reason": "stop"}])
 
-        async for chunk in mock.chat_stream(
+        async for _chunk in mock.chat_stream(
             messages=[{"role": "user", "content": "hi"}],
             tools=[{"type": "function", "function": {"name": "search"}}],
             model="gpt-4",
@@ -258,17 +285,30 @@ class TestStreamAndNonStream:
     @pytest.mark.asyncio
     async def test_chat_with_tool_calls(self):
         mock = MockLLMProvider()
-        mock.add_response([
-            {"tool_call": {"id": "call_1", "name": "search", "arguments": {"query": "test"}}},
-            {"content": "", "finish_reason": "tool_calls"},
-        ])
+        mock.add_response(
+            [
+                {
+                    "tool_call": {
+                        "id": "call_1",
+                        "name": "search",
+                        "arguments": {"query": "test"},
+                    }
+                },
+                {"content": "", "finish_reason": "tool_calls"},
+            ]
+        )
 
-        result = await mock.chat(messages=[{"role": "user", "content": "search for test"}])
-        assert result["tool_calls"] == [{"id": "call_1", "name": "search", "arguments": {"query": "test"}}]
+        result = await mock.chat(
+            messages=[{"role": "user", "content": "search for test"}]
+        )
+        assert result["tool_calls"] == [
+            {"id": "call_1", "name": "search", "arguments": {"query": "test"}}
+        ]
         assert result["finish_reason"] == "tool_calls"
 
 
 # ==================== 调用追踪 ====================
+
 
 class TestCallTracking:
     """测试 call_count / call_history 调用追踪"""
@@ -276,11 +316,13 @@ class TestCallTracking:
     @pytest.mark.asyncio
     async def test_call_count_increments(self):
         mock = MockLLMProvider()
-        mock.add_responses([
-            [{"content": "a", "finish_reason": "stop"}],
-            [{"content": "b", "finish_reason": "stop"}],
-            [{"content": "c", "finish_reason": "stop"}],
-        ])
+        mock.add_responses(
+            [
+                [{"content": "a", "finish_reason": "stop"}],
+                [{"content": "b", "finish_reason": "stop"}],
+                [{"content": "c", "finish_reason": "stop"}],
+            ]
+        )
         assert mock.call_count == 0
         await mock.chat(messages=[{"role": "user", "content": "1"}])
         assert mock.call_count == 1
@@ -314,10 +356,12 @@ class TestCallTracking:
     @pytest.mark.asyncio
     async def test_reset_call_tracking(self):
         mock = MockLLMProvider()
-        mock.add_responses([
-            [{"content": "a", "finish_reason": "stop"}],
-            [{"content": "b", "finish_reason": "stop"}],
-        ])
+        mock.add_responses(
+            [
+                [{"content": "a", "finish_reason": "stop"}],
+                [{"content": "b", "finish_reason": "stop"}],
+            ]
+        )
         await mock.chat(messages=[{"role": "user", "content": "1"}])
         await mock.chat(messages=[{"role": "user", "content": "2"}])
         assert mock.call_count == 2
@@ -329,11 +373,13 @@ class TestCallTracking:
     @pytest.mark.asyncio
     async def test_get_calls_to_model(self):
         mock = MockLLMProvider()
-        mock.add_responses([
-            [{"content": "a", "finish_reason": "stop"}],
-            [{"content": "b", "finish_reason": "stop"}],
-            [{"content": "c", "finish_reason": "stop"}],
-        ])
+        mock.add_responses(
+            [
+                [{"content": "a", "finish_reason": "stop"}],
+                [{"content": "b", "finish_reason": "stop"}],
+                [{"content": "c", "finish_reason": "stop"}],
+            ]
+        )
         await mock.chat(messages=[{"role": "user", "content": "1"}], model="gpt-4")
         await mock.chat(messages=[{"role": "user", "content": "2"}], model="claude")
         await mock.chat(messages=[{"role": "user", "content": "3"}], model="gpt-4")
@@ -358,6 +404,7 @@ class TestCallTracking:
 
 # ==================== Token 计数 ====================
 
+
 class TestCountTokens:
     """测试 count_tokens 估计"""
 
@@ -369,13 +416,18 @@ class TestCountTokens:
 
     def test_multimodal_content(self):
         mock = MockLLMProvider()
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Describe this image"},
-                {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
-            ],
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/img.png"},
+                    },
+                ],
+            }
+        ]
         tokens = mock.count_tokens(messages)
         assert tokens >= 4
 
@@ -386,6 +438,7 @@ class TestCountTokens:
 
 
 # ==================== 辅助方法 ====================
+
 
 class TestStats:
     """测试 get_stats"""
@@ -410,23 +463,29 @@ class TestStats:
 
 # ==================== Mock 助手函数 ====================
 
+
 class TestMockHelpers:
     """测试 mock_helpers 工厂函数和断言工具"""
 
     @pytest.mark.asyncio
     async def test_create_echo_mock_returns_last_user_message(self):
         from tests.mock_helpers import create_echo_mock
+
         mock = create_echo_mock()
-        result = await mock.chat(messages=[
-            {"role": "system", "content": "You are helpful."},
-            {"role": "user", "content": "What is the weather?"},
-        ])
+        result = await mock.chat(
+            messages=[
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "What is the weather?"},
+            ]
+        )
         assert result["content"] == "What is the weather?"
 
     @pytest.mark.asyncio
     async def test_echo_mock_with_delay(self):
-        from tests.mock_helpers import create_echo_mock
         import time
+
+        from tests.mock_helpers import create_echo_mock
+
         mock = create_echo_mock(delay_ms=50)
         start = time.monotonic()
         result = await mock.chat(messages=[{"role": "user", "content": "hi"}])
@@ -437,6 +496,7 @@ class TestMockHelpers:
     @pytest.mark.asyncio
     async def test_create_scripted_mock(self):
         from tests.mock_helpers import create_scripted_mock
+
         mock = create_scripted_mock(["first", "second", "third"])
         r1 = await mock.chat(messages=[{"role": "user", "content": "q1"}])
         r2 = await mock.chat(messages=[{"role": "user", "content": "q2"}])
@@ -447,51 +507,56 @@ class TestMockHelpers:
 
     def test_assert_tool_called_passes(self):
         from tests.mock_helpers import assert_tool_called
+
         mock = MockLLMProvider()
-        mock.add_response([
-            {"tool_call": {"id": "1", "name": "search", "arguments": {"q": "x"}}},
-            {"content": "", "finish_reason": "tool_calls"},
-        ])
-        import asyncio
+        mock.add_response(
+            [
+                {"tool_call": {"id": "1", "name": "search", "arguments": {"q": "x"}}},
+                {"content": "", "finish_reason": "tool_calls"},
+            ]
+        )
         asyncio.run(mock.chat(messages=[{"role": "user", "content": "search x"}]))
         assert_tool_called(mock, "search")  # should not raise
 
     def test_assert_tool_called_raises_on_missing(self):
         from tests.mock_helpers import assert_tool_called
+
         mock = MockLLMProvider()
         mock.add_response([{"content": "no tools here", "finish_reason": "stop"}])
-        import asyncio
         asyncio.run(mock.chat(messages=[{"role": "user", "content": "hi"}]))
         with pytest.raises(AssertionError, match="not called"):
             assert_tool_called(mock, "search")
 
     def test_assert_agent_says_contains(self):
         from tests.mock_helpers import assert_agent_says
+
         mock = MockLLMProvider()
-        mock.add_response([{"content": "The weather is sunny today", "finish_reason": "stop"}])
-        import asyncio
+        mock.add_response(
+            [{"content": "The weather is sunny today", "finish_reason": "stop"}]
+        )
         asyncio.run(mock.chat(messages=[{"role": "user", "content": "weather?"}]))
         assert_agent_says(mock, "sunny")  # should not raise
 
     def test_assert_agent_says_exact_match(self):
         from tests.mock_helpers import assert_agent_says
+
         mock = MockLLMProvider()
         mock.add_response([{"content": "exact match", "finish_reason": "stop"}])
-        import asyncio
         asyncio.run(mock.chat(messages=[{"role": "user", "content": "hi"}]))
         assert_agent_says(mock, "exact match", contains=False)
 
     def test_assert_agent_says_raises_on_missing(self):
         from tests.mock_helpers import assert_agent_says
+
         mock = MockLLMProvider()
         mock.add_response([{"content": "hello world", "finish_reason": "stop"}])
-        import asyncio
         asyncio.run(mock.chat(messages=[{"role": "user", "content": "hi"}]))
         with pytest.raises(AssertionError, match="not found"):
             assert_agent_says(mock, "missing text")
 
 
 # ==================== 集成测试 ====================
+
 
 class TestIntegration:
     """测试 MockLLMProvider 与 Agent 组件的集成"""
@@ -501,16 +566,28 @@ class TestIntegration:
         """验证 MockProvider 可以驱动 AgentLoop 的典型消费模式"""
         mock = MockLLMProvider()
         # 模拟典型的 Agent 一轮对话：先产出 tool_call，再产出最终回复
-        mock.add_response([
-            {"tool_call": {"id": "call_1", "name": "read_file", "arguments": {"path": "/test.txt"}}},
-            {"content": "", "finish_reason": "tool_calls"},
-        ])
-        mock.add_response([
-            {"content": "The file contains: hello world", "finish_reason": "stop"},
-        ])
+        mock.add_response(
+            [
+                {
+                    "tool_call": {
+                        "id": "call_1",
+                        "name": "read_file",
+                        "arguments": {"path": "/test.txt"},
+                    }
+                },
+                {"content": "", "finish_reason": "tool_calls"},
+            ]
+        )
+        mock.add_response(
+            [
+                {"content": "The file contains: hello world", "finish_reason": "stop"},
+            ]
+        )
 
         chunks = []
-        async for chunk in mock.chat_stream(messages=[{"role": "user", "content": "read /test.txt"}]):
+        async for chunk in mock.chat_stream(
+            messages=[{"role": "user", "content": "read /test.txt"}]
+        ):
             chunks.append(chunk)
 
         # 第一个响应应该包含 tool_call
@@ -519,11 +596,22 @@ class TestIntegration:
         assert tool_chunks[0]["tool_call"]["name"] == "read_file"
 
         # 第二个响应应该是文本回复
-        r2 = await mock.chat(messages=[
-            {"role": "user", "content": "read /test.txt"},
-            {"role": "assistant", "tool_calls": [{"id": "call_1", "name": "read_file", "arguments": {"path": "/test.txt"}}]},
-            {"role": "tool", "tool_call_id": "call_1", "content": "hello world"},
-        ])
+        r2 = await mock.chat(
+            messages=[
+                {"role": "user", "content": "read /test.txt"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "read_file",
+                            "arguments": {"path": "/test.txt"},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_1", "content": "hello world"},
+            ]
+        )
         assert "hello world" in r2["content"]
 
     @pytest.mark.asyncio

@@ -4,21 +4,17 @@ Interrupt API - 中断与恢复 API
 提供中断管理和检查点操作的 REST API
 """
 
-from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
 from app.api.auth import get_current_active_user
 from app.models import User
 from app.modules.agent.interrupt import (
+    Checkpoint,
     InterruptManager,
+    InterruptOption,
     InterruptPoint,
     InterruptReason,
-    InterruptStatus,
-    InterruptOption,
-    Checkpoint,
     get_interrupt_manager,
 )
 
@@ -27,8 +23,10 @@ router = APIRouter(prefix="/interrupt", tags=["中断管理"])
 
 # ==================== Pydantic Models ====================
 
+
 class InterruptOptionSchema(BaseModel):
     """中断选项"""
+
     label: str
     value: str
     description: str = ""
@@ -39,6 +37,7 @@ class InterruptOptionSchema(BaseModel):
 
 class CreateInterruptRequest(BaseModel):
     """创建中断请求"""
+
     reason: str = Field(..., description="中断原因")
     message: str = Field(..., description="中断消息")
     title: str = Field("", description="标题")
@@ -47,12 +46,15 @@ class CreateInterruptRequest(BaseModel):
     conversation_id: str = Field("", description="对话 ID")
     session_id: str = Field("", description="会话 ID")
     details: dict = Field(default_factory=dict, description="详细信息")
-    options: List[InterruptOptionSchema] = Field(default_factory=list, description="可选项")
-    ttl: Optional[float] = Field(None, description="过期时间（秒）")
+    options: list[InterruptOptionSchema] = Field(
+        default_factory=list, description="可选项"
+    )
+    ttl: float | None = Field(None, description="过期时间（秒）")
 
 
 class ResolveInterruptRequest(BaseModel):
     """解决中断请求"""
+
     resolution: str = Field(..., description="解决方式：approve/reject/modify/cancel")
     resolution_note: str = Field("", description="解决备注")
     modified_state: dict = Field(default_factory=dict, description="修改后的状态")
@@ -60,6 +62,7 @@ class ResolveInterruptRequest(BaseModel):
 
 class InterruptResponse(BaseModel):
     """中断响应"""
+
     id: str
     reason: str
     status: str
@@ -70,12 +73,12 @@ class InterruptResponse(BaseModel):
     title: str
     message: str
     details: dict
-    options: List[dict]
+    options: list[dict]
     created_at: float
-    expires_at: Optional[float]
-    resolved_at: Optional[float]
-    resolution: Optional[str]
-    resolved_by: Optional[int]
+    expires_at: float | None
+    resolved_at: float | None
+    resolution: str | None
+    resolved_by: int | None
     resolution_note: str
 
     class Config:
@@ -84,19 +87,21 @@ class InterruptResponse(BaseModel):
 
 class InterruptListResponse(BaseModel):
     """中断列表响应"""
-    items: List[InterruptResponse]
+
+    items: list[InterruptResponse]
     total: int
 
 
 class CheckpointResponse(BaseModel):
     """检查点响应"""
+
     id: str
     agent_id: str
     name: str
     state: dict
-    messages: List[dict]
+    messages: list[dict]
     iteration: int
-    tool_calls: List[dict]
+    tool_calls: list[dict]
     created_at: float
     metadata: dict
 
@@ -106,30 +111,34 @@ class CheckpointResponse(BaseModel):
 
 class CheckpointListResponse(BaseModel):
     """检查点列表响应"""
-    items: List[CheckpointResponse]
+
+    items: list[CheckpointResponse]
     total: int
 
 
 class SaveCheckpointRequest(BaseModel):
     """保存检查点请求"""
+
     name: str = Field("", description="检查点名称")
     agent_id: str = Field(..., description="Agent ID")
     state: dict = Field(default_factory=dict, description="状态快照")
-    messages: List[dict] = Field(default_factory=list, description="消息列表")
+    messages: list[dict] = Field(default_factory=list, description="消息列表")
     iteration: int = Field(0, description="当前迭代次数")
-    tool_calls: List[dict] = Field(default_factory=list, description="工具调用列表")
+    tool_calls: list[dict] = Field(default_factory=list, description="工具调用列表")
     metadata: dict = Field(default_factory=dict, description="元数据")
 
 
 class RestoreCheckpointResponse(BaseModel):
     """恢复检查点响应"""
+
     state: dict
-    messages: List[dict]
+    messages: list[dict]
     iteration: int
-    tool_calls: List[dict]
+    tool_calls: list[dict]
 
 
 # ==================== API Endpoints ====================
+
 
 @router.post("/", response_model=InterruptResponse, status_code=status.HTTP_201_CREATED)
 async def create_interrupt(
@@ -143,17 +152,21 @@ async def create_interrupt(
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Invalid reason: {data.reason}")
 
-    options = [
-        InterruptOption(
-            label=o.label,
-            value=o.value,
-            description=o.description,
-            requires_input=o.requires_input,
-            input_placeholder=o.input_placeholder,
-            style=o.style,
-        )
-        for o in data.options
-    ] if data.options else None
+    options = (
+        [
+            InterruptOption(
+                label=o.label,
+                value=o.value,
+                description=o.description,
+                requires_input=o.requires_input,
+                input_placeholder=o.input_placeholder,
+                style=o.style,
+            )
+            for o in data.options
+        ]
+        if data.options
+        else None
+    )
 
     interrupt = await manager.create_interrupt(
         reason=reason,
@@ -174,10 +187,10 @@ async def create_interrupt(
 
 @router.get("/", response_model=InterruptListResponse)
 async def list_interrupts(
-    conversation_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    agent_id: Optional[str] = None,
-    user_id: Optional[int] = None,
+    conversation_id: str | None = None,
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    user_id: int | None = None,
     manager: InterruptManager = Depends(get_interrupt_manager),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -270,7 +283,12 @@ async def cancel_interrupt(
 
 # ==================== Checkpoint Endpoints ====================
 
-@router.post("/checkpoints", response_model=CheckpointResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/checkpoints",
+    response_model=CheckpointResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def save_checkpoint(
     data: SaveCheckpointRequest,
     manager: InterruptManager = Depends(get_interrupt_manager),
@@ -304,7 +322,9 @@ async def list_checkpoints(
     )
 
 
-@router.get("/checkpoints/{agent_id}/{checkpoint_id}", response_model=CheckpointResponse)
+@router.get(
+    "/checkpoints/{agent_id}/{checkpoint_id}", response_model=CheckpointResponse
+)
 async def get_checkpoint(
     agent_id: str,
     checkpoint_id: str,
@@ -318,7 +338,9 @@ async def get_checkpoint(
     return _checkpoint_to_response(checkpoint)
 
 
-@router.post("/checkpoints/{checkpoint_id}/restore", response_model=RestoreCheckpointResponse)
+@router.post(
+    "/checkpoints/{checkpoint_id}/restore", response_model=RestoreCheckpointResponse
+)
 async def restore_checkpoint(
     checkpoint_id: str,
     manager: InterruptManager = Depends(get_interrupt_manager),
@@ -343,6 +365,7 @@ async def delete_checkpoint(
 
 
 # ==================== Helper Functions ====================
+
 
 def _interrupt_to_response(interrupt: InterruptPoint) -> InterruptResponse:
     """转换中断点到响应"""

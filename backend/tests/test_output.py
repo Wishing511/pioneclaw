@@ -4,22 +4,22 @@
 测试图片生成功能。
 """
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-import base64
 
 from app.modules.output.image_gen import (
+    ImageGenerationResult,
     ImageGenerator,
     ImageProvider,
-    OpenAIImageGenerator,
     MiniMaxImageGenerator,
-    ImageGenerationResult,
+    OpenAIImageGenerator,
 )
-
 
 # ------------------------------------------------------------------
 # 图片生成测试
 # ------------------------------------------------------------------
+
 
 class TestImageGenerationResult:
     """图片生成结果测试"""
@@ -31,7 +31,7 @@ class TestImageGenerationResult:
             image_url="https://example.com/image.png",
             revised_prompt="A beautiful sunset",
         )
-        assert result.success == True
+        assert result.success
         assert result.image_url == "https://example.com/image.png"
         assert result.error is None
 
@@ -41,7 +41,7 @@ class TestImageGenerationResult:
             success=False,
             error="API error",
         )
-        assert result.success == False
+        assert not result.success
         assert result.error == "API error"
 
 
@@ -85,7 +85,7 @@ class TestOpenAIImageGenerator:
 
             result = await generator.generate(prompt="A sunset")
 
-            assert result.success == True
+            assert result.success
             assert result.image_url == "https://example.com/image.png"
 
     @pytest.mark.asyncio
@@ -104,7 +104,7 @@ class TestOpenAIImageGenerator:
 
             result = await generator.generate(prompt="Test")
 
-            assert result.success == False
+            assert not result.success
             assert result.error is not None
 
 
@@ -143,7 +143,7 @@ class TestMiniMaxImageGenerator:
 
             result = await generator.generate(prompt="A sunset")
 
-            assert result.success == True
+            assert result.success
             assert result.image_url == "https://example.com/image.png"
 
 
@@ -197,6 +197,7 @@ class TestImageGenerator:
 # API 测试
 # ------------------------------------------------------------------
 
+
 class TestOutputAPI:
     """多模态输出 API 测试"""
 
@@ -211,6 +212,7 @@ class TestOutputAPI:
 # 工具函数
 # ------------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_user():
     """Mock 用户"""
@@ -224,4 +226,5 @@ def mock_user():
 def async_client():
     """Mock HTTP 客户端"""
     from httpx import AsyncClient
+
     return Mock(spec=AsyncClient)

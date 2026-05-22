@@ -5,27 +5,25 @@ Skills API - 技能管理接口
 """
 
 import logging
-from typing import Optional, List, Any
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
 from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from app.api.auth import get_current_active_user
 from app.models.models import User
 from app.modules.agent.skills import (
     SkillsLoader,
-    Skill,
     get_skills_loader,
 )
 from app.modules.agent.skills_config import (
     SkillsConfigManager,
-    ConfigStatus,
     get_config_manager,
 )
 from app.modules.agent.skills_schema import (
-    SkillsSchemaRegistry,
     SkillSchema,
-    SchemaField,
+    SkillsSchemaRegistry,
     get_schema_registry,
 )
 
@@ -36,34 +34,41 @@ router = APIRouter(prefix="/skills", tags=["技能管理"])
 
 # ==================== 请求模型 ====================
 
+
 class CreateSkillRequest(BaseModel):
     """创建技能请求"""
+
     name: str
     content: str
 
 
 class UpdateSkillRequest(BaseModel):
     """更新技能请求"""
+
     content: str
 
 
 class ToggleSkillRequest(BaseModel):
     """切换技能状态请求"""
+
     enabled: bool
 
 
 class SetConfigRequest(BaseModel):
     """设置配置请求"""
+
     config: dict
 
 
 class SetFieldRequest(BaseModel):
     """设置字段请求"""
+
     field_key: str
     value: Any
 
 
 # ==================== 依赖 ====================
+
 
 def get_loader() -> SkillsLoader:
     """获取技能加载器实例"""
@@ -84,6 +89,7 @@ def get_schema_reg() -> SkillsSchemaRegistry:
 
 
 # ==================== API 端点 ====================
+
 
 @router.get("")
 async def list_skills(
@@ -143,10 +149,10 @@ async def get_skill(
 ):
     """获取单个技能详情"""
     skill = loader.get_skill(name)
-    
+
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
-    
+
     return skill.to_dict()
 
 
@@ -172,13 +178,13 @@ async def check_requirements(
 ):
     """检查技能依赖"""
     skill = loader.get_skill(name)
-    
+
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill '{name}' not found")
-    
+
     satisfied = skill.check_requirements()
     missing = skill.get_missing_requirements()
-    
+
     return {
         "name": name,
         "satisfied": satisfied,
@@ -195,13 +201,10 @@ async def toggle_skill(
 ):
     """切换技能启用状态"""
     success = loader.toggle_skill(name, request.enabled)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to toggle skill '{name}'"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to toggle skill '{name}'")
+
     return {
         "success": True,
         "name": name,
@@ -217,13 +220,10 @@ async def enable_skill(
 ):
     """启用技能"""
     success = loader.enable_skill(name)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to enable skill '{name}'"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to enable skill '{name}'")
+
     return {"success": True, "name": name, "enabled": True}
 
 
@@ -235,13 +235,10 @@ async def disable_skill(
 ):
     """禁用技能"""
     success = loader.disable_skill(name)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to disable skill '{name}'"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to disable skill '{name}'")
+
     return {"success": True, "name": name, "enabled": False}
 
 
@@ -253,20 +250,23 @@ async def create_skill(
 ):
     """创建新技能"""
     # 验证技能名称
-    if not request.name.isalnum() and "_" not in request.name and "-" not in request.name:
+    if (
+        not request.name.isalnum()
+        and "_" not in request.name
+        and "-" not in request.name
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Skill name must be alphanumeric, underscore, or hyphen"
+            detail="Skill name must be alphanumeric, underscore, or hyphen",
         )
-    
+
     success = loader.add_skill(request.name, request.content)
-    
+
     if not success:
         raise HTTPException(
-            status_code=400,
-            detail=f"Failed to create skill '{request.name}'"
+            status_code=400, detail=f"Failed to create skill '{request.name}'"
         )
-    
+
     return {
         "success": True,
         "name": request.name,
@@ -282,13 +282,10 @@ async def update_skill(
 ):
     """更新技能"""
     success = loader.update_skill(name, request.content)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to update skill '{name}'"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to update skill '{name}'")
+
     return {"success": True, "name": name}
 
 
@@ -300,13 +297,10 @@ async def delete_skill(
 ):
     """删除技能"""
     success = loader.delete_skill(name)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to delete skill '{name}'"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Failed to delete skill '{name}'")
+
     return {"success": True, "name": name}
 
 
@@ -325,6 +319,7 @@ async def reload_skills(
 
 # ==================== 配置管理 API ====================
 
+
 @router.get("/{name}/config")
 async def get_skill_config(
     name: str,
@@ -333,12 +328,12 @@ async def get_skill_config(
 ):
     """获取技能配置"""
     config = config_mgr.load_config(name)
-    
+
     # 如果没有配置，返回默认配置
     if config is None:
         schema_reg = get_schema_reg()
         config = schema_reg.get_default_config(name)
-    
+
     return {
         "name": name,
         "config": config or {},
@@ -356,21 +351,17 @@ async def set_skill_config(
     """设置技能配置"""
     # 验证配置
     is_valid, errors = schema_reg.validate_config(name, request.config)
-    
+
     if not is_valid:
-        raise HTTPException(
-            status_code=400,
-            detail={"errors": errors}
-        )
-    
+        raise HTTPException(status_code=400, detail={"errors": errors})
+
     success = config_mgr.save_config(name, request.config)
-    
+
     if not success:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save config for skill '{name}'"
+            status_code=500, detail=f"Failed to save config for skill '{name}'"
         )
-    
+
     return {"success": True, "name": name}
 
 
@@ -383,13 +374,13 @@ async def set_skill_field(
 ):
     """设置技能配置的单个字段"""
     success = config_mgr.set_field_value(name, request.field_key, request.value)
-    
+
     if not success:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to set field '{request.field_key}' for skill '{name}'"
+            detail=f"Failed to set field '{request.field_key}' for skill '{name}'",
         )
-    
+
     return {
         "success": True,
         "name": name,
@@ -405,13 +396,12 @@ async def delete_skill_config(
 ):
     """删除技能配置"""
     success = config_mgr.delete_config(name)
-    
+
     if not success:
         raise HTTPException(
-            status_code=404,
-            detail=f"Config not found for skill '{name}'"
+            status_code=404, detail=f"Config not found for skill '{name}'"
         )
-    
+
     return {"success": True, "name": name}
 
 
@@ -434,13 +424,10 @@ async def fix_skill_config(
 ):
     """自动修复技能配置"""
     success, changes = config_mgr.auto_fix_config(name)
-    
+
     if not success:
-        raise HTTPException(
-            status_code=400,
-            detail={"changes": changes}
-        )
-    
+        raise HTTPException(status_code=400, detail={"changes": changes})
+
     return {
         "success": True,
         "name": name,
@@ -456,13 +443,12 @@ async def get_config_help(
 ):
     """获取技能配置帮助文档"""
     help_content = config_mgr.get_help_content(name)
-    
+
     if help_content is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"Help content not found for skill '{name}'"
+            status_code=404, detail=f"Help content not found for skill '{name}'"
         )
-    
+
     return {
         "name": name,
         "help": help_content,
@@ -470,6 +456,7 @@ async def get_config_help(
 
 
 # ==================== Schema 管理 API ====================
+
 
 @router.get("/{name}/schema")
 async def get_skill_schema(
@@ -479,13 +466,12 @@ async def get_skill_schema(
 ):
     """获取技能 Schema"""
     schema = schema_reg.get_schema(name)
-    
+
     if schema is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"Schema not found for skill '{name}'"
+            status_code=404, detail=f"Schema not found for skill '{name}'"
         )
-    
+
     return schema.to_dict()
 
 
@@ -503,8 +489,7 @@ async def create_skill_schema(
         return {"success": True, "name": name}
     except Exception as e:
         raise HTTPException(
-            status_code=400,
-            detail=f"Failed to create schema: {str(e)}"
+            status_code=400, detail=f"Failed to create schema: {str(e)}"
         )
 
 
@@ -516,13 +501,12 @@ async def delete_skill_schema(
 ):
     """删除技能 Schema"""
     success = schema_reg.delete_schema(name)
-    
+
     if not success:
         raise HTTPException(
-            status_code=404,
-            detail=f"Schema not found for skill '{name}'"
+            status_code=404, detail=f"Schema not found for skill '{name}'"
         )
-    
+
     return {"success": True, "name": name}
 
 

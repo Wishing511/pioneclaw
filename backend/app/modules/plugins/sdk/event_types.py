@@ -8,7 +8,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class EventType(str, Enum):
@@ -16,6 +16,7 @@ class EventType(str, Enum):
 
     借鉴 OpenClaw plugin-sdk EventType
     """
+
     # Agent 生命周期
     AGENT_START = "agent.start"
     AGENT_COMPLETE = "agent.complete"
@@ -56,13 +57,14 @@ class PluginEvent:
 
     借鉴 OpenClaw plugin-sdk PluginEvent
     """
-    type: str
-    data: Dict[str, Any] = field(default_factory=dict)
-    source: str = ""         # 事件来源（如 plugin_id）
-    timestamp: Optional[str] = None
-    event_id: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    type: str
+    data: dict[str, Any] = field(default_factory=dict)
+    source: str = ""  # 事件来源（如 plugin_id）
+    timestamp: str | None = None
+    event_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.type,
             "data": self.data,

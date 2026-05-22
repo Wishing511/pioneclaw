@@ -12,32 +12,35 @@
 import asyncio
 import hashlib
 import time
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Optional, Callable, Any, Dict, List
-from collections import defaultdict
+from typing import Any
 
 from loguru import logger
 
 
 class MessagePriority(IntEnum):
     """消息优先级"""
-    HIGH = 0       # 最高优先级（系统消息、紧急任务）
-    NORMAL = 1     # 普通优先级（用户消息）
-    LOW = 2        # 低优先级（批量任务）
-    BACKGROUND = 3 # 后台优先级（清理、统计）
+
+    HIGH = 0  # 最高优先级（系统消息、紧急任务）
+    NORMAL = 1  # 普通优先级（用户消息）
+    LOW = 2  # 低优先级（批量任务）
+    BACKGROUND = 3  # 后台优先级（清理、统计）
 
 
 @dataclass
 class Message:
     """消息"""
+
     id: str
     content: Any
     priority: MessagePriority = MessagePriority.NORMAL
     retry_count: int = 0
     max_retries: int = 3
     created_at: float = field(default_factory=time.time)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def content_hash(self) -> str:
         """计算内容哈希"""
@@ -48,6 +51,7 @@ class Message:
 @dataclass
 class DeadLetter:
     """死信"""
+
     original_message: Message
     error: str
     failed_at: float = field(default_factory=time.time)
@@ -74,22 +78,22 @@ class MessageQueue:
         self.default_max_retries = default_max_retries
 
         # 优先级队列
-        self._queues: Dict[MessagePriority, List[Message]] = defaultdict(list)
+        self._queues: dict[MessagePriority, list[Message]] = defaultdict(list)
 
         # 去重缓存 {hash: timestamp}
-        self._dedup_cache: Dict[str, float] = {}
+        self._dedup_cache: dict[str, float] = {}
 
         # 死信队列
-        self._dead_letters: List[DeadLetter] = []
+        self._dead_letters: list[DeadLetter] = []
 
         # 处理中的消息
-        self._processing: Dict[str, Message] = {}
+        self._processing: dict[str, Message] = {}
 
         # 锁
         self._lock = asyncio.Lock()
 
         # 消费者
-        self._consumer: Optional[Callable] = None
+        self._consumer: Callable | None = None
 
         # 运行状态
         self._running = False
@@ -99,8 +103,8 @@ class MessageQueue:
         content: Any,
         priority: MessagePriority = MessagePriority.NORMAL,
         max_retries: int = None,
-        metadata: Dict[str, Any] = None,
-    ) -> Optional[str]:
+        metadata: dict[str, Any] = None,
+    ) -> str | None:
         """
         入队
 
@@ -128,8 +132,7 @@ class MessageQueue:
 
             # 清理过期的去重缓存
             expired_keys = [
-                k for k, v in self._dedup_cache.items()
-                if now - v > self.dedup_window
+                k for k, v in self._dedup_cache.items() if now - v > self.dedup_window
             ]
             for k in expired_keys:
                 del self._dedup_cache[k]
@@ -144,11 +147,13 @@ class MessageQueue:
 
             # 加入队列
             self._queues[priority].append(message)
-            logger.debug(f"Message enqueued: {message.id} with priority {priority.name}")
+            logger.debug(
+                f"Message enqueued: {message.id} with priority {priority.name}"
+            )
 
             return message.id
 
-    async def dequeue(self) -> Optional[Message]:
+    async def dequeue(self) -> Message | None:
         """
         出队（按优先级）
 
@@ -197,9 +202,11 @@ class MessageQueue:
             else:
                 # 重新入队
                 self._queues[message.priority].append(message)
-                logger.debug(f"Message re-queued: {message_id}, retry {message.retry_count}")
+                logger.debug(
+                    f"Message re-queued: {message_id}, retry {message.retry_count}"
+                )
 
-    async def get_dead_letters(self) -> List[DeadLetter]:
+    async def get_dead_letters(self) -> list[DeadLetter]:
         """获取死信队列"""
         async with self._lock:
             return list(self._dead_letters)
@@ -209,7 +216,7 @@ class MessageQueue:
         async with self._lock:
             self._dead_letters.clear()
 
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """获取队列统计"""
         async with self._lock:
             queue_sizes = {
@@ -261,4 +268,5 @@ class MessageQueue:
     def _generate_id(self) -> str:
         """生成消息 ID"""
         import uuid
+
         return str(uuid.uuid4())

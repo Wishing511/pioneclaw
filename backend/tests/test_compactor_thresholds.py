@@ -8,11 +8,10 @@ Test Compactor threshold strategy based on context_window
 4. 小上下文模型也能正确计算
 5. message_threshold 作为兜底保护
 """
-import pytest
 
 from app.modules.agent.compactor import (
-    Compactor,
     CompactionConfig,
+    Compactor,
 )
 
 

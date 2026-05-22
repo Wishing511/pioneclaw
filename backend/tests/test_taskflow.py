@@ -13,20 +13,21 @@
 - VALID_TRANSITIONS 状态转换表
 """
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.models.task_flow import TaskFlow, TaskFlowState
 from app.modules.agent.taskflow import (
-    TaskFlowManager,
-    RevisionConflictError,
-    InvalidStateTransition,
     VALID_TRANSITIONS,
+    InvalidStateTransition,
+    RevisionConflictError,
+    TaskFlowManager,
 )
 
-
 # ==================== TaskFlowState 枚举 ====================
+
 
 class TestTaskFlowState:
     def test_values(self):
@@ -42,6 +43,7 @@ class TestTaskFlowState:
 
 
 # ==================== TaskFlow 模型字段 ====================
+
 
 class TestTaskFlowModel:
     def test_tablename(self):
@@ -59,6 +61,7 @@ class TestTaskFlowModel:
 
 
 # ==================== 状态转换表 ====================
+
 
 class TestValidTransitions:
     def test_created_can_start(self):
@@ -97,6 +100,7 @@ class TestValidTransitions:
 
 # ==================== 异常类 ====================
 
+
 class TestExceptions:
     def test_revision_conflict_is_exception(self):
         assert issubclass(RevisionConflictError, Exception)
@@ -106,6 +110,7 @@ class TestExceptions:
 
 
 # ==================== TaskFlowManager 核心流程 ====================
+
 
 def _make_mock_db():
     """创建 mock AsyncSession"""
@@ -203,9 +208,8 @@ class TestTaskFlowManagerStart:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.RUNNING.value)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(InvalidStateTransition):
-                await mgr.start("flow-1")
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(InvalidStateTransition):
+            await mgr.start("flow-1")
 
 
 class TestTaskFlowManagerRunStep:
@@ -245,9 +249,8 @@ class TestTaskFlowManagerRunStep:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.CREATED.value)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(InvalidStateTransition):
-                await mgr.run_step("flow-1", "step")
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(InvalidStateTransition):
+            await mgr.run_step("flow-1", "step")
 
 
 class TestTaskFlowManagerSetWaiting:
@@ -278,9 +281,8 @@ class TestTaskFlowManagerSetWaiting:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.CREATED.value)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(InvalidStateTransition):
-                await mgr.set_waiting("flow-1", "reason")
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(InvalidStateTransition):
+            await mgr.set_waiting("flow-1", "reason")
 
 
 class TestTaskFlowManagerResume:
@@ -312,9 +314,8 @@ class TestTaskFlowManagerResume:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.WAITING.value, revision=5)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(RevisionConflictError):
-                await mgr.resume("flow-1", expected_revision=3)
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(RevisionConflictError):
+            await mgr.resume("flow-1", expected_revision=3)
 
     @pytest.mark.asyncio
     async def test_resume_revision_matches(self):
@@ -332,9 +333,8 @@ class TestTaskFlowManagerResume:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.RUNNING.value)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(InvalidStateTransition):
-                await mgr.resume("flow-1")
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(InvalidStateTransition):
+            await mgr.resume("flow-1")
 
 
 class TestTaskFlowManagerFinish:
@@ -366,9 +366,8 @@ class TestTaskFlowManagerFinish:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.CREATED.value)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(InvalidStateTransition):
-                await mgr.finish("flow-1")
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(InvalidStateTransition):
+            await mgr.finish("flow-1")
 
 
 class TestTaskFlowManagerFail:
@@ -410,9 +409,8 @@ class TestTaskFlowManagerFail:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.COMPLETED.value)
 
-        with patch.object(mgr, "_get_flow", return_value=flow):
-            with pytest.raises(InvalidStateTransition):
-                await mgr.fail("flow-1", "too late")
+        with patch.object(mgr, "_get_flow", return_value=flow), pytest.raises(InvalidStateTransition):
+            await mgr.fail("flow-1", "too late")
 
 
 class TestTaskFlowManagerAddChildTask:
@@ -454,7 +452,13 @@ class TestTaskFlowManagerGetFlow:
     @pytest.mark.asyncio
     async def test_get_flow_not_found(self):
         db = _make_mock_db()
-        db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=None)))))
+        db.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(first=MagicMock(return_value=None))
+                )
+            )
+        )
         mgr = TaskFlowManager(db)
 
         result = await mgr.get_flow("nonexistent")
@@ -464,7 +468,13 @@ class TestTaskFlowManagerGetFlow:
     async def test_get_flow_found(self):
         flow = _make_flow()
         db = _make_mock_db()
-        db.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(first=MagicMock(return_value=flow)))))
+        db.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(first=MagicMock(return_value=flow))
+                )
+            )
+        )
         mgr = TaskFlowManager(db)
 
         result = await mgr.get_flow("flow-1")
@@ -477,9 +487,8 @@ class TestTaskFlowManagerInternalGetFlow:
         db = _make_mock_db()
         mgr = TaskFlowManager(db)
 
-        with patch.object(mgr, "get_flow", return_value=None):
-            with pytest.raises(ValueError, match="TaskFlow not found"):
-                await mgr._get_flow("nonexistent")
+        with patch.object(mgr, "get_flow", return_value=None), pytest.raises(ValueError, match="TaskFlow not found"):
+            await mgr._get_flow("nonexistent")
 
 
 class TestTaskFlowManagerRecoverPending:
@@ -487,12 +496,20 @@ class TestTaskFlowManagerRecoverPending:
     async def test_recover_running_flows(self):
         db = _make_mock_db()
         mgr = TaskFlowManager(db)
-        flow1 = _make_flow(id="f1", state=TaskFlowState.RUNNING.value, name="Running Flow")
-        flow2 = _make_flow(id="f2", state=TaskFlowState.CREATED.value, name="Created Flow")
+        flow1 = _make_flow(
+            id="f1", state=TaskFlowState.RUNNING.value, name="Running Flow"
+        )
+        flow2 = _make_flow(
+            id="f2", state=TaskFlowState.CREATED.value, name="Created Flow"
+        )
 
-        db.execute = AsyncMock(return_value=MagicMock(
-            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[flow1, flow2])))
-        ))
+        db.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[flow1, flow2]))
+                )
+            )
+        )
 
         recovered = await mgr.recover_pending()
         assert len(recovered) == 2
@@ -507,9 +524,13 @@ class TestTaskFlowManagerRecoverPending:
         mgr = TaskFlowManager(db)
         flow = _make_flow(state=TaskFlowState.RUNNING.value, revision=3)
 
-        db.execute = AsyncMock(return_value=MagicMock(
-            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[flow])))
-        ))
+        db.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[flow]))
+                )
+            )
+        )
 
         recovered = await mgr.recover_pending()
         assert recovered[0].revision == 4
@@ -519,15 +540,20 @@ class TestTaskFlowManagerRecoverPending:
         db = _make_mock_db()
         mgr = TaskFlowManager(db)
 
-        db.execute = AsyncMock(return_value=MagicMock(
-            scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
-        ))
+        db.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[]))
+                )
+            )
+        )
 
         recovered = await mgr.recover_pending()
         assert recovered == []
 
 
 # ==================== 完整生命周期测试 ====================
+
 
 class TestTaskFlowFullLifecycle:
     @pytest.mark.asyncio
@@ -547,7 +573,9 @@ class TestTaskFlowFullLifecycle:
             assert flow.current_step == "process"
 
             # Wait
-            flow = await mgr.set_waiting("flow-1", "Need approval", {"checkpoint_step": "process"})
+            flow = await mgr.set_waiting(
+                "flow-1", "Need approval", {"checkpoint_step": "process"}
+            )
             assert flow.state == "waiting"
 
             # Resume
@@ -588,10 +616,12 @@ class TestTaskFlowFullLifecycle:
 
 # ==================== WorkflowEngine TaskFlow 集成 ====================
 
+
 class TestWorkflowTaskFlowIntegration:
     def test_bind_taskflow_without_db(self):
         """无 db 时不绑定"""
         from app.modules.agent.workflow import WorkflowEngine
+
         engine = WorkflowEngine(agent_loop=MagicMock())
         assert engine._taskflow_db is None
         assert engine._taskflow_id is None
@@ -599,6 +629,7 @@ class TestWorkflowTaskFlowIntegration:
     def test_bind_taskflow_with_db(self):
         """有 db 时可绑定"""
         from app.modules.agent.workflow import WorkflowEngine
+
         db = AsyncMock()
         engine = WorkflowEngine(agent_loop=MagicMock(), taskflow_db=db)
         assert engine._taskflow_db is db
@@ -607,6 +638,7 @@ class TestWorkflowTaskFlowIntegration:
     async def test_taskflow_step_noop_without_db(self):
         """无 db 时 _taskflow_step 不报错"""
         from app.modules.agent.workflow import WorkflowEngine
+
         engine = WorkflowEngine(agent_loop=MagicMock())
         # 不应抛异常
         await engine._taskflow_step("step", {"data": 1})
@@ -614,18 +646,21 @@ class TestWorkflowTaskFlowIntegration:
     @pytest.mark.asyncio
     async def test_taskflow_finish_noop_without_db(self):
         from app.modules.agent.workflow import WorkflowEngine
+
         engine = WorkflowEngine(agent_loop=MagicMock())
         await engine._taskflow_finish({"result": "ok"})
 
     @pytest.mark.asyncio
     async def test_taskflow_fail_noop_without_db(self):
         from app.modules.agent.workflow import WorkflowEngine
+
         engine = WorkflowEngine(agent_loop=MagicMock())
         await engine._taskflow_fail("error msg")
 
     @pytest.mark.asyncio
     async def test_taskflow_step_with_taskflow(self):
         from app.modules.agent.workflow import WorkflowEngine
+
         db = _make_mock_db()
         engine = WorkflowEngine(agent_loop=MagicMock(), taskflow_db=db)
         engine._taskflow_id = "flow-1"
@@ -640,6 +675,7 @@ class TestWorkflowTaskFlowIntegration:
     async def test_taskflow_step_handles_error(self):
         """持久化失败不中断主流程"""
         from app.modules.agent.workflow import WorkflowEngine
+
         db = _make_mock_db()
         engine = WorkflowEngine(agent_loop=MagicMock(), taskflow_db=db)
         engine._taskflow_id = "flow-1"
@@ -652,8 +688,11 @@ class TestWorkflowTaskFlowIntegration:
     @pytest.mark.asyncio
     async def test_bind_taskflow_creates_flow(self):
         from app.modules.agent.workflow import WorkflowEngine
+
         db = _make_mock_db()
-        engine = WorkflowEngine(agent_loop=MagicMock(), taskflow_db=db, session_id="sess-1")
+        engine = WorkflowEngine(
+            agent_loop=MagicMock(), taskflow_db=db, session_id="sess-1"
+        )
 
         mock_flow = _make_flow(id="new-flow", name="test", goal="test")
         with patch("app.modules.agent.taskflow.TaskFlowManager") as MockMgr:
@@ -668,6 +707,7 @@ class TestWorkflowTaskFlowIntegration:
     @pytest.mark.asyncio
     async def test_bind_taskflow_no_db_returns_none(self):
         from app.modules.agent.workflow import WorkflowEngine
+
         engine = WorkflowEngine(agent_loop=MagicMock())
         result = await engine.bind_taskflow("test", "goal")
         assert result is None

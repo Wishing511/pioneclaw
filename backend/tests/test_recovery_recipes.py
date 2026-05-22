@@ -3,39 +3,37 @@ Recovery Recipes 测试
 
 借鉴 claw-code recovery_recipes.rs 的测试场景
 """
+
 import pytest
+
 from app.core.recovery_recipes import (
+    ApiRateLimitError,
+    AuthError,
+    ConnectionError_,
+    DiskFullError,
+    FailureScenario,
+    FileNotFound_,
+    GitLockError,
+    ProviderFailureError,
     # Errors
     RecoverableToolError,
-    ToolTimeoutError,
-    ConnectionError_,
-    ApiRateLimitError,
-    ProviderFailureError,
-    AuthError,
-    GitLockError,
-    DiskFullError,
-    FileNotFound_,
-    # Scenario
-    FailureScenario,
-    classify_error,
-    # Recipe
-    RecoveryStep,
-    RecoveryRecipe,
-    EscalationPolicy,
-    recipe_for,
-    get_all_recipes,
-    # Executor
-    RecoveryExecutor,
     RecoveryContext,
-    RecoveryResult,
     RecoveryEvent,
     RecoveryEventType,
+    # Executor
+    RecoveryExecutor,
+    RecoveryResult,
+    # Recipe
+    RecoveryStep,
+    ToolTimeoutError,
     _compute_backoff_ms,
+    classify_error,
+    get_all_recipes,
+    get_recent_events,
+    recipe_for,
     # History
     record_recovery_event,
-    get_recent_events,
 )
-
 
 # ==================== Error Hierarchy ====================
 
@@ -96,16 +94,26 @@ class TestFailureScenarioClassification:
     """按显式错误类型分类"""
 
     def test_api_rate_limit(self):
-        assert classify_error(ApiRateLimitError("429")) == FailureScenario.API_RATE_LIMITED
+        assert (
+            classify_error(ApiRateLimitError("429")) == FailureScenario.API_RATE_LIMITED
+        )
 
     def test_provider_failure(self):
-        assert classify_error(ProviderFailureError("500")) == FailureScenario.PROVIDER_FAILURE
+        assert (
+            classify_error(ProviderFailureError("500"))
+            == FailureScenario.PROVIDER_FAILURE
+        )
 
     def test_tool_timeout(self):
-        assert classify_error(ToolTimeoutError("timeout")) == FailureScenario.TOOL_TIMEOUT
+        assert (
+            classify_error(ToolTimeoutError("timeout")) == FailureScenario.TOOL_TIMEOUT
+        )
 
     def test_connection_error(self):
-        assert classify_error(ConnectionError_("connection refused")) == FailureScenario.CONNECTION_ERROR
+        assert (
+            classify_error(ConnectionError_("connection refused"))
+            == FailureScenario.CONNECTION_ERROR
+        )
 
     def test_git_lock(self):
         assert classify_error(GitLockError("lock")) == FailureScenario.GIT_LOCK
@@ -117,35 +125,63 @@ class TestFailureScenarioClassification:
         assert classify_error(AuthError("unauthorized")) == FailureScenario.AUTH_ERROR
 
     def test_file_not_found(self):
-        assert classify_error(FileNotFound_("no such file")) == FailureScenario.FILE_NOT_FOUND
+        assert (
+            classify_error(FileNotFound_("no such file"))
+            == FailureScenario.FILE_NOT_FOUND
+        )
 
     def test_unknown(self):
-        assert classify_error(ValueError("some random error")) == FailureScenario.UNKNOWN
+        assert (
+            classify_error(ValueError("some random error")) == FailureScenario.UNKNOWN
+        )
 
 
 class TestFailureScenarioPatternMatching:
     """字符串 fallback 匹配"""
 
     def test_rate_limit_string_match(self):
-        assert classify_error(RuntimeError("API rate limit exceeded")) == FailureScenario.API_RATE_LIMITED
+        assert (
+            classify_error(RuntimeError("API rate limit exceeded"))
+            == FailureScenario.API_RATE_LIMITED
+        )
 
     def test_provider_503_string_match(self):
-        assert classify_error(RuntimeError("503 Service Unavailable")) == FailureScenario.PROVIDER_FAILURE
+        assert (
+            classify_error(RuntimeError("503 Service Unavailable"))
+            == FailureScenario.PROVIDER_FAILURE
+        )
 
     def test_timeout_string_match(self):
-        assert classify_error(RuntimeError("Connection timed out")) == FailureScenario.TOOL_TIMEOUT
+        assert (
+            classify_error(RuntimeError("Connection timed out"))
+            == FailureScenario.TOOL_TIMEOUT
+        )
 
     def test_git_lock_string_match(self):
-        assert classify_error(RuntimeError("Unable to create '.git/index.lock': File exists")) == FailureScenario.GIT_LOCK
+        assert (
+            classify_error(
+                RuntimeError("Unable to create '.git/index.lock': File exists")
+            )
+            == FailureScenario.GIT_LOCK
+        )
 
     def test_disk_full_string_match(self):
-        assert classify_error(RuntimeError("ENOSPC: no space left on device")) == FailureScenario.DISK_FULL
+        assert (
+            classify_error(RuntimeError("ENOSPC: no space left on device"))
+            == FailureScenario.DISK_FULL
+        )
 
     def test_auth_string_match(self):
-        assert classify_error(RuntimeError("401 Unauthorized: invalid api key")) == FailureScenario.AUTH_ERROR
+        assert (
+            classify_error(RuntimeError("401 Unauthorized: invalid api key"))
+            == FailureScenario.AUTH_ERROR
+        )
 
     def test_file_not_found_string_match(self):
-        assert classify_error(FileNotFoundError("No such file or directory")) == FailureScenario.FILE_NOT_FOUND
+        assert (
+            classify_error(FileNotFoundError("No such file or directory"))
+            == FailureScenario.FILE_NOT_FOUND
+        )
 
 
 # ==================== Recovery Recipes ====================
@@ -217,9 +253,7 @@ class TestRecoveryExecutor:
     def test_retry_on_rate_limit(self):
         executor = RecoveryExecutor()
         ctx = RecoveryContext()
-        result = executor.attempt_recovery(
-            FailureScenario.API_RATE_LIMITED, ctx
-        )
+        result = executor.attempt_recovery(FailureScenario.API_RATE_LIMITED, ctx)
         assert result.should_retry is True
         assert result.wait_ms > 0
         assert ctx.attempt_count == 1
@@ -227,9 +261,7 @@ class TestRecoveryExecutor:
     def test_escalate_after_max_attempts(self):
         executor = RecoveryExecutor()
         ctx = RecoveryContext(attempt_count=3)  # 已达 max_attempts (3)
-        result = executor.attempt_recovery(
-            FailureScenario.API_RATE_LIMITED, ctx
-        )
+        result = executor.attempt_recovery(FailureScenario.API_RATE_LIMITED, ctx)
         assert result.escalate is True
         assert "已尝试 3/3 次" in result.detail
 
@@ -265,9 +297,7 @@ class TestRecoveryExecutor:
     def test_provider_failure_first_attempt(self):
         executor = RecoveryExecutor()
         ctx = RecoveryContext()
-        result = executor.attempt_recovery(
-            FailureScenario.PROVIDER_FAILURE, ctx
-        )
+        result = executor.attempt_recovery(FailureScenario.PROVIDER_FAILURE, ctx)
         assert result.should_retry is True
         assert ctx.attempt_count == 1
 
@@ -275,9 +305,7 @@ class TestRecoveryExecutor:
         executor = RecoveryExecutor()
         ctx = RecoveryContext(attempt_count=1)
         # 第一次重试后再次失败 → 第二次尝试时 attempt_count=1，再 increment 到 2
-        result = executor.attempt_recovery(
-            FailureScenario.PROVIDER_FAILURE, ctx
-        )
+        result = executor.attempt_recovery(FailureScenario.PROVIDER_FAILURE, ctx)
         # attempt_count=2 >= max_attempts=2 → escalate
         if result.should_retry:
             # 第一次重试成功
@@ -288,9 +316,7 @@ class TestRecoveryExecutor:
     def test_escalate_on_second_attempt(self):
         executor = RecoveryExecutor()
         ctx = RecoveryContext(attempt_count=2)
-        result = executor.attempt_recovery(
-            FailureScenario.TOOL_TIMEOUT, ctx
-        )
+        result = executor.attempt_recovery(FailureScenario.TOOL_TIMEOUT, ctx)
         assert result.escalate is True
 
     def test_auto_fix_disabled(self):
@@ -303,9 +329,7 @@ class TestRecoveryExecutor:
     def test_simulate_failure(self):
         executor = RecoveryExecutor()
         ctx = RecoveryContext(fail_at_step=0)
-        result = executor.attempt_recovery(
-            FailureScenario.API_RATE_LIMITED, ctx
-        )
+        result = executor.attempt_recovery(FailureScenario.API_RATE_LIMITED, ctx)
         assert result.should_retry is True  # step 0 failed, but can retry
         assert len(ctx.events) >= 1
 
@@ -557,7 +581,9 @@ class TestEdgeCases:
             FileNotFound_(""),
         ]
         for e in errors:
-            assert isinstance(e, RecoverableToolError), f"{type(e).__name__} should be RecoverableToolError"
+            assert isinstance(e, RecoverableToolError), (
+                f"{type(e).__name__} should be RecoverableToolError"
+            )
 
 
 # ==================== Custom Recipe Registration ====================

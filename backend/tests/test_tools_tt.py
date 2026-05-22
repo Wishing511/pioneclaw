@@ -12,18 +12,19 @@ TT 工具测试：TT.1 + TT.2 新工具的单测
 """
 
 import json
-import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from app.modules.agent.subagent import BuiltinAgentType
 from app.modules.tools.builtin import AskUserQuestionTool, SpawnTool
 from app.modules.tools.config import ConfigTool
-from app.modules.tools.team import TeamCreateTool, TeamDeleteTool
-from app.modules.tools.send_message import SendMessageTool
 from app.modules.tools.plan_mode import EnterPlanModeTool, ExitPlanModeTool
-from app.modules.agent.subagent import BuiltinAgentType
-
+from app.modules.tools.send_message import SendMessageTool
+from app.modules.tools.team import TeamCreateTool, TeamDeleteTool
 
 # ── 辅助函数 ──────────────────────────────────────────────────
+
 
 def _make_async_db_session_mock(scalars_list=None, scalar_one=None):
     """构造完整的异步 DB session mock 链
@@ -57,6 +58,7 @@ def _make_async_db_session_mock(scalars_list=None, scalar_one=None):
 # ============================================================
 # AskUserQuestionTool 测试
 # ============================================================
+
 
 class TestAskUserQuestionTool:
     """测试 AskUserQuestionTool"""
@@ -100,9 +102,7 @@ class TestAskUserQuestionTool:
     @pytest.mark.asyncio
     async def test_missing_options_field(self, tool):
         """缺少 options 字段"""
-        result = await tool.execute(
-            questions='[{"question": "What to do?"}]'
-        )
+        result = await tool.execute(questions='[{"question": "What to do?"}]')
         data = json.loads(result)
         assert data["success"] is False
         assert "options" in data["error"]
@@ -123,6 +123,7 @@ class TestAskUserQuestionTool:
 # ConfigTool 测试
 # ============================================================
 
+
 class TestConfigTool:
     """测试 ConfigTool"""
 
@@ -140,6 +141,7 @@ class TestConfigTool:
     async def test_list_returns_settings(self, tool):
         """模拟 DB 返回设置列表"""
         from app.models.models import SystemSetting
+
         mock_setting = MagicMock(spec=SystemSetting)
         mock_setting.key = "max_turns"
         mock_setting.value = "20"
@@ -212,6 +214,7 @@ class TestConfigTool:
 # TeamCreateTool / TeamDeleteTool 测试
 # ============================================================
 
+
 class TestTeamTools:
     """测试 TeamCreateTool 和 TeamDeleteTool"""
 
@@ -219,6 +222,7 @@ class TestTeamTools:
     def _clean_teams_registry(self):
         """每个测试前后清理运行时团队注册表"""
         import app.modules.tools.team as team_module
+
         team_module._teams.clear()
         yield
         team_module._teams.clear()
@@ -240,10 +244,10 @@ class TestTeamTools:
     @pytest.mark.asyncio
     async def test_team_create_success(self, create_tool):
         """模拟 DB 创建成功"""
-        from app.models.organization import Organization
-        from unittest.mock import ANY
 
-        mock_org = MagicMock(spec=Organization)
+        from app.models.organization import Organization
+
+        MagicMock(spec=Organization)
         db_mock = _make_async_db_session_mock()
 
         with patch("app.core.database.async_session_maker", db_mock):
@@ -325,6 +329,7 @@ class TestTeamTools:
 # SendMessageTool 测试
 # ============================================================
 
+
 class TestSendMessageTool:
     """测试 SendMessageTool"""
 
@@ -332,6 +337,7 @@ class TestSendMessageTool:
     def _clean_agent_state(self):
         """每个测试前后清理 Agent 注册表"""
         import app.modules.tools.send_message as sm
+
         sm._agent_inboxes.clear()
         sm._agent_metadata.clear()
         yield
@@ -361,6 +367,7 @@ class TestSendMessageTool:
     async def test_list_agents_with_registered(self, tool):
         """有注册 Agent 时返回列表"""
         import app.modules.tools.send_message as sm
+
         sm.register_agent("agent-1", "Agent One")
         sm.register_agent("agent-2", "Agent Two")
 
@@ -404,6 +411,7 @@ class TestSendMessageTool:
     async def test_send_to_agent_success(self, tool):
         """发送成功"""
         import app.modules.tools.send_message as sm
+
         sm.register_agent("agent-1", "Agent One")
 
         result = await tool.execute(
@@ -441,6 +449,7 @@ class TestSendMessageTool:
 # EnterPlanModeTool / ExitPlanModeTool 测试
 # ============================================================
 
+
 class TestPlanModeTools:
     """测试 EnterPlanModeTool 和 ExitPlanModeTool"""
 
@@ -448,6 +457,7 @@ class TestPlanModeTools:
     def _reset_plan_state(self):
         """每个测试前后重置 plan mode 全局状态"""
         import app.modules.tools.plan_mode as pm
+
         old_active = pm._plan_mode_active
         old_content = pm._plan_content
         old_session = pm._plan_session_start
@@ -471,6 +481,7 @@ class TestPlanModeTools:
     async def test_enter_plan_mode_no_params(self, enter_tool):
         """EnterPlanMode 无参数，激活全局状态"""
         import app.modules.tools.plan_mode as pm
+
         result = await enter_tool.execute()
         assert "计划模式" in result
         assert pm.is_plan_mode_active() is True
@@ -482,6 +493,7 @@ class TestPlanModeTools:
     async def test_exit_plan_mode_saves_file(self, exit_tool):
         """退出计划模式，写入 .md 到 .claude/plans/"""
         import app.modules.tools.plan_mode as pm
+
         pm._plan_mode_active = True
         pm._plan_session_start = "2026-05-11T00:00:00"
 
@@ -492,8 +504,10 @@ class TestPlanModeTools:
             "## Verification\nRun tests and verify.\n"
         )
 
-        with patch("builtins.open", MagicMock()) as mock_open, \
-             patch("os.makedirs", MagicMock()):
+        with (
+            patch("builtins.open", MagicMock()) as mock_open,
+            patch("os.makedirs", MagicMock()),
+        ):
             result = await exit_tool.execute(plan=plan_text)
             assert "计划已保存" in result
             assert pm.is_plan_mode_active() is False
@@ -503,6 +517,7 @@ class TestPlanModeTools:
     async def test_exit_plan_mode_short_plan_fails(self, exit_tool):
         """计划 < 50 字符返回错误"""
         import app.modules.tools.plan_mode as pm
+
         pm._plan_mode_active = True
 
         result = await exit_tool.execute(plan="Too short")
@@ -520,13 +535,12 @@ class TestPlanModeTools:
         import app.modules.tools.plan_mode as pm
 
         # 进入
-        result1 = await enter_tool.execute()
+        await enter_tool.execute()
         assert pm.is_plan_mode_active() is True
 
         # 退出
         plan = "Context: test\n\nPlan: do X then Y\n\nFiles: a.py, b.py\n\nVerify: run tests to confirm"
-        with patch("builtins.open", MagicMock()), \
-             patch("os.makedirs", MagicMock()):
+        with patch("builtins.open", MagicMock()), patch("os.makedirs", MagicMock()):
             result2 = await exit_tool.execute(plan=plan)
             assert "计划已保存" in result2
             assert pm.is_plan_mode_active() is False
@@ -536,14 +550,20 @@ class TestPlanModeTools:
 # BuiltinAgentType 枚举测试 (TT.2)
 # ============================================================
 
+
 class TestBuiltinAgentType:
     """测试 BuiltinAgentType 枚举"""
 
     def test_all_seven_types_present(self):
         values = {t.value for t in BuiltinAgentType}
         assert values == {
-            "general", "research", "build",
-            "explore", "plan", "verification", "guide",
+            "general",
+            "research",
+            "build",
+            "explore",
+            "plan",
+            "verification",
+            "guide",
         }
 
     def test_type_values_match_spawn_tool(self):
@@ -553,7 +573,9 @@ class TestBuiltinAgentType:
         # BuiltinAgentType 涵盖了 SpawnTool 的所有类型
         builtin_values = {t.value for t in BuiltinAgentType}
         for st in spawn_types:
-            assert st in builtin_values, f"SpawnTool type '{st}' missing from BuiltinAgentType"
+            assert st in builtin_values, (
+                f"SpawnTool type '{st}' missing from BuiltinAgentType"
+            )
 
     def test_is_string_enum(self):
         """验证是 str+Enum，可以直接用于字符串比较"""
@@ -565,6 +587,7 @@ class TestBuiltinAgentType:
 # ============================================================
 # SpawnTool TT.2 新类型测试
 # ============================================================
+
 
 class TestSpawnToolTT:
     """SpawnTool 的 verification 和 guide 类型测试"""

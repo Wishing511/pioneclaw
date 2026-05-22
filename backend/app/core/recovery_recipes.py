@@ -23,13 +23,13 @@ Error Recovery Recipes — 借鉴 claw-code recovery_recipes.rs
             ...
 """
 
-import asyncio
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,49 +44,59 @@ class RecoverableToolError(Exception):
     借鉴 claw-code WorkerFailureKind → FailureScenario 的分层设计。
     """
 
-    def __init__(self, message: str, original_error: Optional[Exception] = None):
+    def __init__(self, message: str, original_error: Exception | None = None):
         super().__init__(message)
         self.original_error = original_error
 
 
 class ToolTimeoutError(RecoverableToolError):
     """工具执行超时"""
+
     pass
 
 
 class ConnectionError_(RecoverableToolError):
     """网络连接错误（httpx.ConnectError, ConnectionRefused 等）"""
+
     pass
 
 
 class ApiRateLimitError(RecoverableToolError):
     """API 限流（429 / rate limit / too many requests）"""
+
     pass
 
 
 class ProviderFailureError(RecoverableToolError):
     """Provider 内部错误（500/502/503）"""
+
     pass
 
 
 class AuthError(RecoverableToolError):
     """认证错误（401 / unauthorized / invalid api key）"""
+
     pass
 
 
 class GitLockError(RecoverableToolError):
     """Git 锁文件冲突（.git/index.lock）"""
+
     pass
 
 
 class DiskFullError(RecoverableToolError):
     """磁盘空间不足"""
+
     pass
 
 
 class FileNotFound_(RecoverableToolError):
     """文件不存在（可让 LLM 修正路径）"""
-    def __init__(self, message: str, path: str = "", original_error: Optional[Exception] = None):
+
+    def __init__(
+        self, message: str, path: str = "", original_error: Exception | None = None
+    ):
         super().__init__(message, original_error)
         self.path = path
 
@@ -96,6 +106,7 @@ class FileNotFound_(RecoverableToolError):
 
 class FailureScenario(Enum):
     """失败场景 —— 借鉴 claw-code FailureScenario enum"""
+
     API_RATE_LIMITED = "api_rate_limited"
     PROVIDER_FAILURE = "provider_failure"
     TOOL_TIMEOUT = "tool_timeout"
@@ -108,38 +119,67 @@ class FailureScenario(Enum):
 
 
 # 错误消息正则（字符串匹配 fallback）—— 借鉴 claw-code 的 error classification markers
-_ERROR_PATTERNS: Dict[FailureScenario, List[str]] = {
+_ERROR_PATTERNS: dict[FailureScenario, list[str]] = {
     FailureScenario.API_RATE_LIMITED: [
-        r"rate.limit", r"too many requests", r"429", r"quota.*exceeded",
-        r"insufficient_quota", r"capacity.*exceeded", r"overloaded",
+        r"rate.limit",
+        r"too many requests",
+        r"429",
+        r"quota.*exceeded",
+        r"insufficient_quota",
+        r"capacity.*exceeded",
+        r"overloaded",
     ],
     FailureScenario.PROVIDER_FAILURE: [
-        r"500.*internal server", r"502.*bad gateway", r"503.*service unavailable",
-        r"server error", r"provider.*error", r"internal.*error",
+        r"500.*internal server",
+        r"502.*bad gateway",
+        r"503.*service unavailable",
+        r"server error",
+        r"provider.*error",
+        r"internal.*error",
     ],
     FailureScenario.TOOL_TIMEOUT: [
-        r"timeout", r"timed out", r"TimeoutError",
+        r"timeout",
+        r"timed out",
+        r"TimeoutError",
     ],
     FailureScenario.CONNECTION_ERROR: [
-        r"connection refused", r"connection.*error", r"connect.*timeout",
-        r"dns.*resolve", r"name.*resolution", r"network.*unreachable",
-        r"ConnectError", r"ConnectionError",
+        r"connection refused",
+        r"connection.*error",
+        r"connect.*timeout",
+        r"dns.*resolve",
+        r"name.*resolution",
+        r"network.*unreachable",
+        r"ConnectError",
+        r"ConnectionError",
     ],
     FailureScenario.GIT_LOCK: [
-        r"\.git[/\\]index\.lock", r"Unable to create.*\.lock.*File exists",
+        r"\.git[/\\]index\.lock",
+        r"Unable to create.*\.lock.*File exists",
         r"lock.*file.*exists",
     ],
     FailureScenario.DISK_FULL: [
-        r"no space left", r"disk.*full", r"ENOSPC", r"insufficient.*disk",
+        r"no space left",
+        r"disk.*full",
+        r"ENOSPC",
+        r"insufficient.*disk",
     ],
     FailureScenario.AUTH_ERROR: [
-        r"401", r"unauthorized", r"invalid api key", r"authentication.*failed",
-        r"invalid.*token", r"access denied", r"forbidden",
-        r"account.*deactivated", r"insufficient_quota",
+        r"401",
+        r"unauthorized",
+        r"invalid api key",
+        r"authentication.*failed",
+        r"invalid.*token",
+        r"access denied",
+        r"forbidden",
+        r"account.*deactivated",
+        r"insufficient_quota",
     ],
     FailureScenario.FILE_NOT_FOUND: [
-        r"no such file", r"file.*not found", r"FileNotFoundError",
-        r"ENOENT", r"cannot find.*file",
+        r"no such file",
+        r"file.*not found",
+        r"FileNotFoundError",
+        r"ENOENT",
+        r"cannot find.*file",
     ],
 }
 
@@ -182,12 +222,13 @@ def classify_error(error: Exception) -> FailureScenario:
 
 class RecoveryStep(Enum):
     """恢复步骤 —— 借鉴 claw-code RecoveryStep enum"""
-    WAIT_AND_RETRY = "wait_and_retry"                    # 等待后重试
-    ROTATE_KEY = "rotate_key"                             # 轮换 API key
-    AUTO_FIX = "auto_fix"                                 # 自动修复（安全、无副作用的）
+
+    WAIT_AND_RETRY = "wait_and_retry"  # 等待后重试
+    ROTATE_KEY = "rotate_key"  # 轮换 API key
+    AUTO_FIX = "auto_fix"  # 自动修复（安全、无副作用的）
     RETRY_WITH_LONGER_TIMEOUT = "retry_with_longer_timeout"  # 延长超时后重试
-    REPORT_TO_LLM = "report_to_llm"                       # 报告给 LLM，让 LLM 调整
-    ESCALATE_TO_HUMAN = "escalate_to_human"               # 升级到人工处理
+    REPORT_TO_LLM = "report_to_llm"  # 报告给 LLM，让 LLM 调整
+    ESCALATE_TO_HUMAN = "escalate_to_human"  # 升级到人工处理
 
 
 # ==================== Recovery Recipe ====================
@@ -195,9 +236,10 @@ class RecoveryStep(Enum):
 
 class EscalationPolicy(Enum):
     """升级策略 —— 借鉴 claw-code EscalationPolicy"""
-    ALERT_HUMAN = "alert_human"        # 创建 InterruptPoint
+
+    ALERT_HUMAN = "alert_human"  # 创建 InterruptPoint
     LOG_AND_CONTINUE = "log_and_continue"  # 记录日志，继续执行
-    ABORT = "abort"                    # 中止，不重试
+    ABORT = "abort"  # 中止，不重试
 
 
 @dataclass
@@ -211,8 +253,9 @@ class RecoveryRecipe:
         escalation_policy: 升级策略
         description: 人类可读描述
     """
+
     scenario: FailureScenario
-    steps: List[RecoveryStep]
+    steps: list[RecoveryStep]
     max_attempts: int = 1
     escalation_policy: EscalationPolicy = EscalationPolicy.ALERT_HUMAN
     description: str = ""
@@ -230,7 +273,7 @@ class RecoveryRecipe:
 
 # ==================== Built-in Recipes ====================
 
-_BUILTIN_RECIPES: Dict[FailureScenario, RecoveryRecipe] = {
+_BUILTIN_RECIPES: dict[FailureScenario, RecoveryRecipe] = {
     FailureScenario.API_RATE_LIMITED: RecoveryRecipe(
         scenario=FailureScenario.API_RATE_LIMITED,
         steps=[RecoveryStep.WAIT_AND_RETRY],
@@ -290,7 +333,7 @@ _BUILTIN_RECIPES: Dict[FailureScenario, RecoveryRecipe] = {
 }
 
 
-def recipe_for(scenario: FailureScenario) -> Optional[RecoveryRecipe]:
+def recipe_for(scenario: FailureScenario) -> RecoveryRecipe | None:
     """获取场景对应的恢复配方 —— 借鉴 claw-code recipe_for()
 
     Returns:
@@ -299,7 +342,7 @@ def recipe_for(scenario: FailureScenario) -> Optional[RecoveryRecipe]:
     return _BUILTIN_RECIPES.get(scenario)
 
 
-def get_all_recipes() -> Dict[str, RecoveryRecipe]:
+def get_all_recipes() -> dict[str, RecoveryRecipe]:
     """获取所有内置配方（给 API 用）"""
     return {s.value: r for s, r in _BUILTIN_RECIPES.items()}
 
@@ -309,6 +352,7 @@ def get_all_recipes() -> Dict[str, RecoveryRecipe]:
 
 class RecoveryEventType(Enum):
     """恢复事件类型 —— 借鉴 claw-code RecoveryEvent"""
+
     ATTEMPTED = "recovery_attempted"
     SUCCEEDED = "recovery_succeeded"
     FAILED = "recovery_failed"
@@ -318,9 +362,10 @@ class RecoveryEventType(Enum):
 @dataclass
 class RecoveryEvent:
     """恢复事件 —— 借鉴 claw-code 的结构化事件"""
+
     event_type: RecoveryEventType
     scenario: FailureScenario
-    step: Optional[RecoveryStep] = None
+    step: RecoveryStep | None = None
     attempt: int = 0
     max_attempts: int = 0
     timestamp: float = 0.0
@@ -330,7 +375,7 @@ class RecoveryEvent:
         if not self.timestamp:
             self.timestamp = time.time()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "type": self.event_type.value,
             "scenario": self.scenario.value,
@@ -351,11 +396,12 @@ class RecoveryContext:
 
     追踪每个场景的尝试次数和事件日志。
     """
+
     scenario: FailureScenario = FailureScenario.UNKNOWN
     attempt_count: int = 0
-    events: List[RecoveryEvent] = field(default_factory=list)
-    fail_at_step: Optional[int] = None  # 模拟失败（测试用）
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    events: list[RecoveryEvent] = field(default_factory=list)
+    fail_at_step: int | None = None  # 模拟失败（测试用）
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def record_event(self, event: RecoveryEvent):
         self.events.append(event)
@@ -376,14 +422,15 @@ class RecoveryContext:
 @dataclass
 class RecoveryResult:
     """恢复结果"""
+
     recovered: bool = False
     should_retry: bool = False
     escalate: bool = False
     wait_ms: int = 0
-    modified_args: Optional[Dict[str, Any]] = None
-    auto_fix_command: Optional[str] = None
+    modified_args: dict[str, Any] | None = None
+    auto_fix_command: str | None = None
     detail: str = ""
-    events: List[RecoveryEvent] = field(default_factory=list)
+    events: list[RecoveryEvent] = field(default_factory=list)
 
     @classmethod
     def retry(cls, wait_ms: int = 1000, detail: str = "") -> "RecoveryResult":
@@ -399,7 +446,9 @@ class RecoveryResult:
 
     @classmethod
     def auto_fix(cls, command: str, detail: str = "") -> "RecoveryResult":
-        return cls(recovered=True, should_retry=True, auto_fix_command=command, detail=detail)
+        return cls(
+            recovered=True, should_retry=True, auto_fix_command=command, detail=detail
+        )
 
     @classmethod
     def report_to_llm(cls, detail: str = "") -> "RecoveryResult":
@@ -417,7 +466,7 @@ class RecoveryExecutor:
 
     def __init__(self, auto_fix_enabled: bool = True):
         self.auto_fix_enabled = auto_fix_enabled
-        self._auto_fix_handlers: Dict[str, Callable[[], bool]] = {}
+        self._auto_fix_handlers: dict[str, Callable[[], bool]] = {}
 
     def register_auto_fix(self, scenario: FailureScenario, handler: Callable[[], bool]):
         """注册自定义自动修复处理函数"""
@@ -426,8 +475,8 @@ class RecoveryExecutor:
     def attempt_recovery(
         self,
         scenario: FailureScenario,
-        context: Optional[RecoveryContext] = None,
-        error: Optional[Exception] = None,
+        context: RecoveryContext | None = None,
+        error: Exception | None = None,
     ) -> RecoveryResult:
         """尝试恢复 —— 借鉴 claw-code attempt_recovery()
 
@@ -456,8 +505,10 @@ class RecoveryExecutor:
         # 检查是否应该升级
         if ctx.should_escalate(recipe):
             # max_attempts=0 但有非升级步骤（如 REPORT_TO_LLM）→ 执行步骤而不升级
-            if (recipe.max_attempts == 0
-                    and RecoveryStep.ESCALATE_TO_HUMAN not in recipe.steps):
+            if (
+                recipe.max_attempts == 0
+                and RecoveryStep.ESCALATE_TO_HUMAN not in recipe.steps
+            ):
                 for step in recipe.steps:
                     return self._execute_step(step, recipe, ctx, error)
 
@@ -556,7 +607,7 @@ class RecoveryExecutor:
         step: RecoveryStep,
         recipe: RecoveryRecipe,
         context: RecoveryContext,
-        error: Optional[Exception] = None,
+        error: Exception | None = None,
     ) -> RecoveryResult:
         """执行单个恢复步骤"""
         event = RecoveryEvent(
@@ -600,15 +651,11 @@ class RecoveryExecutor:
                         detail=f"API key 轮换失败: {e}"
                     )
             # 无 handler 时，直接升级
-            return RecoveryResult.escalate_to_human(
-                detail="需要手动轮换 API key"
-            )
+            return RecoveryResult.escalate_to_human(detail="需要手动轮换 API key")
 
         elif step == RecoveryStep.AUTO_FIX:
             if not self.auto_fix_enabled:
-                return RecoveryResult.escalate_to_human(
-                    detail="自动修复已禁用"
-                )
+                return RecoveryResult.escalate_to_human(detail="自动修复已禁用")
             # Git lock 专用的 auto-fix
             if recipe.scenario == FailureScenario.GIT_LOCK:
                 return RecoveryResult.auto_fix(
@@ -639,6 +686,7 @@ def _compute_backoff_ms(attempt: int, base_ms: int = 2000, max_ms: int = 32000) 
     带 ±25% 抖动防止雷鸣群效应。
     """
     import random
+
     exponential = min(base_ms * (4 ** (attempt - 1)), max_ms)
     jitter = int(exponential * 0.25 * (random.random() * 2 - 1))
     return min(max_ms, max(1000, exponential + jitter))
@@ -646,7 +694,7 @@ def _compute_backoff_ms(attempt: int, base_ms: int = 2000, max_ms: int = 32000) 
 
 # ==================== Global Event History ====================
 
-_recent_events: List[RecoveryEvent] = []  # 最近 200 条事件
+_recent_events: list[RecoveryEvent] = []  # 最近 200 条事件
 _MAX_EVENTS = 200
 
 
@@ -658,6 +706,6 @@ def record_recovery_event(event: RecoveryEvent):
         _recent_events = _recent_events[-_MAX_EVENTS:]
 
 
-def get_recent_events(limit: int = 50) -> List[Dict[str, Any]]:
+def get_recent_events(limit: int = 50) -> list[dict[str, Any]]:
     """获取最近恢复事件"""
     return [e.to_dict() for e in _recent_events[-limit:]]

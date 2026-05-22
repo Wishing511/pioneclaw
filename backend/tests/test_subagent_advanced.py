@@ -14,27 +14,28 @@
 """
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from app.modules.agent.subagent import (
-    SubagentManager,
-    SubagentTask,
-    SubagentRole,
+    SUBAGENT_SYSTEM_PROMPT_TEMPLATE,
+    LaneType,
+    SubagentAnnouncer,
     SubagentConfig,
     SubagentLane,
-    LaneType,
+    SubagentManager,
+    SubagentRole,
     SubagentTargetPolicy,
-    SubagentAnnouncer,
+    SubagentTask,
     TaskStatus,
     TaskType,
-    resolve_subagent_role,
     resolve_subagent_capabilities,
-    SUBAGENT_SYSTEM_PROMPT_TEMPLATE,
+    resolve_subagent_role,
 )
 
-
 # ==================== 深度与角色系统 ====================
+
 
 class TestResolveSubagentRole:
     """resolve_subagent_role 测试"""
@@ -109,6 +110,7 @@ class TestSubagentConfig:
 
 # ==================== Push-based 结果回传 ====================
 
+
 class TestSubagentAnnouncer:
     """SubagentAnnouncer 测试"""
 
@@ -162,8 +164,12 @@ class TestSubagentAnnouncer:
         parent_task.event_callback = None
         manager.tasks["parent-1"] = parent_task
 
-        await announcer.announce("child-1", "parent-1", "result-1", "completed", manager)
-        await announcer.announce("child-2", "parent-1", "result-2", "completed", manager)
+        await announcer.announce(
+            "child-1", "parent-1", "result-1", "completed", manager
+        )
+        await announcer.announce(
+            "child-2", "parent-1", "result-2", "completed", manager
+        )
 
         pending = announcer.get_pending_announcements("parent-1")
         assert len(pending) == 2
@@ -192,6 +198,7 @@ class TestSubagentAnnouncer:
 
 
 # ==================== 并发隔离 Lane ====================
+
 
 class TestSubagentLane:
     """SubagentLane 测试"""
@@ -257,6 +264,7 @@ class TestLaneType:
 
 # ==================== Agent 间访问控制 ====================
 
+
 class TestSubagentTargetPolicy:
     """SubagentTargetPolicy 测试"""
 
@@ -292,6 +300,7 @@ class TestSubagentTargetPolicy:
 
 # ==================== SubagentTask 新字段 ====================
 
+
 class TestSubagentTask:
     """SubagentTask 新字段测试"""
 
@@ -303,22 +312,32 @@ class TestSubagentTask:
         assert task.agent_id is None
 
     def test_can_spawn_property_main(self):
-        task = SubagentTask(task_id="t1", label="test", message="msg", role=SubagentRole.MAIN)
+        task = SubagentTask(
+            task_id="t1", label="test", message="msg", role=SubagentRole.MAIN
+        )
         assert task.can_spawn is True
 
     def test_can_spawn_property_leaf(self):
-        task = SubagentTask(task_id="t1", label="test", message="msg", role=SubagentRole.LEAF)
+        task = SubagentTask(
+            task_id="t1", label="test", message="msg", role=SubagentRole.LEAF
+        )
         assert task.can_spawn is False
 
     def test_can_spawn_property_orchestrator(self):
-        task = SubagentTask(task_id="t1", label="test", message="msg", role=SubagentRole.ORCHESTRATOR)
+        task = SubagentTask(
+            task_id="t1", label="test", message="msg", role=SubagentRole.ORCHESTRATOR
+        )
         assert task.can_spawn is True
 
     def test_to_dict_includes_new_fields(self):
         task = SubagentTask(
-            task_id="t1", label="test", message="msg",
-            depth=1, role=SubagentRole.LEAF,
-            parent_task_id="p1", agent_id="a1"
+            task_id="t1",
+            label="test",
+            message="msg",
+            depth=1,
+            role=SubagentRole.LEAF,
+            parent_task_id="p1",
+            agent_id="a1",
         )
         d = task.to_dict()
         assert d["depth"] == 1
@@ -328,6 +347,7 @@ class TestSubagentTask:
 
 
 # ==================== SubagentManager 集成测试 ====================
+
 
 class TestSubagentManagerAdvanced:
     """SubagentManager OpenClaw 增强集成测试"""
@@ -372,7 +392,9 @@ class TestSubagentManagerAdvanced:
     def test_create_task_with_parent(self):
         manager = SubagentManager()
         parent_id = manager.create_task(label="parent", message="parent task", depth=0)
-        child_id = manager.create_task(label="child", message="child task", depth=1, parent_task_id=parent_id)
+        child_id = manager.create_task(
+            label="child", message="child task", depth=1, parent_task_id=parent_id
+        )
 
         child = manager.get_task(child_id)
         assert child.parent_task_id == parent_id
@@ -403,8 +425,11 @@ class TestSubagentManagerAdvanced:
         # 尝试 spawn 不同 agent 的子任务 → 被阻止
         with pytest.raises(ValueError, match="not allowed to spawn target"):
             manager.create_task(
-                label="child", message="c", depth=1,
-                parent_task_id=parent_id, agent_id="agent-b"
+                label="child",
+                message="c",
+                depth=1,
+                parent_task_id=parent_id,
+                agent_id="agent-b",
             )
 
     def test_create_task_target_policy_allows_wildcard(self):
@@ -417,8 +442,11 @@ class TestSubagentManagerAdvanced:
         )
         # 通配符允许
         child_id = manager.create_task(
-            label="child", message="c", depth=1,
-            parent_task_id=parent_id, agent_id="agent-b"
+            label="child",
+            message="c",
+            depth=1,
+            parent_task_id=parent_id,
+            agent_id="agent-b",
         )
         assert child_id is not None
 
@@ -429,18 +457,22 @@ class TestSubagentManagerAdvanced:
 
         # 创建父任务（带 callback 接收子任务完成事件）
         parent_events = []
+
         def parent_callback(event_type, data):
             parent_events.append((event_type, data))
 
         parent_id = manager.create_task(
-            label="parent", message="parent task",
+            label="parent",
+            message="parent task",
             event_callback=parent_callback,
         )
 
         # 创建子任务
         child_id = manager.create_task(
-            label="child", message="child task",
-            depth=1, parent_task_id=parent_id,
+            label="child",
+            message="child task",
+            depth=1,
+            parent_task_id=parent_id,
         )
 
         # 执行子任务并等待完成
@@ -460,7 +492,10 @@ class TestSubagentManagerAdvanced:
         parent_id = manager.create_task(label="parent", message="p")
 
         child_id = manager.create_task(
-            label="child", message="c", depth=1, parent_task_id=parent_id,
+            label="child",
+            message="c",
+            depth=1,
+            parent_task_id=parent_id,
         )
 
         await manager.execute_task(child_id)
@@ -495,6 +530,7 @@ class TestSubagentManagerAdvanced:
 
 # ==================== 子 Agent 专用系统提示词 ====================
 
+
 class TestSubagentSystemPrompt:
     """子 Agent 专用系统提示词测试"""
 
@@ -526,8 +562,11 @@ class TestSubagentSystemPrompt:
         parent_id = manager.create_task(label="Root", message="root")
 
         task = SubagentTask(
-            task_id="t2", label="sub task", message="do research",
-            depth=1, role=SubagentRole.LEAF,
+            task_id="t2",
+            label="sub task",
+            message="do research",
+            depth=1,
+            role=SubagentRole.LEAF,
             parent_task_id=parent_id,
             task_type=TaskType.RESEARCH,
         )
@@ -544,8 +583,11 @@ class TestSubagentSystemPrompt:
         """depth>0 但无 parent_task_id"""
         manager = SubagentManager()
         task = SubagentTask(
-            task_id="t2", label="sub task", message="msg",
-            depth=1, role=SubagentRole.LEAF,
+            task_id="t2",
+            label="sub task",
+            message="msg",
+            depth=1,
+            role=SubagentRole.LEAF,
         )
         manager.tasks["t2"] = task
 
@@ -555,6 +597,7 @@ class TestSubagentSystemPrompt:
 
 
 # ==================== 统计信息扩展 ====================
+
 
 class TestStatsWithDepth:
     """统计信息包含深度/角色信息"""
@@ -572,8 +615,8 @@ class TestStatsWithDepth:
     def test_list_by_depth(self):
         """通过 depth 字段过滤"""
         manager = SubagentManager()
-        id1 = manager.create_task(label="root", message="r", depth=0)
-        id2 = manager.create_task(label="child", message="c", depth=1)
+        manager.create_task(label="root", message="r", depth=0)
+        manager.create_task(label="child", message="c", depth=1)
 
         all_tasks = manager.list_tasks()
         roots = [t for t in all_tasks if t.depth == 0]

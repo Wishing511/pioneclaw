@@ -5,32 +5,43 @@ Track 2 — 分层向量记忆库
 """
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.modules.tools.builtin import (
-    VectorMemoryRecallTool,
-    VectorMemoryStoreTool,
-    VectorMemoryGetTool,
-    VectorMemoryStatsTool,
-)
+import pytest
 
+from app.modules.tools.builtin import (
+    VectorMemoryGetTool,
+    VectorMemoryRecallTool,
+    VectorMemoryStatsTool,
+    VectorMemoryStoreTool,
+)
 
 # ============================================================
 # VectorMemoryRecallTool 测试 (sync vector store, async execute wrapper)
 # ============================================================
+
 
 class TestVectorMemoryRecallTool:
     @pytest.mark.asyncio
     async def test_recall_with_results(self):
         mock_store = MagicMock()
         mock_store.search.return_value = [
-            MagicMock(id="mem-1", content="Python async programming guide",
-                       source_type="memory", score=0.95),
-            MagicMock(id="mem-2", content="Database optimization tips",
-                       source_type="knowledge", score=0.72),
+            MagicMock(
+                id="mem-1",
+                content="Python async programming guide",
+                source_type="memory",
+                score=0.95,
+            ),
+            MagicMock(
+                id="mem-2",
+                content="Database optimization tips",
+                source_type="knowledge",
+                score=0.72,
+            ),
         ]
-        with patch("app.modules.agent.vector_store.get_vector_store", lambda: mock_store):
+        with patch(
+            "app.modules.agent.vector_store.get_vector_store", lambda: mock_store
+        ):
             tool = VectorMemoryRecallTool()
             result = json.loads(await tool.execute(query="Python programming", top_k=5))
         assert len(result["results"]) == 2
@@ -41,7 +52,9 @@ class TestVectorMemoryRecallTool:
     async def test_recall_empty_results(self):
         mock_store = MagicMock()
         mock_store.search.return_value = []
-        with patch("app.modules.agent.vector_store.get_vector_store", lambda: mock_store):
+        with patch(
+            "app.modules.agent.vector_store.get_vector_store", lambda: mock_store
+        ):
             tool = VectorMemoryRecallTool()
             result = json.loads(await tool.execute(query="zzzznotfound"))
         assert result["results"] == []
@@ -52,9 +65,13 @@ class TestVectorMemoryRecallTool:
         mock_store = MagicMock()
         long_content = "A" * 1000
         mock_store.search.return_value = [
-            MagicMock(id="mem-long", content=long_content, source_type="memory", score=0.8),
+            MagicMock(
+                id="mem-long", content=long_content, source_type="memory", score=0.8
+            ),
         ]
-        with patch("app.modules.agent.vector_store.get_vector_store", lambda: mock_store):
+        with patch(
+            "app.modules.agent.vector_store.get_vector_store", lambda: mock_store
+        ):
             tool = VectorMemoryRecallTool()
             result = json.loads(await tool.execute(query="test"))
         assert len(result["results"][0]["content"]) <= 500
@@ -63,25 +80,35 @@ class TestVectorMemoryRecallTool:
     async def test_recall_source_type_filter(self):
         mock_store = MagicMock()
         mock_store.search.return_value = []
-        with patch("app.modules.agent.vector_store.get_vector_store", lambda: mock_store):
+        with patch(
+            "app.modules.agent.vector_store.get_vector_store", lambda: mock_store
+        ):
             tool = VectorMemoryRecallTool()
             await tool.execute(query="test", source_type="memory", top_k=10)
-        mock_store.search.assert_called_with("test", top_k=10, source_type="memory", min_score=0.3)
+        mock_store.search.assert_called_with(
+            "test", top_k=10, source_type="memory", min_score=0.3
+        )
 
     @pytest.mark.asyncio
     async def test_recall_all_source_type(self):
         mock_store = MagicMock()
         mock_store.search.return_value = []
-        with patch("app.modules.agent.vector_store.get_vector_store", lambda: mock_store):
+        with patch(
+            "app.modules.agent.vector_store.get_vector_store", lambda: mock_store
+        ):
             tool = VectorMemoryRecallTool()
             await tool.execute(query="test", source_type="all")
-        mock_store.search.assert_called_with("test", top_k=5, source_type=None, min_score=0.3)
+        mock_store.search.assert_called_with(
+            "test", top_k=5, source_type=None, min_score=0.3
+        )
 
     @pytest.mark.asyncio
     async def test_recall_exception(self):
         mock_store = MagicMock()
         mock_store.search.side_effect = RuntimeError("Vector store unavailable")
-        with patch("app.modules.agent.vector_store.get_vector_store", lambda: mock_store):
+        with patch(
+            "app.modules.agent.vector_store.get_vector_store", lambda: mock_store
+        ):
             tool = VectorMemoryRecallTool()
             result = json.loads(await tool.execute(query="test"))
         assert "error" in result
@@ -91,12 +118,14 @@ class TestVectorMemoryRecallTool:
 # VectorMemoryStoreTool 测试
 # ============================================================
 
+
 def _make_session_mock():
     s = AsyncMock()
     s.commit = AsyncMock()
     s.__aenter__ = AsyncMock(return_value=s)
     s.__aexit__ = AsyncMock(return_value=None)
     return s
+
 
 class TestVectorMemoryStoreTool:
     def _mock_memory(self, **attrs):
@@ -118,15 +147,29 @@ class TestVectorMemoryStoreTool:
         )
         mock_orchestrator.store = AsyncMock(return_value=mock_memory)
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator), \
-             patch("app.modules.agent.vector_store.get_vector_store", lambda: MagicMock()):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+            patch(
+                "app.modules.agent.vector_store.get_vector_store", lambda: MagicMock()
+            ),
+        ):
             tool = VectorMemoryStoreTool()
-            result = json.loads(await tool.execute(
-                content="Memory content for testing",
-                name="Test Memory", context_type="memory",
-                tags="python,test", importance=4,
-            ))
+            result = json.loads(
+                await tool.execute(
+                    content="Memory content for testing",
+                    name="Test Memory",
+                    context_type="memory",
+                    tags="python,test",
+                    importance=4,
+                )
+            )
         assert result["success"] is True
         assert result["uri"] == "viking://user/1/test_memory"
         assert result["name"] == "Test Memory"
@@ -136,17 +179,33 @@ class TestVectorMemoryStoreTool:
         mock_session = _make_session_mock()
         mock_orchestrator = MagicMock()
         mock_memory = self._mock_memory(
-            uri="uri://1", name="Default Memory", context_type="memory", layer=2,
+            uri="uri://1",
+            name="Default Memory",
+            context_type="memory",
+            layer=2,
         )
         mock_orchestrator.store = AsyncMock(return_value=mock_memory)
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator), \
-             patch("app.modules.agent.vector_store.get_vector_store", lambda: MagicMock()):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+            patch(
+                "app.modules.agent.vector_store.get_vector_store", lambda: MagicMock()
+            ),
+        ):
             tool = VectorMemoryStoreTool()
-            result = json.loads(await tool.execute(
-                content="Basic content", name="Default Memory",
-            ))
+            result = json.loads(
+                await tool.execute(
+                    content="Basic content",
+                    name="Default Memory",
+                )
+            )
         assert result["success"] is True
 
     @pytest.mark.asyncio
@@ -155,13 +214,26 @@ class TestVectorMemoryStoreTool:
         mock_orchestrator = MagicMock()
         mock_orchestrator.store = AsyncMock(side_effect=RuntimeError("DB error"))
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator), \
-             patch("app.modules.agent.vector_store.get_vector_store", lambda: MagicMock()):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+            patch(
+                "app.modules.agent.vector_store.get_vector_store", lambda: MagicMock()
+            ),
+        ):
             tool = VectorMemoryStoreTool()
-            result = json.loads(await tool.execute(
-                content="Should fail", name="Error Test",
-            ))
+            result = json.loads(
+                await tool.execute(
+                    content="Should fail",
+                    name="Error Test",
+                )
+            )
         assert result["success"] is False
         assert "error" in result
 
@@ -169,6 +241,7 @@ class TestVectorMemoryStoreTool:
 # ============================================================
 # VectorMemoryGetTool 测试
 # ============================================================
+
 
 class TestVectorMemoryGetTool:
     def _mock_memory(self, **attrs):
@@ -181,14 +254,30 @@ class TestVectorMemoryGetTool:
     async def test_get_success(self):
         mock_session = _make_session_mock()
         mock_orchestrator = MagicMock()
-        mock_orchestrator.get_with_context = AsyncMock(return_value={
-            "l0": self._mock_memory(uri="uri://1/.level_0", content="L0 summary", name="Test"),
-            "l1": self._mock_memory(uri="uri://1/.level_1", content="L1 overview", name="Test"),
-            "l2": self._mock_memory(uri="uri://1/.level_2", content="L2 full content", name="Test"),
-        })
+        mock_orchestrator.get_with_context = AsyncMock(
+            return_value={
+                "l0": self._mock_memory(
+                    uri="uri://1/.level_0", content="L0 summary", name="Test"
+                ),
+                "l1": self._mock_memory(
+                    uri="uri://1/.level_1", content="L1 overview", name="Test"
+                ),
+                "l2": self._mock_memory(
+                    uri="uri://1/.level_2", content="L2 full content", name="Test"
+                ),
+            }
+        )
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+        ):
             tool = VectorMemoryGetTool()
             result = json.loads(await tool.execute(uri="uri://1"))
         assert result["success"] is True
@@ -200,8 +289,16 @@ class TestVectorMemoryGetTool:
         mock_orchestrator = MagicMock()
         mock_orchestrator.get_with_context = AsyncMock(return_value=None)
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+        ):
             tool = VectorMemoryGetTool()
             result = json.loads(await tool.execute(uri="uri://notfound"))
         assert result["success"] is False
@@ -212,18 +309,34 @@ class TestVectorMemoryGetTool:
 # VectorMemoryStatsTool 测试
 # ============================================================
 
+
 class TestVectorMemoryStatsTool:
     @pytest.mark.asyncio
     async def test_stats_success(self):
         mock_session = _make_session_mock()
         mock_orchestrator = MagicMock()
-        mock_orchestrator.stats = AsyncMock(return_value={
-            "total": 10, "l0_count": 3, "l1_count": 3, "l2_count": 4,
-            "by_type": {"memory": 6}, "by_source": {"manual": 8}, "vector_count": 30,
-        })
+        mock_orchestrator.stats = AsyncMock(
+            return_value={
+                "total": 10,
+                "l0_count": 3,
+                "l1_count": 3,
+                "l2_count": 4,
+                "by_type": {"memory": 6},
+                "by_source": {"manual": 8},
+                "vector_count": 30,
+            }
+        )
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+        ):
             tool = VectorMemoryStatsTool()
             result = json.loads(await tool.execute())
         assert result["success"] is True
@@ -236,8 +349,16 @@ class TestVectorMemoryStatsTool:
         mock_orchestrator = MagicMock()
         mock_orchestrator.stats = AsyncMock(side_effect=RuntimeError("DB unavailable"))
 
-        with patch("app.core.database.async_session_maker", MagicMock(return_value=mock_session)), \
-             patch("app.modules.agent.layered_memory.MemoryOrchestrator", lambda **kw: mock_orchestrator):
+        with (
+            patch(
+                "app.core.database.async_session_maker",
+                MagicMock(return_value=mock_session),
+            ),
+            patch(
+                "app.modules.agent.layered_memory.MemoryOrchestrator",
+                lambda **kw: mock_orchestrator,
+            ),
+        ):
             tool = VectorMemoryStatsTool()
             result = json.loads(await tool.execute())
         assert result["success"] is False

@@ -10,7 +10,6 @@ Compactor - 对话压缩和上下文管理
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -147,14 +146,16 @@ OVERFLOW_SUMMARY_PROMPT = """你是一个对话总结器。在即将截断旧的
 
 # ==================== 数据类 ====================
 
+
 @dataclass
 class CompactionResult:
     """压缩结果"""
+
     summary: str  # 压缩后的摘要
     removed_messages: int  # 移除的消息数
     kept_messages: int  # 保留的消息数
     saved_tokens: int  # 节省的 Token 数
-    memory_entries: List[str] = field(default_factory=list)  # 生成的记忆条目
+    memory_entries: list[str] = field(default_factory=list)  # 生成的记忆条目
 
 
 @dataclass
@@ -166,6 +167,7 @@ class CompactionConfig:
     - Compactor 是最后防线，只在接近模型上下文上限时才触发
     - token_threshold = context_window - buffer_tokens
     """
+
     # 模型上下文窗口大小，从 AI 配置读取
     context_window: int = 200_000
 
@@ -203,25 +205,26 @@ class CompactionConfig:
 
 # ==================== Compactor 类 ====================
 
+
 class Compactor:
     """
     对话压缩器
-    
+
     功能：
     1. 检测是否需要压缩
     2. 分割消息（总结 vs 保留）
     3. 生成摘要
     4. 提取记忆条目
     """
-    
+
     def __init__(
         self,
-        config: Optional[CompactionConfig] = None,
+        config: CompactionConfig | None = None,
         llm_client=None,  # LLM 客户端（用于生成摘要）
         memory_orchestrator=None,  # LayeredMemory MemoryOrchestrator（写入 L1）
         user_id: int = 1,  # 用户 ID（写入记忆时使用）
-        session_id: Optional[str] = None,  # 会话 ID
-        agent_id: Optional[int] = None,  # Agent ID
+        session_id: str | None = None,  # 会话 ID
+        agent_id: int | None = None,  # Agent ID
     ):
         self.config = config or CompactionConfig()
         self.llm_client = llm_client
@@ -231,16 +234,16 @@ class Compactor:
         self.agent_id = agent_id
 
         # 当前摘要（递归总结用）
-        self._current_summary: Optional[str] = None
+        self._current_summary: str | None = None
 
         # 熔断器：连续失败次数
         self._consecutive_failures: int = 0
         self.MAX_CONSECUTIVE_FAILURES: int = 3
-    
+
     def should_compact(
         self,
-        messages: List[dict],
-        token_count: Optional[int] = None,
+        messages: list[dict],
+        token_count: int | None = None,
     ) -> bool:
         """
         判断是否需要压缩
@@ -274,12 +277,12 @@ class Compactor:
             return True
 
         return False
-    
+
     async def compact(
         self,
-        messages: List[dict],
-        existing_summary: Optional[str] = None,
-        instruction: Optional[str] = None,
+        messages: list[dict],
+        existing_summary: str | None = None,
+        instruction: str | None = None,
         force: bool = False,
     ) -> CompactionResult:
         """
@@ -301,10 +304,10 @@ class Compactor:
                 kept_messages=len(messages),
                 saved_tokens=0,
             )
-        
+
         # 分割消息
         to_summarize, to_keep = self._split_messages(messages)
-        
+
         if not to_summarize:
             return CompactionResult(
                 summary="",
@@ -312,10 +315,10 @@ class Compactor:
                 kept_messages=len(messages),
                 saved_tokens=0,
             )
-        
+
         # 估算节省的 Token
         saved_tokens = self._estimate_tokens(to_summarize)
-        
+
         # 熔断器检查
         if self._consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
             logger.warning(
@@ -339,7 +342,9 @@ class Compactor:
 
             # 空摘要保护：摘要为空 = 压缩失败，不丢弃历史
             if not summary or not summary.strip():
-                logger.warning("Compaction failed: empty summary, preserving original messages")
+                logger.warning(
+                    "Compaction failed: empty summary, preserving original messages"
+                )
                 self._consecutive_failures += 1
                 return CompactionResult(
                     summary="",
@@ -379,11 +384,11 @@ class Compactor:
                 kept_messages=len(messages),
                 saved_tokens=0,
             )
-    
+
     def _split_messages(
         self,
-        messages: List[dict],
-    ) -> Tuple[List[dict], List[dict]]:
+        messages: list[dict],
+    ) -> tuple[list[dict], list[dict]]:
         """分割消息：要总结的和要保留的"""
         keep_recent = self.config.keep_recent_messages
 
@@ -398,12 +403,12 @@ class Compactor:
             to_keep = messages[-keep_recent:]
 
         return to_summarize, to_keep
-    
+
     async def _generate_summary(
         self,
-        messages: List[dict],
-        existing_summary: Optional[str] = None,
-        instruction: Optional[str] = None,
+        messages: list[dict],
+        existing_summary: str | None = None,
+        instruction: str | None = None,
     ) -> str:
         """生成摘要"""
         if not self.llm_client:
@@ -439,11 +444,11 @@ class Compactor:
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")
             return self._generate_simple_summary(messages)
-    
+
     async def _generate_memory_entries(
         self,
-        messages: List[dict],
-    ) -> List[str]:
+        messages: list[dict],
+    ) -> list[str]:
         """生成记忆条目（使用 CONVERSATION_TO_MEMORY_PROMPT）"""
         if not self.llm_client:
             return []
@@ -466,7 +471,7 @@ class Compactor:
             logger.error(f"Failed to generate memory entries: {e}")
             return []
 
-    async def _write_memories_to_l1(self, entries: List[str]) -> None:
+    async def _write_memories_to_l1(self, entries: list[str]) -> None:
         """将记忆条目写入 L1 会话记忆（通过 MemoryOrchestrator）"""
         try:
             for entry in entries:
@@ -480,7 +485,9 @@ class Compactor:
                     source="compactor",
                     importance=2,
                 )
-            logger.info(f"Wrote {len(entries)} memory entries to L1 via MemoryOrchestrator")
+            logger.info(
+                f"Wrote {len(entries)} memory entries to L1 via MemoryOrchestrator"
+            )
         except Exception as e:
             logger.warning(f"Failed to write memories to L1: {e}")
 
@@ -497,21 +504,25 @@ class Compactor:
 
         try:
             # 1. 标准非流式 chat 接口
-            if hasattr(self.llm_client, 'chat'):
-                response = await self.llm_client.chat([{"role": "user", "content": prompt}])
+            if hasattr(self.llm_client, "chat"):
+                response = await self.llm_client.chat(
+                    [{"role": "user", "content": prompt}]
+                )
                 if isinstance(response, dict):
                     return response.get("content", "")
                 return str(response)
 
             # 2. 简化 complete 接口
-            elif hasattr(self.llm_client, 'complete'):
+            elif hasattr(self.llm_client, "complete"):
                 response = await self.llm_client.complete(prompt)
                 return str(response)
 
             # 3. 流式 chat_stream 接口（如 SimpleLLMProvider）— 聚合所有 chunk
-            elif hasattr(self.llm_client, 'chat_stream'):
+            elif hasattr(self.llm_client, "chat_stream"):
                 content_parts = []
-                async for chunk in self.llm_client.chat_stream([{"role": "user", "content": prompt}]):
+                async for chunk in self.llm_client.chat_stream(
+                    [{"role": "user", "content": prompt}]
+                ):
                     if isinstance(chunk, dict):
                         if chunk.get("error"):
                             logger.error(f"LLM stream error: {chunk['error']}")
@@ -523,13 +534,15 @@ class Compactor:
                 return "".join(content_parts)
 
             else:
-                logger.warning(f"LLM client has no supported interface: {type(self.llm_client).__name__}")
+                logger.warning(
+                    f"LLM client has no supported interface: {type(self.llm_client).__name__}"
+                )
                 return ""
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             return ""
-    
-    def _format_messages(self, messages: List[dict]) -> str:
+
+    def _format_messages(self, messages: list[dict]) -> str:
         """格式化消息为文本（压缩前调用）
 
         处理多模态内容：将图片/文档替换为占位符，避免压缩请求本身过大。
@@ -569,19 +582,19 @@ class Compactor:
             lines.append(f"[{role_label}]: {content}")
 
         return "\n".join(lines)
-    
-    def _generate_simple_summary(self, messages: List[dict]) -> str:
+
+    def _generate_simple_summary(self, messages: list[dict]) -> str:
         """生成简单统计摘要（无 LLM 时使用）"""
         user_msgs = sum(1 for m in messages if m.get("role") == "user")
         assistant_msgs = sum(1 for m in messages if m.get("role") == "assistant")
-        
+
         return (
             f"[历史对话摘要] 共 {len(messages)} 条消息 "
             f"(用户: {user_msgs}, 助手: {assistant_msgs})。"
             f"已压缩 {len(messages)} 条历史消息以节省上下文空间。"
         )
-    
-    def _estimate_tokens(self, messages: List[dict]) -> int:
+
+    def _estimate_tokens(self, messages: list[dict]) -> int:
         """估算 Token 数"""
         total = 0
         for msg in messages:
@@ -593,22 +606,24 @@ class Compactor:
                 )
             # 简单估算：中文 1.5 字符/token，英文 4 字符/token
             import re
-            chinese = len(re.findall(r'[\u4e00-\u9fff]', str(content)))
+
+            chinese = len(re.findall(r"[\u4e00-\u9fff]", str(content)))
             english = len(str(content)) - chinese
             total += int(chinese / 1.5 + english / 4) + 4
         return total
-    
+
     @property
-    def current_summary(self) -> Optional[str]:
+    def current_summary(self) -> str | None:
         """获取当前摘要"""
         return self._current_summary
-    
+
     def reset_summary(self) -> None:
         """重置摘要"""
         self._current_summary = None
 
 
 # ==================== 便捷函数 ====================
+
 
 def create_compactor(
     context_window: int = 200_000,
@@ -617,8 +632,8 @@ def create_compactor(
     keep_recent: int = 10,
     llm_client=None,
     user_id: int = 1,
-    session_id: Optional[str] = None,
-    agent_id: Optional[int] = None,
+    session_id: str | None = None,
+    agent_id: int | None = None,
 ) -> Compactor:
     """创建 Compactor 实例"""
     config = CompactionConfig(
@@ -628,6 +643,9 @@ def create_compactor(
         keep_recent_messages=keep_recent,
     )
     return Compactor(
-        config=config, llm_client=llm_client,
-        user_id=user_id, session_id=session_id, agent_id=agent_id,
+        config=config,
+        llm_client=llm_client,
+        user_id=user_id,
+        session_id=session_id,
+        agent_id=agent_id,
     )

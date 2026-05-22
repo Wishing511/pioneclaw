@@ -3,13 +3,15 @@ DeferredInit 测试 (Stage QQ)
 """
 
 import asyncio
-import pytest
-from app.core.deferred_init import DeferredInit, DeferredInitError
 
+import pytest
+
+from app.core.deferred_init import DeferredInit, DeferredInitError
 
 # ============================================================
 # Basic initialization
 # ============================================================
+
 
 class TestDeferredInitBasic:
     """测试基本延迟初始化"""
@@ -59,6 +61,7 @@ class TestDeferredInitBasic:
 
     def test_get_sync_async_factory_fails(self):
         """同步 get_sync() + async 工厂 → RuntimeError"""
+
         async def factory():
             return "async_val"
 
@@ -87,6 +90,7 @@ class TestDeferredInitBasic:
 
     def test_error_property(self):
         """error 属性记录失败信息"""
+
         async def factory():
             raise ValueError("test error")
 
@@ -100,6 +104,7 @@ class TestDeferredInitBasic:
 # ============================================================
 # Retry
 # ============================================================
+
 
 class TestDeferredInitRetry:
     """测试重试机制"""
@@ -121,6 +126,7 @@ class TestDeferredInitRetry:
 
     def test_retry_exhausted(self):
         """所有重试耗尽 → DeferredInitError"""
+
         async def factory():
             raise ValueError("always fail")
 
@@ -133,6 +139,7 @@ class TestDeferredInitRetry:
 
     def test_no_retry_when_max_retries_zero(self):
         """max_retries=0 不重试"""
+
         async def factory():
             raise ValueError("fail")
 
@@ -145,6 +152,7 @@ class TestDeferredInitRetry:
 # ============================================================
 # Concurrency
 # ============================================================
+
 
 class TestDeferredInitConcurrency:
     """测试并发安全"""
@@ -175,6 +183,7 @@ class TestDeferredInitConcurrency:
 # Timeout
 # ============================================================
 
+
 class TestDeferredInitTimeout:
     """测试超时"""
 
@@ -189,8 +198,10 @@ class TestDeferredInitTimeout:
             return "ok"
 
         deferred = DeferredInit(
-            factory=factory, name="test",
-            timeout=0.05, max_retries=1,
+            factory=factory,
+            name="test",
+            timeout=0.05,
+            max_retries=1,
         )
         result = asyncio.run(deferred.get())
         assert result == "ok"

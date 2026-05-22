@@ -1,12 +1,20 @@
 """
 组织模型 - 树形结构
 """
-from datetime import datetime
-from typing import Optional, List
-from sqlalchemy import String, Text, Integer, ForeignKey, JSON, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.core.database import Base
+
+from __future__ import annotations
+
 import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models import User
 
 
 def generate_uuid() -> str:
@@ -15,29 +23,42 @@ def generate_uuid() -> str:
 
 class Organization(Base):
     """组织模型 - 树形结构"""
+
     __tablename__ = "organizations"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # 树形结构
-    parent_id: Mapped[Optional[str]] = mapped_column(ForeignKey("organizations.id"), nullable=True, index=True)
-    level: Mapped[int] = mapped_column(Integer, default=1)  # 层级：1=公司, 2=部门, 3=团队
-    path: Mapped[str] = mapped_column(String(500), default="")  # 路径：如 "uuid1/uuid2/uuid3"
+    parent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organizations.id"), nullable=True, index=True
+    )
+    level: Mapped[int] = mapped_column(
+        Integer, default=1
+    )  # 层级：1=公司, 2=部门, 3=团队
+    path: Mapped[str] = mapped_column(
+        String(500), default=""
+    )  # 路径：如 "uuid1/uuid2/uuid3"
 
     # 管理信息
-    manager_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
-    type: Mapped[str] = mapped_column(String(20), default="department")  # company/department/team
+    manager_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    type: Mapped[str] = mapped_column(
+        String(20), default="department"
+    )  # company/department/team
     status: Mapped[str] = mapped_column(String(20), default="active")  # active/inactive
 
     # 元数据（不能用 metadata，SQLAlchemy 保留字）
-    meta_data: Mapped[Optional[dict]] = mapped_column("metadata", JSON, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
 
     # 组织级设置
-    model_config_ids: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)  # 分配给该组织的模型配置 ID 列表
-    settings: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    model_config_ids: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True
+    )  # 分配给该组织的模型配置 ID 列表
+    settings: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # settings 结构：
     # {
     #   "default_output_language": "中文",
@@ -46,25 +67,25 @@ class Organization(Base):
     # }
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=func.now(), onupdate=func.now()
+    )
 
     # 关系
-    parent: Mapped[Optional["Organization"]] = relationship(
+    parent: Mapped[Organization | None] = relationship(
         "Organization",
         back_populates="children",
         remote_side=[id],
-        foreign_keys=[parent_id]
+        foreign_keys=[parent_id],
     )
-    children: Mapped[List["Organization"]] = relationship(
+    children: Mapped[list[Organization]] = relationship(
         "Organization",
         back_populates="parent",
         foreign_keys=[parent_id],
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
-    users: Mapped[List["User"]] = relationship(
-        "User",
-        back_populates="organization",
-        foreign_keys="User.organization_id"
+    users: Mapped[list[User]] = relationship(
+        "User", back_populates="organization", foreign_keys="User.organization_id"
     )
 
     def update_path(self, parent_path: str = ""):

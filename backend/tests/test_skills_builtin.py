@@ -4,24 +4,39 @@ UU.2 内置技能测试
 覆盖：6 个 builtin 技能的加载、frontmatter 解析、activate 和 list
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
+if TYPE_CHECKING:
+    from app.modules.agent.skills import SkillsLoader
 
 # ── 辅助：获取 builtin 目录路径 ────────────────────────────────
 
+
 def _get_builtin_dir() -> Path:
-    return (Path(__file__).resolve().parent.parent
-            / "app" / "modules" / "agent" / "skills" / "builtin")
+    return (
+        Path(__file__).resolve().parent.parent
+        / "app"
+        / "modules"
+        / "agent"
+        / "skills"
+        / "builtin"
+    )
 
 
 # ── 辅助：创建临时的 SkillsLoader 实例 ─────────────────────────
 
-def _create_loader_with_builtin() -> "SkillsLoader":
-    from app.modules.agent.skills import SkillsLoader
+
+def _create_loader_with_builtin() -> SkillsLoader:
     import tempfile
+
+    from app.modules.agent.skills import SkillsLoader
+
     tmpdir = Path(tempfile.mkdtemp())
     builtin_dir = _get_builtin_dir()
     return SkillsLoader(skills_dir=tmpdir, builtin_skills_dir=builtin_dir)
@@ -31,15 +46,25 @@ def _create_loader_with_builtin() -> "SkillsLoader":
 # 测试 1: 所有 6 个技能能被加载
 # ============================================================
 
+
 class TestBuiltinSkillsLoad:
     """测试 SkillsLoader 能发现并加载 6 个 builtin 技能"""
 
-    EXPECTED_SKILLS = {"commit", "simplify", "verify", "remember", "update-config", "loop"}
+    EXPECTED_SKILLS = {
+        "commit",
+        "simplify",
+        "verify",
+        "remember",
+        "update-config",
+        "loop",
+    }
 
     def test_all_six_skills_discovered(self):
         loader = _create_loader_with_builtin()
         names = set(loader.skills.keys())
-        assert self.EXPECTED_SKILLS.issubset(names), f"Missing: {self.EXPECTED_SKILLS - names}"
+        assert self.EXPECTED_SKILLS.issubset(names), (
+            f"Missing: {self.EXPECTED_SKILLS - names}"
+        )
 
     def test_each_skill_is_enabled(self):
         loader = _create_loader_with_builtin()
@@ -59,6 +84,7 @@ class TestBuiltinSkillsLoad:
 # 测试 2: Frontmatter 解析正确
 # ============================================================
 
+
 class TestBuiltinSkillFrontmatter:
     """测试每个技能的 title/description/tags 正确解析"""
 
@@ -72,7 +98,9 @@ class TestBuiltinSkillFrontmatter:
     def test_simplify_metadata(self):
         loader = _create_loader_with_builtin()
         skill = loader.get_skill("simplify")
-        assert "审查" in skill.metadata.title or "review" in skill.metadata.title.lower()
+        assert (
+            "审查" in skill.metadata.title or "review" in skill.metadata.title.lower()
+        )
         assert "review" in skill.metadata.tags or "code-quality" in skill.metadata.tags
 
     def test_verify_metadata(self):
@@ -84,19 +112,27 @@ class TestBuiltinSkillFrontmatter:
     def test_remember_metadata(self):
         loader = _create_loader_with_builtin()
         skill = loader.get_skill("remember")
-        assert "记忆" in skill.metadata.title or "memory" in skill.metadata.title.lower()
+        assert (
+            "记忆" in skill.metadata.title or "memory" in skill.metadata.title.lower()
+        )
         assert len(skill.metadata.tags) > 0
 
     def test_update_config_metadata(self):
         loader = _create_loader_with_builtin()
         skill = loader.get_skill("update-config")
-        assert "配置" in skill.metadata.title or "config" in skill.metadata.title.lower()
+        assert (
+            "配置" in skill.metadata.title or "config" in skill.metadata.title.lower()
+        )
         assert len(skill.metadata.tags) > 0
 
     def test_loop_metadata(self):
         loader = _create_loader_with_builtin()
         skill = loader.get_skill("loop")
-        assert "定时" in skill.metadata.title or "循环" in skill.metadata.title or "loop" in skill.metadata.title.lower()
+        assert (
+            "定时" in skill.metadata.title
+            or "循环" in skill.metadata.title
+            or "loop" in skill.metadata.title.lower()
+        )
         assert len(skill.metadata.tags) > 0
 
     def test_no_skill_has_always_true(self):
@@ -110,6 +146,7 @@ class TestBuiltinSkillFrontmatter:
 # ============================================================
 # 测试 3: 技能内容不为空
 # ============================================================
+
 
 class TestBuiltinSkillContent:
     """测试每个技能有实质性内容（去除 frontmatter 后）"""
@@ -126,13 +163,14 @@ class TestBuiltinSkillContent:
 # 测试 4: SkillTool activate 返回非空内容
 # ============================================================
 
+
 class TestBuiltinSkillActivate:
     """测试 SkillTool activate 对每个 builtin 技能返回正确内容"""
 
     @pytest.mark.asyncio
     async def test_activate_commit(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -146,8 +184,8 @@ class TestBuiltinSkillActivate:
 
     @pytest.mark.asyncio
     async def test_activate_simplify(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -160,8 +198,8 @@ class TestBuiltinSkillActivate:
 
     @pytest.mark.asyncio
     async def test_activate_verify(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -174,8 +212,8 @@ class TestBuiltinSkillActivate:
 
     @pytest.mark.asyncio
     async def test_activate_remember(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -188,8 +226,8 @@ class TestBuiltinSkillActivate:
 
     @pytest.mark.asyncio
     async def test_activate_update_config(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -202,8 +240,8 @@ class TestBuiltinSkillActivate:
 
     @pytest.mark.asyncio
     async def test_activate_loop(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -219,13 +257,14 @@ class TestBuiltinSkillActivate:
 # 测试 5: SkillTool list 包含 builtin 技能
 # ============================================================
 
+
 class TestBuiltinSkillList:
     """测试 SkillTool list 返回包含 builtin 技能"""
 
     @pytest.mark.asyncio
     async def test_list_includes_builtin(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -240,8 +279,8 @@ class TestBuiltinSkillList:
 
     @pytest.mark.asyncio
     async def test_list_shows_builtin_source(self, monkeypatch):
-        from app.modules.tools.skill import SkillTool
         import app.modules.tools.skill as skill_module
+        from app.modules.tools.skill import SkillTool
 
         loader = _create_loader_with_builtin()
         skill_module.get_skills_loader = lambda: loader
@@ -256,6 +295,7 @@ class TestBuiltinSkillList:
 # ============================================================
 # 测试 6: 内置技能目录存在且包含 6 个子目录
 # ============================================================
+
 
 class TestBuiltinDirectoryStructure:
     """测试 builtin 目录结构正确"""

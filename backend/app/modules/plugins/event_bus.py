@@ -12,8 +12,9 @@ EventBus - 异步事件总线
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,10 @@ EventHandler = Callable[[str, dict], Any]
 @dataclass
 class _Subscription:
     """订阅记录"""
+
     handler: EventHandler
     topic_pattern: str  # 原始模式字符串
-    priority: int = 0   # 数值越大越先执行
+    priority: int = 0  # 数值越大越先执行
     _id: int = field(default_factory=lambda: id(object()))  # 用于取消订阅
 
 
@@ -42,8 +44,8 @@ class EventBus:
     """
 
     def __init__(self) -> None:
-        self._subscriptions: Dict[str, List[_Subscription]] = {}
-        self._wildcard_subscriptions: List[_Subscription] = []
+        self._subscriptions: dict[str, list[_Subscription]] = {}
+        self._wildcard_subscriptions: list[_Subscription] = []
         self._counter: int = 0
 
     @staticmethod
@@ -95,7 +97,9 @@ class EventBus:
             self._subscriptions.setdefault(topic, []).append(sub)
             self._subscriptions[topic].sort(key=lambda s: -s.priority)
 
-        logger.debug(f"[EventBus] 订阅: {topic} -> {handler.__name__} (sub_id={sub_id})")
+        logger.debug(
+            f"[EventBus] 订阅: {topic} -> {handler.__name__} (sub_id={sub_id})"
+        )
         return sub_id
 
     def unsubscribe(self, sub_id: str) -> bool:
@@ -120,12 +124,14 @@ class EventBus:
         for i, sub in enumerate(self._wildcard_subscriptions):
             if f"sub_{sub._id}" == sub_id:
                 self._wildcard_subscriptions.pop(i)
-                logger.debug(f"[EventBus] 取消通配符订阅: {sub.topic_pattern} (sub_id={sub_id})")
+                logger.debug(
+                    f"[EventBus] 取消通配符订阅: {sub.topic_pattern} (sub_id={sub_id})"
+                )
                 return True
 
         return False
 
-    def unsubscribe_all(self, topic: Optional[str] = None) -> int:
+    def unsubscribe_all(self, topic: str | None = None) -> int:
         """
         取消所有订阅（或指定主题的订阅）
 
@@ -145,8 +151,7 @@ class EventBus:
             if topic in self._subscriptions:
                 count += len(self._subscriptions.pop(topic))
             to_remove = [
-                s for s in self._wildcard_subscriptions
-                if s.topic_pattern == topic
+                s for s in self._wildcard_subscriptions if s.topic_pattern == topic
             ]
             for s in to_remove:
                 self._wildcard_subscriptions.remove(s)
@@ -155,7 +160,7 @@ class EventBus:
         logger.debug(f"[EventBus] 取消了 {count} 个订阅")
         return count
 
-    async def publish(self, topic: str, data: Optional[dict] = None) -> int:
+    async def publish(self, topic: str, data: dict | None = None) -> int:
         """
         发布事件
 
@@ -170,7 +175,7 @@ class EventBus:
             data = {}
 
         # 收集所有匹配的处理器
-        handlers: List[_Subscription] = []
+        handlers: list[_Subscription] = []
 
         # 精确匹配
         if topic in self._subscriptions:
@@ -200,7 +205,7 @@ class EventBus:
 
         return fired
 
-    def get_subscriptions(self, topic: Optional[str] = None) -> List[dict]:
+    def get_subscriptions(self, topic: str | None = None) -> list[dict]:
         """
         获取订阅信息
 
@@ -216,23 +221,27 @@ class EventBus:
             if topic and t != topic:
                 continue
             for sub in subs:
-                result.append({
-                    "sub_id": f"sub_{sub._id}",
-                    "topic": t,
-                    "handler": sub.handler.__name__,
-                    "priority": sub.priority,
-                    "wildcard": False,
-                })
+                result.append(
+                    {
+                        "sub_id": f"sub_{sub._id}",
+                        "topic": t,
+                        "handler": sub.handler.__name__,
+                        "priority": sub.priority,
+                        "wildcard": False,
+                    }
+                )
 
         for sub in self._wildcard_subscriptions:
             if topic and sub.topic_pattern != topic:
                 continue
-            result.append({
-                "sub_id": f"sub_{sub._id}",
-                "topic": sub.topic_pattern,
-                "handler": sub.handler.__name__,
-                "priority": sub.priority,
-                "wildcard": True,
-            })
+            result.append(
+                {
+                    "sub_id": f"sub_{sub._id}",
+                    "topic": sub.topic_pattern,
+                    "handler": sub.handler.__name__,
+                    "priority": sub.priority,
+                    "wildcard": True,
+                }
+            )
 
         return result

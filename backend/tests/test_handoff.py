@@ -14,28 +14,26 @@
 - SubagentManager handoff_to/parallel_handoffs
 """
 
-import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.agent.handoff import (
-    Handoff,
-    HandoffConfig,
-    HandoffResult,
     ContextPolicy,
     CycleDetectedError,
+    Handoff,
+    HandoffConfig,
     HandoffDepthExceededError,
+    HandoffResult,
     HandoffTracker,
+    get_handoff_tracker,
     handoff_filters,
     parallel_handoffs,
-    get_handoff_tracker,
     reset_handoff_tracker,
 )
 
-
 # ==================== ContextPolicy 测试 ====================
+
 
 class TestContextPolicy:
     def test_values(self):
@@ -52,7 +50,7 @@ class TestContextPolicy:
 class TestContextPolicyFiltering:
     """上下文策略过滤测试"""
 
-    def _make_messages(self) -> List[Dict]:
+    def _make_messages(self) -> list[dict]:
         return [
             {"role": "system", "content": "You are helpful"},
             {"role": "user", "content": "Hello"},
@@ -111,6 +109,7 @@ class TestContextPolicyFiltering:
 
 # ==================== HandoffConfig 测试 ====================
 
+
 class TestHandoffConfig:
     def test_defaults(self):
         config = HandoffConfig()
@@ -135,6 +134,7 @@ class TestHandoffConfig:
 
 # ==================== Handoff 创建和配置 ====================
 
+
 class TestHandoffCreation:
     def test_basic_creation(self):
         target = MagicMock()
@@ -152,7 +152,9 @@ class TestHandoffCreation:
     def test_tool_description_override(self):
         target = MagicMock()
         target.name = "Researcher"
-        handoff = Handoff(target, tool_description_override="Ask the researcher for help")
+        handoff = Handoff(
+            target, tool_description_override="Ask the researcher for help"
+        )
         assert handoff.tool_description == "Ask the researcher for help"
 
     def test_config_passed(self):
@@ -170,6 +172,7 @@ class TestHandoffCreation:
 
 
 # ==================== Handoff.to_tool() ====================
+
 
 class TestHandoffToTool:
     def test_returns_openai_format(self):
@@ -203,6 +206,7 @@ class TestHandoffToTool:
 
 
 # ==================== 循环检测 ====================
+
 
 class TestCycleDetection:
     def test_direct_cycle_detected(self):
@@ -260,6 +264,7 @@ class TestCycleDetection:
 
 # ==================== 深度限制 ====================
 
+
 class TestDepthLimit:
     @pytest.mark.asyncio
     async def test_depth_exceeded_raises(self):
@@ -296,6 +301,7 @@ class TestDepthLimit:
 
 # ==================== Handoff 执行 ====================
 
+
 class TestHandoffExecute:
     @pytest.mark.asyncio
     async def test_execute_with_run_method(self):
@@ -319,7 +325,7 @@ class TestHandoffExecute:
         target.name = "Analyst"
         target.id = "analyst-1"
         # 删除 run 方法，让代码使用 process_direct
-        delattr(target, 'run')
+        delattr(target, "run")
         # process_direct 需要是 AsyncMock
         target.process_direct = AsyncMock(return_value="analysis result")
 
@@ -368,6 +374,7 @@ class TestHandoffExecute:
 
 # ==================== handoff_filters ====================
 
+
 class TestHandoffFilters:
     def test_remove_all_tools(self):
         messages = [
@@ -407,6 +414,7 @@ class TestHandoffFilters:
 
 
 # ==================== parallel_handoffs ====================
+
 
 class TestParallelHandoffs:
     @pytest.mark.asyncio
@@ -448,6 +456,7 @@ class TestParallelHandoffs:
 
 
 # ==================== HandoffTracker ====================
+
 
 class TestHandoffTracker:
     def test_push_pop(self):
@@ -500,6 +509,7 @@ class TestGlobalTracker:
 
 
 # ==================== AgentLoop Handoff 集成 ====================
+
 
 class TestAgentLoopHandoffIntegration:
     def test_handoffs_parameter(self):
@@ -566,6 +576,7 @@ class TestAgentLoopHandoffIntegration:
 
 
 # ==================== SubagentManager Handoff 集成 ====================
+
 
 class TestSubagentManagerHandoff:
     @pytest.mark.asyncio

@@ -5,22 +5,21 @@
 - API 端点
 """
 
-import asyncio
 import os
 import tempfile
+
 import pytest
 
 from app.modules.plugins.event_bus import EventBus
 from app.modules.plugins.manager import (
     PluginManager,
-    PluginInfo,
     PluginState,
 )
-
 
 # ============================================================
 # EventBus 测试
 # ============================================================
+
 
 class TestEventBusSubscribe:
     """测试订阅"""
@@ -257,7 +256,9 @@ class TestEventBusGetSubscriptions:
     def test_subscription_info_fields(self):
         """测试订阅信息字段"""
         bus = EventBus()
-        def my_handler(topic, data): pass
+
+        def my_handler(topic, data):
+            pass
 
         bus.subscribe("test.event", my_handler, priority=5)
         subs = bus.get_subscriptions("test.event")
@@ -269,6 +270,7 @@ class TestEventBusGetSubscriptions:
 # ============================================================
 # PluginManager 测试
 # ============================================================
+
 
 class TestPluginManagerBasic:
     """测试基本功能"""
@@ -388,10 +390,7 @@ class TestPluginLoad:
         with tempfile.TemporaryDirectory() as tmpdir:
             plugin_path = os.path.join(tmpdir, "async_plugin.py")
             with open(plugin_path, "w") as f:
-                f.write(
-                    "__plugin_name__ = 'AsyncPlugin'\n"
-                    "on_load = None\n"
-                )
+                f.write("__plugin_name__ = 'AsyncPlugin'\non_load = None\n")
 
             manager = PluginManager(plugin_dir=tmpdir)
             info = await manager.load_plugin_async("async_plugin")
@@ -568,9 +567,7 @@ class TestPluginEventHandlers:
             plugin_path = os.path.join(tmpdir, "sub.py")
             with open(plugin_path, "w") as f:
                 f.write(
-                    "__plugin_name__ = 'Sub'\n"
-                    "def on_event(topic, data):\n"
-                    "    pass\n"
+                    "__plugin_name__ = 'Sub'\ndef on_event(topic, data):\n    pass\n"
                 )
 
             bus = EventBus()

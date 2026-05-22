@@ -4,25 +4,24 @@
 用户提交 Skill/文档共享请求，管理员在任务页面审批。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlalchemy.orm import joinedload
-from typing import List, Optional
 from datetime import datetime, timezone
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
 from app.api.auth import get_current_active_user
+from app.core.database import get_db
 from app.core.permissions import can_manage_approval
-from app.models import User, Approval, Skill
-from app.models.approval import ApprovalStatus, ApprovalType
+from app.models import Approval, Skill, User
+from app.models.approval import ApprovalStatus
+from app.schemas import MessageResponse
 from app.schemas.approval import (
     ApprovalCreate,
-    ApprovalReview,
     ApprovalResponse,
-    ApprovalBrief,
+    ApprovalReview,
 )
-from app.schemas import MessageResponse
 
 router = APIRouter(prefix="/approvals", tags=["审批"])
 
@@ -47,9 +46,13 @@ async def create_approval(
             raise HTTPException(status_code=403, detail="只能提交自己创建的 Skill")
         # 检查当前 scope
         if data.target_scope == "org" and skill.scope != "user":
-            raise HTTPException(status_code=400, detail="只有用户级 Skill 可以提交为组织级")
+            raise HTTPException(
+                status_code=400, detail="只有用户级 Skill 可以提交为组织级"
+            )
         if data.target_scope == "system" and skill.scope not in ("user", "org"):
-            raise HTTPException(status_code=400, detail="只有用户级或组织级 Skill 可以提交为系统级")
+            raise HTTPException(
+                status_code=400, detail="只有用户级或组织级 Skill 可以提交为系统级"
+            )
 
     # 检查是否有重复的待审批请求
     result = await db.execute(
@@ -82,10 +85,10 @@ async def create_approval(
     return approval
 
 
-@router.get("", response_model=List[ApprovalResponse])
+@router.get("", response_model=list[ApprovalResponse])
 async def list_approvals(
-    status_filter: Optional[str] = None,
-    scope: Optional[str] = None,
+    status_filter: str | None = None,
+    scope: str | None = None,
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
@@ -119,7 +122,12 @@ async def list_approvals(
 
     from sqlalchemy.orm import joinedload
 
-    query = query.options(joinedload(Approval.requester)).order_by(Approval.created_at.desc()).offset(skip).limit(limit)
+    query = (
+        query.options(joinedload(Approval.requester))
+        .order_by(Approval.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     result = await db.execute(query)
     return result.unique().scalars().all()
 
@@ -130,8 +138,10 @@ async def get_pending_count(
     current_user: User = Depends(get_current_active_user),
 ):
     """获取待审批数量"""
-    query = select(func.count()).select_from(Approval).where(
-        Approval.status == ApprovalStatus.PENDING
+    query = (
+        select(func.count())
+        .select_from(Approval)
+        .where(Approval.status == ApprovalStatus.PENDING)
     )
 
     if current_user.is_super_admin:
@@ -153,9 +163,7 @@ async def get_approval(
     current_user: User = Depends(get_current_active_user),
 ):
     """获取审批详情"""
-    result = await db.execute(
-        select(Approval).where(Approval.id == approval_id)
-    )
+    result = await db.execute(select(Approval).where(Approval.id == approval_id))
     approval = result.scalar_one_or_none()
     if not approval:
         raise HTTPException(status_code=404, detail="审批记录不存在")
@@ -183,11 +191,15 @@ async def review_approval(
         raise HTTPException(status_code=400, detail="该审批已处理")
 
     # 权限检查
-    if not can_manage_approval(current_user, approval.target_scope, approval.target_org_id):
+    if not can_manage_approval(
+        current_user, approval.target_scope, approval.target_org_id
+    ):
         raise HTTPException(status_code=403, detail="无权审批此请求")
 
     # 更新状态
-    approval.status = ApprovalStatus.APPROVED if data.approved else ApprovalStatus.REJECTED
+    approval.status = (
+        ApprovalStatus.APPROVED if data.approved else ApprovalStatus.REJECTED
+    )
     approval.reviewer_id = current_user.id
     approval.reviewed_at = datetime.now(tz=timezone.utc)
     approval.review_comment = data.review_comment
@@ -218,9 +230,7 @@ async def cancel_approval(
     current_user: User = Depends(get_current_active_user),
 ):
     """取消审批"""
-    result = await db.execute(
-        select(Approval).where(Approval.id == approval_id)
-    )
+    result = await db.execute(select(Approval).where(Approval.id == approval_id))
     approval = result.scalar_one_or_none()
     if not approval:
         raise HTTPException(status_code=404, detail="审批记录不存在")

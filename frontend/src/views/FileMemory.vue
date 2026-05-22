@@ -323,11 +323,6 @@ function openViewer(row: MemoryEntry) {
   showViewDialog.value = true
 }
 
-function viewEntry(row: MemoryEntry) {
-  editContent.value = `${row.date}|${row.source}|${row.content}`
-  showEditDialog.value = true
-}
-
 async function deleteLine(row: MemoryEntry) {
   try {
     await memoryApi.deleteLine(row.line_number)

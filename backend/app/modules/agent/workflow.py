@@ -15,13 +15,14 @@ import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class WorkflowMode(Enum):
     """工作流模式"""
+
     PIPELINE = "pipeline"
     GRAPH = "graph"
     COUNCIL = "council"
@@ -29,6 +30,7 @@ class WorkflowMode(Enum):
 
 class SlotPhase(Enum):
     """节点状态"""
+
     WAITING = "waiting"
     ACTIVE = "active"
     DONE = "done"
@@ -42,27 +44,27 @@ class AgentSlot:
     slot_id: str
     label: str
     prompt_template: str
-    depends_on: List[str] = field(default_factory=list)
-    condition: Optional[dict] = None  # 可选：执行条件
+    depends_on: list[str] = field(default_factory=list)
+    condition: dict | None = None  # 可选：执行条件
     phase: SlotPhase = SlotPhase.WAITING
-    output: Optional[str] = None
-    error: Optional[str] = None
+    output: str | None = None
+    error: str | None = None
     skipped: bool = False  # 是否因条件不满足而跳过
 
 
 class WorkflowEngine:
     """
     多智能体工作流引擎
-    
+
     编排 Pipeline / Graph / Council 三种执行模式
     """
 
     def __init__(
         self,
         agent_loop,  # AgentLoop 实例
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         cancel_token=None,
-        model_override: Optional[Dict[str, Any]] = None,
+        model_override: dict[str, Any] | None = None,
         event_callback=None,
         taskflow_db=None,  # AsyncSession，用于 TaskFlow 持久化
     ) -> None:
@@ -82,15 +84,17 @@ class WorkflowEngine:
         self._cancel_token = cancel_token
         self._model_override = model_override
         self._event_callback = event_callback
-        self._execution_data: Dict[str, dict] = {}
+        self._execution_data: dict[str, dict] = {}
         self._taskflow_db = taskflow_db
-        self._taskflow_id: Optional[str] = None
+        self._taskflow_id: str | None = None
 
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
 
-    async def bind_taskflow(self, name: str, goal: str, owner_id: Optional[str] = None) -> Optional[str]:
+    async def bind_taskflow(
+        self, name: str, goal: str, owner_id: str | None = None
+    ) -> str | None:
         """绑定 TaskFlow 持久化（可选）
 
         Returns:
@@ -99,6 +103,7 @@ class WorkflowEngine:
         if not self._taskflow_db:
             return None
         from app.modules.agent.taskflow import TaskFlowManager
+
         mgr = TaskFlowManager(self._taskflow_db)
         flow = await mgr.create(
             name=name,
@@ -109,23 +114,27 @@ class WorkflowEngine:
         self._taskflow_id = flow.id
         return flow.id
 
-    async def _taskflow_step(self, step_name: str, step_result: Optional[Dict] = None) -> None:
+    async def _taskflow_step(
+        self, step_name: str, step_result: dict | None = None
+    ) -> None:
         """持久化步骤到 TaskFlow"""
         if not self._taskflow_id or not self._taskflow_db:
             return
         try:
             from app.modules.agent.taskflow import TaskFlowManager
+
             mgr = TaskFlowManager(self._taskflow_db)
             await mgr.run_step(self._taskflow_id, step_name, step_result)
         except Exception as exc:
             logger.warning(f"[Workflow] TaskFlow step persist failed: {exc}")
 
-    async def _taskflow_finish(self, final_result: Optional[Dict] = None) -> None:
+    async def _taskflow_finish(self, final_result: dict | None = None) -> None:
         """完成 TaskFlow"""
         if not self._taskflow_id or not self._taskflow_db:
             return
         try:
             from app.modules.agent.taskflow import TaskFlowManager
+
             mgr = TaskFlowManager(self._taskflow_db)
             await mgr.finish(self._taskflow_id, final_result)
         except Exception as exc:
@@ -137,6 +146,7 @@ class WorkflowEngine:
             return
         try:
             from app.modules.agent.taskflow import TaskFlowManager
+
             mgr = TaskFlowManager(self._taskflow_db)
             await mgr.fail(self._taskflow_id, error)
         except Exception as exc:
@@ -150,7 +160,9 @@ class WorkflowEngine:
                 if inspect.isawaitable(maybe_result):
                     await maybe_result
             except Exception as exc:
-                logger.warning(f"[Workflow] Event callback failed ({event_type}): {exc}")
+                logger.warning(
+                    f"[Workflow] Event callback failed ({event_type}): {exc}"
+                )
 
     def _is_cancelled(self) -> bool:
         """检查是否已取消"""
@@ -160,12 +172,14 @@ class WorkflowEngine:
         self,
         prompt: str,
         label: str = "",
-        system_prompt: Optional[str] = None,
+        system_prompt: str | None = None,
         agent_id: str = "",
     ) -> str:
         """执行单个 Agent 并返回输出"""
         if self._is_cancelled():
-            logger.info(f"[Workflow] Workflow cancelled, stopping agent '{agent_id or label}'")
+            logger.info(
+                f"[Workflow] Workflow cancelled, stopping agent '{agent_id or label}'"
+            )
             raise asyncio.CancelledError("Workflow cancelled before agent start")
 
         short_label = label or (prompt[:40] + ("..." if len(prompt) > 40 else ""))
@@ -205,10 +219,10 @@ class WorkflowEngine:
             logger.error(f"[Workflow] Agent '{aid}' failed: {e}")
             raise
 
-    def _detect_cycle(self, dep_map: Dict[str, List[str]]) -> bool:
+    def _detect_cycle(self, dep_map: dict[str, list[str]]) -> bool:
         """检测依赖图环路"""
-        visited: Set[str] = set()
-        in_stack: Set[str] = set()
+        visited: set[str] = set()
+        in_stack: set[str] = set()
 
         def _dfs(node: str) -> bool:
             visited.add(node)
@@ -224,25 +238,27 @@ class WorkflowEngine:
 
         return any(_dfs(n) for n in dep_map if n not in visited)
 
-    def _evaluate_condition(self, condition: dict, slot_map: Dict[str, AgentSlot]) -> bool:
+    def _evaluate_condition(
+        self, condition: dict, slot_map: dict[str, AgentSlot]
+    ) -> bool:
         """评估节点执行条件"""
         if not condition:
             return True
-        
+
         cond_type = condition.get("type")
         node_id = condition.get("node")
         text = condition.get("text", "")
-        
+
         if not node_id or node_id not in slot_map:
             return False
-        
+
         output = slot_map[node_id].output or ""
-        
+
         if cond_type == "output_contains":
             return text in output
         elif cond_type == "output_not_contains":
             return text not in output
-        
+
         return True
 
     def _build_exec_metadata(self) -> str:
@@ -262,15 +278,15 @@ class WorkflowEngine:
     async def run_pipeline(
         self,
         goal: str,
-        stages: List[Dict[str, Any]],
+        stages: list[dict[str, Any]],
     ) -> str:
         """
         顺序流水线，每个阶段继承前序输出
-        
+
         Args:
             goal: 工作流目标
             stages: 阶段列表，每个阶段包含 role、task、system_prompt
-        
+
         Returns:
             str: 汇总结果
         """
@@ -281,13 +297,14 @@ class WorkflowEngine:
         if self._taskflow_id and self._taskflow_db:
             try:
                 from app.modules.agent.taskflow import TaskFlowManager
+
                 mgr = TaskFlowManager(self._taskflow_db)
                 await mgr.start(self._taskflow_id, initial_step="pipeline:stage-0")
             except Exception:
                 pass
 
         accumulated: str = ""
-        stage_outputs: List[dict] = []
+        stage_outputs: list[dict] = []
 
         for idx, stage in enumerate(stages):
             if self._is_cancelled():
@@ -298,11 +315,7 @@ class WorkflowEngine:
             task_desc = stage.get("task", "")
             custom_sp = stage.get("system_prompt")
 
-            prior_ctx = (
-                f"\n\n## 前序阶段输出:\n{accumulated}"
-                if accumulated
-                else ""
-            )
+            prior_ctx = f"\n\n## 前序阶段输出:\n{accumulated}" if accumulated else ""
             prompt = (
                 f"# 工作流目标\n{goal}\n\n"
                 f"# 你的任务\n{task_desc}"
@@ -326,7 +339,9 @@ class WorkflowEngine:
 
             stage_outputs.append({"role": role, "output": output})
             accumulated += f"\n### {role}:\n{output}"
-            await self._taskflow_step(f"pipeline:stage-{idx + 1}", {"role": role, "output": output[:200]})
+            await self._taskflow_step(
+                f"pipeline:stage-{idx + 1}", {"role": role, "output": output[:200]}
+            )
 
         # 完成 TaskFlow
         await self._taskflow_finish({"stages": len(stage_outputs)})
@@ -343,15 +358,15 @@ class WorkflowEngine:
     async def run_graph(
         self,
         goal: str,
-        slots: List[Dict[str, Any]],
+        slots: list[dict[str, Any]],
     ) -> str:
         """
         依赖 DAG，自动并行调度
-        
+
         Args:
             goal: 工作流目标
             slots: 节点列表，每个节点包含 id、role、task、depends_on、condition
-        
+
         Returns:
             str: 汇总结果
         """
@@ -362,20 +377,21 @@ class WorkflowEngine:
         if self._taskflow_id and self._taskflow_db:
             try:
                 from app.modules.agent.taskflow import TaskFlowManager
+
                 mgr = TaskFlowManager(self._taskflow_db)
                 await mgr.start(self._taskflow_id, initial_step="graph:init")
             except Exception:
                 pass
 
-        slot_system_prompts: Dict[str, str] = {}
-        slot_map: Dict[str, AgentSlot] = {}
-        dep_map: Dict[str, List[str]] = {}
+        slot_system_prompts: dict[str, str] = {}
+        slot_map: dict[str, AgentSlot] = {}
+        dep_map: dict[str, list[str]] = {}
 
         for s in slots:
             sid = s.get("id", "")
             if not sid:
                 return "Error: 每个节点必须有 'id' 字段。"
-            
+
             deps = s.get("depends_on", s.get("depends", []))
             role = s.get("role", sid)
             task_desc = s.get("task", "")
@@ -415,7 +431,8 @@ class WorkflowEngine:
 
             # 找出可执行的节点
             ready = [
-                s for s in slot_map.values()
+                s
+                for s in slot_map.values()
                 if s.phase == SlotPhase.WAITING
                 and all(
                     slot_map[d].phase == SlotPhase.DONE or slot_map[d].skipped
@@ -442,15 +459,17 @@ class WorkflowEngine:
                     s.phase = SlotPhase.DONE
                     s.skipped = True
                     s.output = "[跳过: 条件不满足]"
-                    logger.info(f"[Workflow/Graph] 节点 '{s.slot_id}' 跳过（条件不满足）")
-            
+                    logger.info(
+                        f"[Workflow/Graph] 节点 '{s.slot_id}' 跳过（条件不满足）"
+                    )
+
             if not to_execute:
                 continue
-            
+
             # 标记为活跃
             for s in to_execute:
                 s.phase = SlotPhase.ACTIVE
-            
+
             logger.info(
                 f"[Workflow/Graph] 并行调度 {len(to_execute)} 个节点: "
                 f"{[s.slot_id for s in to_execute]}"
@@ -467,7 +486,7 @@ class WorkflowEngine:
                     ]
                     if dep_parts:
                         dep_ctx = "\n\n## 上游节点输出:\n" + "\n\n".join(dep_parts)
-                
+
                 prompt = (
                     f"# 工作流目标\n{goal}\n\n"
                     f"# 你的任务\n{slot.prompt_template}"
@@ -502,13 +521,13 @@ class WorkflowEngine:
             else:
                 icon = "❌"
                 status_text = "失败"
-            
+
             lines.append(f"## {icon} {slot.label} ({status_text})")
             if slot.output:
                 lines.append(slot.output)
             elif slot.error:
                 lines.append(f"*错误: {slot.error}*")
-        
+
         return "\n\n---\n\n".join(lines) + self._build_exec_metadata()
 
     # ------------------------------------------------------------------
@@ -518,17 +537,17 @@ class WorkflowEngine:
     async def run_council(
         self,
         question: str,
-        members: List[Dict[str, Any]],
+        members: list[dict[str, Any]],
         cross_review: bool = True,
     ) -> str:
         """
         多视角评审：立场陈述 → [可选]交叉评审 → 综合输出
-        
+
         Args:
             question: 待评审的问题
             members: 成员列表，每个成员包含 id、perspective、system_prompt
             cross_review: 是否进行交叉评审
-        
+
         Returns:
             str: 汇总结果
         """
@@ -539,16 +558,17 @@ class WorkflowEngine:
         if self._taskflow_id and self._taskflow_db:
             try:
                 from app.modules.agent.taskflow import TaskFlowManager
+
                 mgr = TaskFlowManager(self._taskflow_db)
                 await mgr.start(self._taskflow_id, initial_step="council:round-1")
             except Exception:
                 pass
 
-        member_map: Dict[str, str] = {
+        member_map: dict[str, str] = {
             m["id"]: m.get("perspective", "neutral analyst") for m in members
         }
-        member_system_prompts: Dict[str, str] = {}
-        
+        member_system_prompts: dict[str, str] = {}
+
         for m in members:
             mid = m["id"]
             perspective = member_map[mid]
@@ -559,7 +579,7 @@ class WorkflowEngine:
             )
 
         # 第1轮：初始立场
-        async def _initial(member: dict) -> Tuple[str, str]:
+        async def _initial(member: dict) -> tuple[str, str]:
             mid = member["id"]
             perspective = member_map[mid]
             prompt = (
@@ -576,7 +596,7 @@ class WorkflowEngine:
             )
             return mid, result
 
-        round1: Dict[str, str] = dict(
+        round1: dict[str, str] = dict(
             await asyncio.gather(*[_initial(m) for m in members])
         )
 
@@ -592,7 +612,7 @@ class WorkflowEngine:
                 mid = m["id"]
                 persp = member_map[mid]
                 blocks.append(f"### {persp}\n\n{round1.get(mid, '')}")
-            
+
             body = "\n\n---\n\n".join(blocks)
             return (
                 f"# 多视角分析结果（独立模式）\n\n"
@@ -604,7 +624,7 @@ class WorkflowEngine:
             ) + self._build_exec_metadata()
 
         # 第2轮：交叉评审
-        async def _cross_review(member: dict) -> Tuple[str, str]:
+        async def _cross_review(member: dict) -> tuple[str, str]:
             mid = member["id"]
             perspective = member_map[mid]
             others = "\n\n".join(
@@ -631,7 +651,7 @@ class WorkflowEngine:
             )
             return mid, result
 
-        round2: Dict[str, str] = dict(
+        round2: dict[str, str] = dict(
             await asyncio.gather(*[_cross_review(m) for m in members])
         )
 
@@ -673,7 +693,9 @@ class WorkflowEngine:
             )
 
         body = "\n\n---\n\n".join(blocks)
-        await self._taskflow_finish({"members": len(members), "rounds": 3 if cross_review else 1})
+        await self._taskflow_finish(
+            {"members": len(members), "rounds": 3 if cross_review else 1}
+        )
         return (
             f"# 多视角评审结果（3轮交叉模式）\n\n"
             f"**议题：** {question}\n\n"

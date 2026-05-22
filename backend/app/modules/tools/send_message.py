@@ -5,11 +5,11 @@ SendMessageTool — Agent 间消息传递
 - 收件箱注册表（模块级状态）：register_agent / unregister_agent / send_to_agent / list_agents
 - SendMessageTool：Agent 通过工具调用发送消息给其他 Agent
 """
+
 import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
 
 from app.modules.tools.base import BaseTool, ToolParameter
 
@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 # 收件箱注册表
 # ═══════════════════════════════════════════════════════════
 
-_agent_inboxes: Dict[str, asyncio.Queue] = {}
-_agent_metadata: Dict[str, dict] = {}
+_agent_inboxes: dict[str, asyncio.Queue] = {}
+_agent_metadata: dict[str, dict] = {}
 
 
 def register_agent(agent_id: str, label: str = "") -> asyncio.Queue:
@@ -65,6 +65,7 @@ def list_agents() -> list:
 # SendMessageTool
 # ═══════════════════════════════════════════════════════════
 
+
 class SendMessageTool(BaseTool):
     """向其他 Agent 发送消息或列出可通信的 Agent"""
 
@@ -100,29 +101,44 @@ class SendMessageTool(BaseTool):
     }
     required = ["action"]
 
-    async def execute(self, action: str, target_agent: str = "",
-                      message: str = "", team_id: str = "", **kwargs) -> str:
+    async def execute(
+        self,
+        action: str,
+        target_agent: str = "",
+        message: str = "",
+        team_id: str = "",
+        **kwargs,
+    ) -> str:
         try:
             if action == "list_agents":
                 agents = list_agents()
-                return json.dumps({
-                    "success": True,
-                    "agents": agents,
-                    "total": len(agents),
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": True,
+                        "agents": agents,
+                        "total": len(agents),
+                    },
+                    ensure_ascii=False,
+                )
 
             elif action == "send":
                 if not target_agent or not target_agent.strip():
-                    return json.dumps({
-                        "success": False,
-                        "error": "send 操作需要提供 target_agent 参数",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "send 操作需要提供 target_agent 参数",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 if not message or not message.strip():
-                    return json.dumps({
-                        "success": False,
-                        "error": "send 操作需要提供 message 参数",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "send 操作需要提供 message 参数",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 sender_id = kwargs.get("sender_id", "unknown")
                 msg = {
@@ -133,34 +149,50 @@ class SendMessageTool(BaseTool):
 
                 ok = send_to_agent(target_agent.strip(), msg)
                 if ok:
-                    return json.dumps({
-                        "success": True,
-                        "target_agent": target_agent.strip(),
-                        "message": f"消息已发送至 Agent '{target_agent.strip()}'",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "target_agent": target_agent.strip(),
+                            "message": f"消息已发送至 Agent '{target_agent.strip()}'",
+                        },
+                        ensure_ascii=False,
+                    )
                 else:
-                    available = [m["agent_id"] for m in _agent_metadata.values()
-                                 if m["status"] == "running"]
-                    return json.dumps({
-                        "success": False,
-                        "error": f"Agent 不存在或已离线: '{target_agent.strip()}'",
-                        "available_agents": available,
-                    }, ensure_ascii=False)
+                    available = [
+                        m["agent_id"]
+                        for m in _agent_metadata.values()
+                        if m["status"] == "running"
+                    ]
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"Agent 不存在或已离线: '{target_agent.strip()}'",
+                            "available_agents": available,
+                        },
+                        ensure_ascii=False,
+                    )
 
             elif action == "send_to_team":
                 if not team_id or not team_id.strip():
-                    return json.dumps({
-                        "success": False,
-                        "error": "send_to_team 操作需要提供 team_id 参数",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "send_to_team 操作需要提供 team_id 参数",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 if not message or not message.strip():
-                    return json.dumps({
-                        "success": False,
-                        "error": "send_to_team 操作需要提供 message 参数",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "send_to_team 操作需要提供 message 参数",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 from app.modules.tools.team import send_to_team as _send_to_team
+
                 sender_id = kwargs.get("sender_id", "unknown")
                 msg = {
                     "from": sender_id,
@@ -171,10 +203,13 @@ class SendMessageTool(BaseTool):
                 return json.dumps(result, ensure_ascii=False)
 
             else:
-                return json.dumps({
-                    "success": False,
-                    "error": f"未知操作: '{action}'。支持的操作: send, list_agents, send_to_team",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"未知操作: '{action}'。支持的操作: send, list_agents, send_to_team",
+                    },
+                    ensure_ascii=False,
+                )
 
         except Exception as e:
             logger.error(f"SendMessageTool execution error: {e}")

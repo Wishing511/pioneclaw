@@ -5,17 +5,16 @@ TDD: 测试先于实现。首次运行应全部 FAIL（端点尚未实现）。
 """
 
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Runner, RunnerStatus
+from app.models import Runner, RunnerStatus, User
 from tests.conftest import auth_headers
-
 
 # ============================
 # 辅助函数
 # ============================
+
 
 async def create_runner(db_session: AsyncSession, name: str, **kwargs) -> Runner:
     """在测试数据库中创建一个 Runner"""
@@ -35,12 +34,17 @@ async def create_runner(db_session: AsyncSession, name: str, **kwargs) -> Runner
 # 1. POST /{runner_id}/bind-user
 # ============================
 
+
 class TestBindUser:
     """测试绑定用户到 Runner"""
 
     @pytest.mark.asyncio
     async def test_bind_user_success(
-        self, client: AsyncClient, db_session: AsyncSession, test_admin: User, test_user: User
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        test_admin: User,
+        test_user: User,
     ):
         """管理员成功绑定用户到 Runner"""
         runner = await create_runner(db_session, "bind-success-1")
@@ -61,10 +65,16 @@ class TestBindUser:
 
     @pytest.mark.asyncio
     async def test_bind_user_already_bound(
-        self, client: AsyncClient, db_session: AsyncSession, test_admin: User, test_user: User
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        test_admin: User,
+        test_user: User,
     ):
         """绑定已绑定用户的 Runner 应返回 400"""
-        runner = await create_runner(db_session, "bind-already-bound", user_id=test_user.id)
+        runner = await create_runner(
+            db_session, "bind-already-bound", user_id=test_user.id
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/bind-user",
@@ -137,12 +147,17 @@ class TestBindUser:
 # 2. DELETE /{runner_id}/unbind-user
 # ============================
 
+
 class TestUnbindUser:
     """测试解绑 Runner 用户"""
 
     @pytest.mark.asyncio
     async def test_unbind_user_success(
-        self, client: AsyncClient, db_session: AsyncSession, test_admin: User, test_user: User
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        test_admin: User,
+        test_user: User,
     ):
         """管理员成功解绑 Runner 用户"""
         runner = await create_runner(db_session, "unbind-success", user_id=test_user.id)
@@ -192,7 +207,9 @@ class TestUnbindUser:
         self, client: AsyncClient, db_session: AsyncSession, test_user: User
     ):
         """普通用户尝试解绑 Runner 应返回 403"""
-        runner = await create_runner(db_session, "unbind-not-admin", user_id=test_user.id)
+        runner = await create_runner(
+            db_session, "unbind-not-admin", user_id=test_user.id
+        )
 
         response = await client.delete(
             f"/api/runners/{runner.id}/unbind-user",
@@ -205,6 +222,7 @@ class TestUnbindUser:
 # ============================
 # 3. GET /my-bindings
 # ============================
+
 
 class TestMyBindings:
     """测试获取当前用户绑定的 Runner 列表"""
@@ -231,7 +249,11 @@ class TestMyBindings:
 
     @pytest.mark.asyncio
     async def test_my_bindings_excludes_other_users(
-        self, client: AsyncClient, db_session: AsyncSession, test_user: User, test_admin: User
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        test_user: User,
+        test_admin: User,
     ):
         """不返回其他用户的 Runner"""
         await create_runner(db_session, "mybind-mine", user_id=test_user.id)
@@ -244,7 +266,7 @@ class TestMyBindings:
 
         assert response.status_code == 200
         data = response.json()
-        ids = {r["id"] for r in data}
+        {r["id"] for r in data}
         names = {r["name"] for r in data}
         assert "mybind-mine" in names
         assert "mybind-other" not in names
@@ -273,6 +295,7 @@ class TestMyBindings:
 # ============================
 # 4. PUT /my-default
 # ============================
+
 
 class TestSetDefaultRunner:
     """测试设置用户默认 Runner"""
@@ -312,7 +335,11 @@ class TestSetDefaultRunner:
 
     @pytest.mark.asyncio
     async def test_set_default_runner_other_user(
-        self, client: AsyncClient, db_session: AsyncSession, test_user: User, test_admin: User
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        test_user: User,
+        test_admin: User,
     ):
         """设置其他用户的 Runner 为默认应返回 403"""
         runner = await create_runner(db_session, "default-other", user_id=test_admin.id)

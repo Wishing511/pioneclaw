@@ -9,14 +9,18 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+if TYPE_CHECKING:
+    from app.modules.tools.base import ToolDefinition
 
 # ============================================================================
 # Permission System
 # ============================================================================
+
 
 class PermissionBehavior(str, Enum):
     ALLOW = "allow"
@@ -57,6 +61,7 @@ PermissionMode = str  # "default" | "yolo" | "plan" | "ask"
 # Execution Context & Result
 # ============================================================================
 
+
 @dataclass
 class ToolContext:
     """执行上下文（替换散落在 AgentLoop 中的参数传递）"""
@@ -69,8 +74,8 @@ class ToolContext:
     abort_signal: Any = None  # asyncio.Event
 
     # 回调
-    metadata_callback: Optional[Callable[[str, Any], None]] = None
-    ask_callback: Optional[Callable[[PermissionRequest], Any]] = None  # 权限询问
+    metadata_callback: Callable[[str, Any], None] | None = None
+    ask_callback: Callable[[PermissionRequest], Any] | None = None  # 权限询问
 
     def metadata(self, key: str, value: Any) -> None:
         if self.metadata_callback:
@@ -100,6 +105,7 @@ class ToolResult:
 # Tool Use (from LLM)
 # ============================================================================
 
+
 @dataclass
 class ToolUse:
     id: str  # tool_use_id from LLM
@@ -111,6 +117,7 @@ class ToolUse:
 # Hook System
 # ============================================================================
 
+
 class HookType(str, Enum):
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
@@ -121,16 +128,16 @@ class HookType(str, Enum):
 class HookContext:
     tool: Any  # Tool
     input: dict[str, Any]
-    result: Optional[ToolResult] = None
-    ctx: Optional[ToolContext] = None
+    result: ToolResult | None = None
+    ctx: ToolContext | None = None
 
 
 @dataclass
 class HookResult:
     block: bool = False
     message: str = ""
-    transformed_result: Optional[ToolResult] = None
-    modified_args: Optional[dict[str, Any]] = None
+    transformed_result: ToolResult | None = None
+    modified_args: dict[str, Any] | None = None
 
 
 ToolHook = Callable[[HookContext], Any]  # returns HookResult | None | Awaitable
@@ -139,6 +146,7 @@ ToolHook = Callable[[HookContext], Any]  # returns HookResult | None | Awaitable
 # ============================================================================
 # Layer 2: Core Tool Definition
 # ============================================================================
+
 
 class ToolDef(ABC):
     """Layer 2: 工具定义（必需）
@@ -155,7 +163,7 @@ class ToolDef(ABC):
         """核心执行逻辑"""
         ...
 
-    def get_definition(self) -> "ToolDefinition":
+    def get_definition(self) -> ToolDefinition:
         """获取工具定义（兼容旧注册表）"""
         from app.modules.tools.base import ToolDefinition, ToolParameter
 
@@ -185,6 +193,7 @@ class ToolDef(ABC):
 # Layer 3: Tool Decorator (optional enhancements)
 # ============================================================================
 
+
 class ToolDecorator(Protocol):
     """Layer 3: 可选增强
 
@@ -193,20 +202,15 @@ class ToolDecorator(Protocol):
 
     def check_permissions(
         self, input: dict[str, Any], ctx: ToolContext
-    ) -> PermissionResult:
-        ...
+    ) -> PermissionResult: ...
 
-    def is_read_only(self, input: dict[str, Any]) -> bool:
-        ...
+    def is_read_only(self, input: dict[str, Any]) -> bool: ...
 
-    def is_concurrency_safe(self, input: dict[str, Any]) -> bool:
-        ...
+    def is_concurrency_safe(self, input: dict[str, Any]) -> bool: ...
 
-    def is_destructive(self, input: dict[str, Any]) -> bool:
-        ...
+    def is_destructive(self, input: dict[str, Any]) -> bool: ...
 
-    def on_progress(self, data: Any, ctx: ToolContext) -> None:
-        ...
+    def on_progress(self, data: Any, ctx: ToolContext) -> None: ...
 
     max_result_size: int = 0
 

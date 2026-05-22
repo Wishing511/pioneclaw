@@ -1,13 +1,13 @@
-from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from pydantic import BaseModel, EmailStr, Field
-from app.core import get_db, get_password_hash
-from app.models import User, UserRole
-from app.schemas import UserResponse, MessageResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
+from app.core import get_db, get_password_hash
 from app.core.permissions import PermissionChecker
+from app.models import User, UserRole
+from app.schemas import MessageResponse, UserResponse
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
 
@@ -16,7 +16,7 @@ class UserCreate(BaseModel):
     username: str = Field(
         min_length=3,
         max_length=50,
-        pattern=r'^[a-zA-Z0-9_一-鿿]+$',
+        pattern=r"^[a-zA-Z0-9_一-鿿]+$",
     )
     email: EmailStr
     display_name: str = ""
@@ -38,11 +38,14 @@ class PasswordUpdate(BaseModel):
     password: str
 
 
-@router.get("", response_model=List[UserResponse],
-            dependencies=[Depends(PermissionChecker("user:read"))])
+@router.get(
+    "",
+    response_model=list[UserResponse],
+    dependencies=[Depends(PermissionChecker("user:read"))],
+)
 async def list_users(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取用户列表（非超管只返回本组织用户）"""
     query = select(User).order_by(User.created_at.desc())
@@ -53,12 +56,15 @@ async def list_users(
     return users
 
 
-@router.get("/{user_id}", response_model=UserResponse,
-            dependencies=[Depends(PermissionChecker("user:read"))])
+@router.get(
+    "/{user_id}",
+    response_model=UserResponse,
+    dependencies=[Depends(PermissionChecker("user:read"))],
+)
 async def get_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取用户详情"""
     result = await db.execute(select(User).where(User.id == user_id))
@@ -68,20 +74,26 @@ async def get_user(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     # 非超管只能查看本组织用户
-    if (not current_user.is_super_admin
-            and current_user.organization_id
-            and user.organization_id != current_user.organization_id):
+    if (
+        not current_user.is_super_admin
+        and current_user.organization_id
+        and user.organization_id != current_user.organization_id
+    ):
         raise HTTPException(status_code=403, detail="无权查看其他组织用户")
 
     return user
 
 
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED,
-             dependencies=[Depends(PermissionChecker("user:create"))])
+@router.post(
+    "",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(PermissionChecker("user:create"))],
+)
 async def create_user(
     user_data: UserCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """创建用户"""
     # 检查用户名是否已存在
@@ -98,7 +110,7 @@ async def create_user(
     role_map = {
         "user": UserRole.USER,
         "org_admin": UserRole.ORG_ADMIN,
-        "super_admin": UserRole.SUPER_ADMIN
+        "super_admin": UserRole.SUPER_ADMIN,
     }
     role = role_map.get(user_data.role, UserRole.USER)
 
@@ -139,13 +151,16 @@ async def create_user(
     return user
 
 
-@router.put("/{user_id}", response_model=UserResponse,
-            dependencies=[Depends(PermissionChecker("user:update"))])
+@router.put(
+    "/{user_id}",
+    response_model=UserResponse,
+    dependencies=[Depends(PermissionChecker("user:update"))],
+)
 async def update_user(
     user_id: int,
     user_data: UserUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新用户"""
     result = await db.execute(select(User).where(User.id == user_id))
@@ -155,9 +170,11 @@ async def update_user(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     # 非超管只能修改本组织用户
-    if (not current_user.is_super_admin
-            and current_user.organization_id
-            and user.organization_id != current_user.organization_id):
+    if (
+        not current_user.is_super_admin
+        and current_user.organization_id
+        and user.organization_id != current_user.organization_id
+    ):
         raise HTTPException(status_code=403, detail="无权修改其他组织用户")
 
     # 非超管不能提升用户为超管
@@ -172,7 +189,7 @@ async def update_user(
         role_map = {
             "user": UserRole.USER,
             "org_admin": UserRole.ORG_ADMIN,
-            "super_admin": UserRole.SUPER_ADMIN
+            "super_admin": UserRole.SUPER_ADMIN,
         }
         user.role = role_map.get(user_data.role, UserRole.USER)
         if user_data.role == "super_admin":
@@ -198,13 +215,16 @@ async def update_user(
     return user
 
 
-@router.put("/{user_id}/password", response_model=MessageResponse,
-            dependencies=[Depends(PermissionChecker("user:update"))])
+@router.put(
+    "/{user_id}/password",
+    response_model=MessageResponse,
+    dependencies=[Depends(PermissionChecker("user:update"))],
+)
 async def update_password(
     user_id: int,
     password_data: PasswordUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """重置用户密码"""
     result = await db.execute(select(User).where(User.id == user_id))
@@ -214,9 +234,11 @@ async def update_password(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     # 非超管只能重置本组织用户密码
-    if (not current_user.is_super_admin
-            and current_user.organization_id
-            and user.organization_id != current_user.organization_id):
+    if (
+        not current_user.is_super_admin
+        and current_user.organization_id
+        and user.organization_id != current_user.organization_id
+    ):
         raise HTTPException(status_code=403, detail="无权重置其他组织用户密码")
 
     user.hashed_password = get_password_hash(password_data.password)
@@ -225,12 +247,15 @@ async def update_password(
     return MessageResponse(message="密码已重置")
 
 
-@router.delete("/{user_id}", response_model=MessageResponse,
-               dependencies=[Depends(PermissionChecker("user:delete"))])
+@router.delete(
+    "/{user_id}",
+    response_model=MessageResponse,
+    dependencies=[Depends(PermissionChecker("user:delete"))],
+)
 async def delete_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """删除用户"""
     if user_id == 1:
@@ -247,9 +272,11 @@ async def delete_user(
         raise HTTPException(status_code=400, detail="不能删除自己")
 
     # 非超管只能删除本组织用户
-    if (not current_user.is_super_admin
-            and current_user.organization_id
-            and user.organization_id != current_user.organization_id):
+    if (
+        not current_user.is_super_admin
+        and current_user.organization_id
+        and user.organization_id != current_user.organization_id
+    ):
         raise HTTPException(status_code=403, detail="无权删除其他组织用户")
 
     # 非超管不能删除组织管理员

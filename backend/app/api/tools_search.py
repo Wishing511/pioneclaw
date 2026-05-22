@@ -1,13 +1,14 @@
 """
 工具搜索 + Git 上下文 API
 """
-from typing import Optional, List
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
 from app.api.auth import get_current_active_user
 from app.models import User
+from app.modules.agent.git_context import format_git_prompt, get_git_context
 from app.modules.tools.registry import ToolRegistry
-from app.modules.agent.git_context import get_git_context, format_git_prompt
 
 router = APIRouter(tags=["工具搜索 & Git"])
 
@@ -15,10 +16,10 @@ router = APIRouter(tags=["工具搜索 & Git"])
 class ToolSearchItem(BaseModel):
     name: str
     description: str
-    parameters: Optional[dict] = None
+    parameters: dict | None = None
 
 
-@router.get("/tools/search", response_model=List[ToolSearchItem])
+@router.get("/tools/search", response_model=list[ToolSearchItem])
 async def search_tools(
     query: str = "",
     limit: int = 10,
@@ -38,11 +39,18 @@ async def search_tools(
             desc = (tool.description or "").lower() if tool else ""
             if q and q not in name.lower() and q not in desc:
                 continue
-            results.append(ToolSearchItem(
-                name=tool.name if tool else name,
-                description=tool.description if tool else "",
-                parameters={k: v.model_dump() if hasattr(v, 'model_dump') else str(v) for k, v in (tool.parameters.items() if tool else {})} if tool else None,
-            ))
+            results.append(
+                ToolSearchItem(
+                    name=tool.name if tool else name,
+                    description=tool.description if tool else "",
+                    parameters={
+                        k: v.model_dump() if hasattr(v, "model_dump") else str(v)
+                        for k, v in (tool.parameters.items() if tool else {})
+                    }
+                    if tool
+                    else None,
+                )
+            )
 
     return results[:limit]
 

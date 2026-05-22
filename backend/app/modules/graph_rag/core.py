@@ -4,9 +4,8 @@ GraphRAG 核心 — LightRAG 封装
 提供文档索引和查询功能
 """
 
-import os
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Optional, List, AsyncIterator
 
 from loguru import logger
 
@@ -18,7 +17,7 @@ class GraphRAGClient:
 
     def __init__(
         self,
-        config: Optional[GraphRAGSettings] = None,
+        config: GraphRAGSettings | None = None,
         llm_caller=None,  # async (prompt: str) -> str
         embedding_func=None,  # async (texts: List[str]) -> List[List[float]]
     ):
@@ -45,8 +44,12 @@ class GraphRAGClient:
             if self.llm_caller or self.embedding_func:
                 self._rag = LightRAG(
                     working_dir=str(working_dir),
-                    llm_model_func=self._wrap_llm_caller() if self.llm_caller else gpt_4o_mini_complete,
-                    embedding_func=self._wrap_embedding_func() if self.embedding_func else openai_embedding,
+                    llm_model_func=self._wrap_llm_caller()
+                    if self.llm_caller
+                    else gpt_4o_mini_complete,
+                    embedding_func=self._wrap_embedding_func()
+                    if self.embedding_func
+                    else openai_embedding,
                 )
             else:
                 # 使用默认配置
@@ -66,7 +69,6 @@ class GraphRAGClient:
 
     def _wrap_llm_caller(self):
         """包装自定义 LLM 调用器"""
-        import asyncio
 
         async def wrapped_llm(prompt: str, **kwargs) -> str:
             if self.llm_caller:
@@ -77,7 +79,8 @@ class GraphRAGClient:
 
     def _wrap_embedding_func(self):
         """包装自定义嵌入函数"""
-        async def wrapped_embedding(texts: List[str]) -> List[List[float]]:
+
+        async def wrapped_embedding(texts: list[str]) -> list[list[float]]:
             if self.embedding_func:
                 return await self.embedding_func(texts)
             return []
@@ -86,7 +89,7 @@ class GraphRAGClient:
 
     # ==================== 索引 ====================
 
-    async def index_document(self, content: str, doc_id: Optional[str] = None) -> dict:
+    async def index_document(self, content: str, doc_id: str | None = None) -> dict:
         """
         索引文档到知识图谱
 
@@ -116,7 +119,7 @@ class GraphRAGClient:
                 "doc_id": doc_id or "auto",
             }
 
-    async def index_batch(self, documents: List[str]) -> dict:
+    async def index_batch(self, documents: list[str]) -> dict:
         """批量索引文档"""
         try:
             rag = self._ensure_rag()
@@ -198,6 +201,7 @@ class GraphRAGClient:
             rag = self._ensure_rag()
 
             from lightrag import QueryMode
+
             mode_map = {
                 "local": QueryMode.Local,
                 "global": QueryMode.Global,
@@ -239,8 +243,7 @@ class GraphRAGClient:
 
             # 尝试读取更多统计信息
             try:
-                if hasattr(rag, 'chunk_entity_relation_graph'):
-                    import networkx as nx
+                if hasattr(rag, "chunk_entity_relation_graph"):
                     g = rag.chunk_entity_relation_graph
                     stats["nodes"] = g.number_of_nodes() if g else 0
                     stats["edges"] = g.number_of_edges() if g else 0
@@ -263,6 +266,7 @@ class GraphRAGClient:
 
             # 删除所有存储文件
             import shutil
+
             if working_dir.exists():
                 shutil.rmtree(working_dir)
                 working_dir.mkdir(parents=True, exist_ok=True)

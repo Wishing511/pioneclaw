@@ -395,6 +395,11 @@ const pagination = reactive({
   pageSize: 20,
 })
 
+const pagedTraces = computed(() => {
+  const start = (pagination.page - 1) * pagination.pageSize
+  return traces.value.slice(start, start + pagination.pageSize)
+})
+
 const isSuperAdmin = computed(() => userStore.user?.role === 'super_admin')
 
 // ==================== Stat Cards ====================

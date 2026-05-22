@@ -12,7 +12,7 @@
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -27,9 +27,10 @@ class ToolPolicyConfig(BaseModel):
     - also_allow: 额外允许（在 allow 基础上追加）
     - deny: 禁止的工具列表（优先级最高）
     """
-    allow: List[str] = []
-    also_allow: List[str] = []
-    deny: List[str] = []
+
+    allow: list[str] = []
+    also_allow: list[str] = []
+    deny: list[str] = []
 
 
 class ToolPolicy:
@@ -44,7 +45,7 @@ class ToolPolicy:
     4. 如果 allow 和 also_allow 都为空，所有非 deny 工具均可
     """
 
-    def __init__(self, config: Optional[ToolPolicyConfig] = None):
+    def __init__(self, config: ToolPolicyConfig | None = None):
         self.config = config or ToolPolicyConfig()
 
     def is_allowed(self, tool_name: str) -> tuple:
@@ -67,7 +68,7 @@ class ToolPolicy:
         # 规则3和4: 无 allow 列表，所有非 deny 工具均可
         return True, ""
 
-    def get_allowed_tools(self, all_tools: List[str]) -> List[str]:
+    def get_allowed_tools(self, all_tools: list[str]) -> list[str]:
         """从所有工具中过滤出允许的工具"""
         result = []
         for tool_name in all_tools:
@@ -76,7 +77,7 @@ class ToolPolicy:
                 result.append(tool_name)
         return result
 
-    def get_denied_tools(self, all_tools: List[str]) -> List[str]:
+    def get_denied_tools(self, all_tools: list[str]) -> list[str]:
         """从所有工具中过滤出被禁止的工具"""
         result = []
         for tool_name in all_tools:
@@ -85,7 +86,7 @@ class ToolPolicy:
                 result.append(tool_name)
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "allow": self.config.allow,
             "also_allow": self.config.also_allow,
@@ -93,7 +94,9 @@ class ToolPolicy:
         }
 
 
-def resolve_tool_policy(agent_config: Optional[Dict[str, Any]] = None) -> Optional[ToolPolicy]:
+def resolve_tool_policy(
+    agent_config: dict[str, Any] | None = None,
+) -> ToolPolicy | None:
     """从 Agent 配置解析工具策略
 
     Agent.config JSON 中增加 tool_policy 键：

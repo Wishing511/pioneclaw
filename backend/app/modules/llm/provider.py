@@ -6,7 +6,9 @@
 
 import json
 import logging
+
 import httpx
+
 from app.models import AIModelConfig
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class PromptTooLongError(Exception):
     """上下文过长错误 — 触发应急压缩"""
+
     pass
 
 
@@ -44,7 +47,9 @@ class SimpleLLMProvider:
         temperature = temperature if temperature is not None else self.temperature
         max_tokens = max_tokens or self.max_tokens
 
-        logger.info(f"SimpleLLMProvider.chat_stream: provider={self.config.provider}, tools_count={len(tools) if tools else 0}")
+        logger.info(
+            f"SimpleLLMProvider.chat_stream: provider={self.config.provider}, tools_count={len(tools) if tools else 0}"
+        )
 
         # 构建请求
         if self.config.provider == "anthropic":
@@ -82,7 +87,7 @@ class SimpleLLMProvider:
             else:
                 logger.warning("No tools in request!")
             # 快速模式：禁用 DeepSeek 推理/思考
-            if getattr(self, 'fast_mode', False):
+            if getattr(self, "fast_mode", False):
                 body["thinking"] = {"type": "disabled"}
 
         try:
@@ -153,6 +158,7 @@ class SimpleLLMProvider:
 
         except Exception as e:
             import traceback
+
             logger.error(f"chat_stream exception: {e}\n{traceback.format_exc()}")
             yield {"error": str(e)}
 
@@ -169,7 +175,9 @@ class SimpleLLMProvider:
         temperature = temperature if temperature is not None else self.temperature
         max_tokens = max_tokens or self.max_tokens
 
-        logger.info(f"chat_stream_sse: provider={self.config.provider}, tools={len(tools) if tools else 0}")
+        logger.info(
+            f"chat_stream_sse: provider={self.config.provider}, tools={len(tools) if tools else 0}"
+        )
 
         url = self.api_base or "https://api.openai.com/v1/chat/completions"
         if not url.endswith("/chat/completions"):
@@ -190,7 +198,7 @@ class SimpleLLMProvider:
             body["tools"] = tools
             body["tool_choice"] = "auto"
         # 快速模式：禁用 DeepSeek 推理/思考
-        if getattr(self, 'fast_mode', False):
+        if getattr(self, "fast_mode", False):
             body["thinking"] = {"type": "disabled"}
 
         try:
@@ -239,19 +247,28 @@ class SimpleLLMProvider:
                     # reasoning_content（思考过程实时输出）
                     if delta.get("reasoning_content"):
                         reasoning_buffer += delta["reasoning_content"]
-                        yield {"reasoning_content": delta["reasoning_content"], "finish_reason": None}
+                        yield {
+                            "reasoning_content": delta["reasoning_content"],
+                            "finish_reason": None,
+                        }
 
                     # tool_calls 增量
                     for tc in delta.get("tool_calls", []):
                         idx = tc.get("index", 0)
                         if idx not in tool_call_deltas:
-                            tool_call_deltas[idx] = {"id": "", "name": "", "arguments": ""}
+                            tool_call_deltas[idx] = {
+                                "id": "",
+                                "name": "",
+                                "arguments": "",
+                            }
                         if tc.get("id"):
                             tool_call_deltas[idx]["id"] = tc["id"]
                         if tc.get("function", {}).get("name"):
                             tool_call_deltas[idx]["name"] = tc["function"]["name"]
                         if tc.get("function", {}).get("arguments"):
-                            tool_call_deltas[idx]["arguments"] += tc["function"]["arguments"]
+                            tool_call_deltas[idx]["arguments"] += tc["function"][
+                                "arguments"
+                            ]
 
                         yield {
                             "tool_call": {
@@ -273,9 +290,13 @@ class SimpleLLMProvider:
                             for idx in tool_call_deltas:
                                 tc_id = tool_call_deltas[idx]["id"]
                                 if isinstance(tc_id, list):
-                                    tool_call_deltas[idx]["id"] = str(tc_id[0]) if tc_id else ""
+                                    tool_call_deltas[idx]["id"] = (
+                                        str(tc_id[0]) if tc_id else ""
+                                    )
                                 elif not isinstance(tc_id, str):
-                                    tool_call_deltas[idx]["id"] = str(tc_id) if tc_id else ""
+                                    tool_call_deltas[idx]["id"] = (
+                                        str(tc_id) if tc_id else ""
+                                    )
                             yield {"finish_reason": "tool_calls"}
                         else:
                             yield {"finish_reason": finish_reason}
@@ -285,5 +306,6 @@ class SimpleLLMProvider:
             yield {"error": f"请求错误: {e}"}
         except Exception as e:
             import traceback
+
             logger.error(f"chat_stream_sse exception: {e}\n{traceback.format_exc()}")
             yield {"error": str(e)}

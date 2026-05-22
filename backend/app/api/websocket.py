@@ -4,24 +4,31 @@ WebSocket API - 实时通信接口
 提供工具调用状态、Agent 执行进度等实时推送
 """
 
-import uuid
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, Depends
-from typing import Optional
+import uuid
 
-from app.core.websocket import manager, EventType
-from app.core.security import decode_access_token
-from app.api.auth import get_current_active_user
-from app.models import User
-from app.core.database import async_session_maker
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy import select
+
+from app.api.auth import get_current_active_user
+from app.core.database import async_session_maker
+from app.core.security import decode_access_token
+from app.core.websocket import EventType, manager
+from app.models import User
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["WebSocket"])
 
 
-async def _resolve_user_id_from_token(token: str) -> Optional[int]:
+async def _resolve_user_id_from_token(token: str) -> int | None:
     """验证 WS token 并返回 user_id。无效 token 返回 None。"""
     payload = decode_access_token(token)
     if payload is None:
@@ -37,7 +44,7 @@ async def _resolve_user_id_from_token(token: str) -> Optional[int]:
     try:
         async with async_session_maker() as db:
             result = await db.execute(
-                select(User).where(User.id == user_id, User.is_active == True)
+                select(User).where(User.id == user_id, User.is_active)
             )
             if result.scalar_one_or_none() is None:
                 return None
@@ -50,8 +57,8 @@ async def _resolve_user_id_from_token(token: str) -> Optional[int]:
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None),
-    session_id: Optional[str] = Query(None),
+    token: str | None = Query(None),
+    session_id: str | None = Query(None),
 ):
     """
     WebSocket 连接端点
@@ -87,53 +94,65 @@ async def websocket_endpoint(
         session_id=sid,
         user_id=user_id,
     )
-    
+
     if not connected:
         return
-    
+
     try:
         # 发送连接成功消息
-        await manager.send_to_session(sid, {
-            "type": EventType.CONNECTED,
-            "session_id": sid,
-            "message": "WebSocket connected successfully",
-        })
-        
+        await manager.send_to_session(
+            sid,
+            {
+                "type": EventType.CONNECTED,
+                "session_id": sid,
+                "message": "WebSocket connected successfully",
+            },
+        )
+
         # 持续接收消息
         while True:
             try:
                 data = await websocket.receive_json()
                 msg_type = data.get("type")
-                
+
                 # 心跳
                 if msg_type == "ping":
-                    await manager.send_to_session(sid, {
-                        "type": EventType.PONG,
-                        "timestamp": data.get("timestamp"),
-                    })
-                
+                    await manager.send_to_session(
+                        sid,
+                        {
+                            "type": EventType.PONG,
+                            "timestamp": data.get("timestamp"),
+                        },
+                    )
+
                 # 取消执行
                 elif msg_type == "cancel":
                     reason = data.get("reason", "User cancelled")
                     success = manager.cancel_session(sid, reason)
-                    await manager.send_to_session(sid, {
-                        "type": "cancel_ack",
-                        "success": success,
-                        "reason": reason,
-                    })
-                
+                    await manager.send_to_session(
+                        sid,
+                        {
+                            "type": "cancel_ack",
+                            "success": success,
+                            "reason": reason,
+                        },
+                    )
+
                 # 订阅频道
                 elif msg_type == "subscribe":
                     channel = data.get("channel")
-                    await manager.send_to_session(sid, {
-                        "type": "subscribed",
-                        "channel": channel,
-                    })
-                
+                    await manager.send_to_session(
+                        sid,
+                        {
+                            "type": "subscribed",
+                            "channel": channel,
+                        },
+                    )
+
             except Exception as e:
                 logger.debug(f"WebSocket receive error: {e}")
                 break
-                
+
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {sid}")
     except Exception as e:
@@ -160,7 +179,7 @@ async def websocket_status(
 @router.post("/ws/cancel/{session_id}")
 async def cancel_session(
     session_id: str,
-    reason: Optional[str] = None,
+    reason: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """通过 HTTP 取消指定会话的执行（只能取消自己的会话）"""
@@ -171,5 +190,5 @@ async def cancel_session(
     if not current_user.is_super_admin:
         if not manager.is_session_owned_by(session_id, current_user.id):
             raise HTTPException(status_code=403, detail="无权取消其他用户的会话")
-    success = manager.cancel_session(session_id, reason or "HTTP cancel")
+    manager.cancel_session(session_id, reason or "HTTP cancel")
     return {"success": True, "session_id": session_id, "reason": reason}

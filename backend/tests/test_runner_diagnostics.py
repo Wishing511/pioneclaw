@@ -5,19 +5,17 @@ TDD: 测试先于实现。首次运行应全部 FAIL（端点尚未实现）。
 """
 
 import pytest
-import pytest_asyncio
-from datetime import datetime, timezone
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Runner, RunnerStatus, ConnectionEvent
+from app.models import ConnectionEvent, Runner, RunnerStatus, User
 from tests.conftest import auth_headers
-
 
 # ============================
 # 辅助函数
 # ============================
+
 
 async def create_runner(db_session: AsyncSession, name: str, **kwargs) -> Runner:
     """在测试数据库中创建一个 Runner"""
@@ -37,6 +35,7 @@ async def create_runner(db_session: AsyncSession, name: str, **kwargs) -> Runner
 # 1. GET /{runner_id}/diagnostics
 # ============================
 
+
 class TestGetDiagnostics:
     """测试获取 Runner 诊断信息"""
 
@@ -46,7 +45,8 @@ class TestGetDiagnostics:
     ):
         """GET /runners/{id}/diagnostics 返回 CPU/memory/disk/processes"""
         runner = await create_runner(
-            db_session, "diag-with-data",
+            db_session,
+            "diag-with-data",
             diagnostics={
                 "cpu_percent": 45.2,
                 "memory_percent": 72.8,
@@ -125,8 +125,15 @@ class TestGetDiagnostics:
         self, client: AsyncClient, db_session: AsyncSession, test_org_admin: User
     ):
         """组织管理员获取诊断信息应返回 200"""
-        runner = await create_runner(db_session, "diag-org-admin",
-            diagnostics={"cpu_percent": 30.0, "memory_percent": 50.0, "disk_percent": 40.0, "processes": []},
+        runner = await create_runner(
+            db_session,
+            "diag-org-admin",
+            diagnostics={
+                "cpu_percent": 30.0,
+                "memory_percent": 50.0,
+                "disk_percent": 40.0,
+                "processes": [],
+            },
         )
 
         response = await client.get(
@@ -140,6 +147,7 @@ class TestGetDiagnostics:
 # ============================
 # 2. GET /{runner_id}/local-logs
 # ============================
+
 
 class TestGetLocalLogs:
     """测试获取 Runner 本地日志"""
@@ -236,6 +244,7 @@ class TestGetLocalLogs:
 # 3. GET /{runner_id}/local-logs/categories
 # ============================
 
+
 class TestGetLogCategories:
     """测试获取日志分类列表"""
 
@@ -282,6 +291,7 @@ class TestGetLogCategories:
 # 4. GET /{runner_id}/connection-events
 # ============================
 
+
 class TestGetConnectionEvents:
     """测试获取 Runner 连接事件历史"""
 
@@ -293,8 +303,12 @@ class TestGetConnectionEvents:
         runner = await create_runner(db_session, "conn-events")
 
         # 创建一些连接事件
-        event1 = ConnectionEvent(runner_id=runner.id, event_type="online", detail="测试上线")
-        event2 = ConnectionEvent(runner_id=runner.id, event_type="offline", detail="测试离线")
+        event1 = ConnectionEvent(
+            runner_id=runner.id, event_type="online", detail="测试上线"
+        )
+        event2 = ConnectionEvent(
+            runner_id=runner.id, event_type="offline", detail="测试离线"
+        )
         db_session.add_all([event1, event2])
         await db_session.commit()
 
@@ -364,6 +378,7 @@ class TestGetConnectionEvents:
 # 5. ConnectionEvent auto-creation on heartbeat/offline
 # ============================
 
+
 class TestConnectionEventAutoCreate:
     """测试心跳/离线时自动创建 ConnectionEvent 记录"""
 
@@ -372,7 +387,9 @@ class TestConnectionEventAutoCreate:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """心跳上报后自动创建 event_type=online 的 ConnectionEvent"""
-        runner = await create_runner(db_session, "hb-auto-event", status=RunnerStatus.APPROVED)
+        runner = await create_runner(
+            db_session, "hb-auto-event", status=RunnerStatus.APPROVED
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/heartbeat",
@@ -383,10 +400,13 @@ class TestConnectionEventAutoCreate:
 
         # 验证 ConnectionEvent 已创建
         result = await db_session.execute(
-            select(ConnectionEvent).where(
+            select(ConnectionEvent)
+            .where(
                 ConnectionEvent.runner_id == runner.id,
                 ConnectionEvent.event_type == "online",
-            ).order_by(ConnectionEvent.created_at.desc()).limit(1)
+            )
+            .order_by(ConnectionEvent.created_at.desc())
+            .limit(1)
         )
         event = result.scalar_one_or_none()
         assert event is not None
@@ -398,7 +418,9 @@ class TestConnectionEventAutoCreate:
         self, client: AsyncClient, db_session: AsyncSession, test_admin: User
     ):
         """设置离线后自动创建 event_type=offline 的 ConnectionEvent"""
-        runner = await create_runner(db_session, "off-auto-event", status=RunnerStatus.ONLINE)
+        runner = await create_runner(
+            db_session, "off-auto-event", status=RunnerStatus.ONLINE
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/offline",
@@ -409,10 +431,13 @@ class TestConnectionEventAutoCreate:
 
         # 验证 ConnectionEvent 已创建
         result = await db_session.execute(
-            select(ConnectionEvent).where(
+            select(ConnectionEvent)
+            .where(
                 ConnectionEvent.runner_id == runner.id,
                 ConnectionEvent.event_type == "offline",
-            ).order_by(ConnectionEvent.created_at.desc()).limit(1)
+            )
+            .order_by(ConnectionEvent.created_at.desc())
+            .limit(1)
         )
         event = result.scalar_one_or_none()
         assert event is not None
@@ -424,7 +449,9 @@ class TestConnectionEventAutoCreate:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """多次心跳应创建多条 ConnectionEvent 记录"""
-        runner = await create_runner(db_session, "hb-multi-event", status=RunnerStatus.APPROVED)
+        runner = await create_runner(
+            db_session, "hb-multi-event", status=RunnerStatus.APPROVED
+        )
 
         for i in range(3):
             response = await client.post(

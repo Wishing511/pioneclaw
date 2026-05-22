@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Optional, List, Dict
+
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from app.models.models import UserRole, AgentStatus
+
+from app.models.models import AgentStatus, RunnerStatus, UserRole
 
 
 # ==================== User Schemas ====================
@@ -9,11 +10,11 @@ class UserBase(BaseModel):
     username: str = Field(
         min_length=3,
         max_length=50,
-        pattern=r'^[a-zA-Z0-9_一-鿿]+$',
+        pattern=r"^[a-zA-Z0-9_一-鿿]+$",
         description="用户名，3-50位，支持字母/数字/下划线/中文",
     )
     email: EmailStr
-    display_name: Optional[str] = Field(default=None, max_length=50)
+    display_name: str | None = Field(default=None, max_length=50)
 
 
 class UserCreate(UserBase):
@@ -21,23 +22,23 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
-    display_name: Optional[str] = None
-    avatar: Optional[str] = None
-    email: Optional[EmailStr] = None
+    display_name: str | None = None
+    avatar: str | None = None
+    email: EmailStr | None = None
 
 
 class UserResponse(BaseModel):
     id: int
     username: str
     email: str  # 改为 str 类型，避免 EmailStr 严格验证导致已有数据无法返回
-    display_name: Optional[str] = None
+    display_name: str | None = None
     role: UserRole
     is_active: bool
-    avatar: Optional[str] = None
-    organization_id: Optional[str] = None
+    avatar: str | None = None
+    organization_id: str | None = None
     is_super_admin: bool = False
     is_org_admin: bool = False
-    permissions: Optional[List[str]] = None
+    permissions: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -48,7 +49,7 @@ class UserResponse(BaseModel):
 class UserLogin(BaseModel):
     username: str
     password: str
-    ip: Optional[str] = None  # 可选，记录登录 IP
+    ip: str | None = None  # 可选，记录登录 IP
 
 
 class RefreshTokenRequest(BaseModel):
@@ -56,11 +57,11 @@ class RefreshTokenRequest(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
-    display_name: Optional[str] = Field(default=None, min_length=1, max_length=50)
-    avatar: Optional[str] = Field(default=None, max_length=200000)
-    phone: Optional[str] = Field(default=None, max_length=20, pattern=r'^[\d\-\+\(\)\s]*$')
-    department: Optional[str] = Field(default=None, max_length=100)
-    position: Optional[str] = Field(default=None, max_length=100)
+    display_name: str | None = Field(default=None, min_length=1, max_length=50)
+    avatar: str | None = Field(default=None, max_length=200000)
+    phone: str | None = Field(default=None, max_length=20, pattern=r"^[\d\-\+\(\)\s]*$")
+    department: str | None = Field(default=None, max_length=100)
+    position: str | None = Field(default=None, max_length=100)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -91,24 +92,24 @@ class TokenPayload(BaseModel):
 class AgentBase(BaseModel):
     name: str
     display_name: str
-    description: Optional[str] = None
+    description: str | None = None
     model: str = "gpt-4o"
     max_turns: int = 20
-    system_prompt: Optional[str] = None
+    system_prompt: str | None = None
 
 
 class AgentCreate(AgentBase):
-    skill_ids: List[int] = []
+    skill_ids: list[int] = []
 
 
 class AgentUpdate(BaseModel):
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    model: Optional[str] = None
-    max_turns: Optional[int] = None
-    system_prompt: Optional[str] = None
-    status: Optional[AgentStatus] = None
-    skill_ids: Optional[List[int]] = None
+    display_name: str | None = None
+    description: str | None = None
+    model: str | None = None
+    max_turns: int | None = None
+    system_prompt: str | None = None
+    status: AgentStatus | None = None
+    skill_ids: list[int] | None = None
 
 
 class AgentResponse(AgentBase):
@@ -117,7 +118,7 @@ class AgentResponse(AgentBase):
     creator_id: int
     created_at: datetime
     updated_at: datetime
-    skills: List["SkillBrief"] = []
+    skills: list["SkillBrief"] = []
 
     class Config:
         from_attributes = True
@@ -137,47 +138,47 @@ class AgentBrief(BaseModel):
 class SkillBase(BaseModel):
     name: str
     display_name: str
-    description: Optional[str] = None
+    description: str | None = None
     category: str = "custom"
     scope: str = "user"
 
 
 class SkillCreate(SkillBase):
-    content: Optional[str] = None
+    content: str | None = None
     is_public: bool = True
     always_activate: bool = False
     skill_format: str = "inline"
-    dependencies: Optional[dict] = None
+    dependencies: dict | None = None
 
 
 class SkillUpdate(BaseModel):
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None
-    content: Optional[str] = None
-    is_active: Optional[bool] = None
-    is_public: Optional[bool] = None
-    always_activate: Optional[bool] = None
-    skill_format: Optional[str] = None
-    dependencies: Optional[dict] = None
-    scope: Optional[str] = None
+    display_name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    content: str | None = None
+    is_active: bool | None = None
+    is_public: bool | None = None
+    always_activate: bool | None = None
+    skill_format: str | None = None
+    dependencies: dict | None = None
+    scope: str | None = None
 
 
 class SkillResponse(SkillBase):
-    id: Optional[int] = None
+    id: int | None = None
     source: str = "db"  # "db" | "file"
-    content: Optional[str] = None
+    content: str | None = None
     package_type: str = "inline"
     package_size: int = 0
     always_activate: bool = False
     skill_format: str = "inline"
-    tags: Optional[list] = None
-    dependencies: Optional[dict] = None
+    tags: list | None = None
+    dependencies: dict | None = None
     is_active: bool = True
     is_public: bool = True
-    creator_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    creator_id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -213,52 +214,51 @@ class UsageStats(BaseModel):
 
 
 # ==================== Runner Schemas ====================
-from app.models.models import RunnerStatus
 
 
 class RunnerBase(BaseModel):
     name: str
     display_name: str
-    description: Optional[str] = None
-    host: Optional[str] = None
-    port: Optional[int] = None
+    description: str | None = None
+    host: str | None = None
+    port: int | None = None
 
 
 class RunnerCreate(RunnerBase):
-    api_key: Optional[str] = None
-    capabilities: Optional[dict] = None
-    version: Optional[str] = None
-    platform: Optional[str] = None
-    user_token: Optional[str] = None  # Runner 端携带的用户 JWT，用于自动关联用户
+    api_key: str | None = None
+    capabilities: dict | None = None
+    version: str | None = None
+    platform: str | None = None
+    user_token: str | None = None  # Runner 端携带的用户 JWT，用于自动关联用户
 
 
 class RunnerUpdate(BaseModel):
-    display_name: Optional[str] = None
-    description: Optional[str] = None
-    host: Optional[str] = None
-    port: Optional[int] = None
-    status: Optional[RunnerStatus] = None
-    user_id: Optional[int] = None
+    display_name: str | None = None
+    description: str | None = None
+    host: str | None = None
+    port: int | None = None
+    status: RunnerStatus | None = None
+    user_id: int | None = None
 
 
 class RunnerResponse(RunnerBase):
     id: int
     status: RunnerStatus
-    api_key: Optional[str] = None
-    capabilities: Optional[dict]
-    version: Optional[str]
-    platform: Optional[str]
-    last_heartbeat: Optional[datetime]
-    current_task: Optional[str]
+    api_key: str | None = None
+    capabilities: dict | None
+    version: str | None
+    platform: str | None
+    last_heartbeat: datetime | None
+    current_task: str | None
     total_tasks: int
     success_tasks: int
     failed_tasks: int
     applied_at: datetime
-    approved_at: Optional[datetime]
-    approved_by: Optional[int] = None
-    user_id: Optional[int] = None
-    username: Optional[str] = None
-    reject_reason: Optional[str]
+    approved_at: datetime | None
+    approved_by: int | None = None
+    user_id: int | None = None
+    username: str | None = None
+    reject_reason: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -275,19 +275,19 @@ class RunnerResponse(RunnerBase):
 
 class RunnerApprove(BaseModel):
     approve: bool
-    user_id: Optional[int] = None
-    reject_reason: Optional[str] = None
+    user_id: int | None = None
+    reject_reason: str | None = None
 
 
 class RunnerHeartbeat(BaseModel):
-    current_task: Optional[str] = None
-    capabilities: Optional[dict] = None
+    current_task: str | None = None
+    capabilities: dict | None = None
 
 
 # ==================== AI Model Config Schemas ====================
 class AIModelConfigBase(BaseModel):
     name: str
-    display_name: Optional[str] = None
+    display_name: str | None = None
     provider: str = "openai"
     model_name: str
     base_url: str
@@ -300,30 +300,30 @@ class AIModelConfigBase(BaseModel):
 class AIModelConfigCreate(AIModelConfigBase):
     api_key: str  # 必填
     is_default: bool = False
-    extra_config: Optional[dict] = None
+    extra_config: dict | None = None
 
 
 class AIModelConfigUpdate(BaseModel):
-    display_name: Optional[str] = None
-    provider: Optional[str] = None
-    model_name: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    context_window: Optional[int] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    is_default: Optional[bool] = None
-    is_active: Optional[bool] = None
-    extra_config: Optional[dict] = None
+    display_name: str | None = None
+    provider: str | None = None
+    model_name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    context_window: int | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
+    is_default: bool | None = None
+    is_active: bool | None = None
+    extra_config: dict | None = None
 
 
 class AIModelConfigResponse(AIModelConfigBase):
     id: int
-    api_key: Optional[str] = None
+    api_key: str | None = None
     is_default: bool
     is_active: bool
     tier: str
-    extra_config: Optional[dict]
+    extra_config: dict | None
     created_at: datetime
     updated_at: datetime
 
@@ -339,26 +339,26 @@ class AIModelConfigResponse(AIModelConfigBase):
 
 
 class AIModelTestRequest(BaseModel):
-    model_config_id: Optional[int] = None
+    model_config_id: int | None = None
     # 或者直接传入配置测试
-    provider: Optional[str] = None
-    model_name: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    provider: str | None = None
+    model_name: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
     test_prompt: str = "Hello, are you working?"
 
 
 class AIModelTestResponse(BaseModel):
     success: bool
     message: str
-    response: Optional[str] = None
-    latency_ms: Optional[int] = None
+    response: str | None = None
+    latency_ms: int | None = None
 
 
 # ==================== Knowledge Base Schemas ====================
 class KnowledgeBaseBase(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class KnowledgeBaseCreate(KnowledgeBaseBase):
@@ -366,15 +366,15 @@ class KnowledgeBaseCreate(KnowledgeBaseBase):
 
 
 class KnowledgeBaseUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    is_active: bool | None = None
 
 
 class KnowledgeDocumentBase(BaseModel):
     title: str
     content: str
-    source: Optional[str] = None
+    source: str | None = None
 
 
 class KnowledgeDocumentCreate(KnowledgeDocumentBase):
@@ -382,17 +382,17 @@ class KnowledgeDocumentCreate(KnowledgeDocumentBase):
 
 
 class KnowledgeDocumentUpdate(BaseModel):
-    title: Optional[str] = None
-    content: Optional[str] = None
-    source: Optional[str] = None
+    title: str | None = None
+    content: str | None = None
+    source: str | None = None
 
 
 class KnowledgeDocumentResponse(KnowledgeDocumentBase):
     id: int
     knowledge_base_id: int
     doc_type: str
-    file_path: Optional[str]
-    file_size: Optional[int]
+    file_path: str | None
+    file_size: int | None
     chunk_count: int
     created_at: datetime
     updated_at: datetime
@@ -408,7 +408,7 @@ class KnowledgeBaseResponse(KnowledgeBaseBase):
     total_chunks: int = 0
     created_at: datetime
     updated_at: datetime
-    documents: List[KnowledgeDocumentResponse] = []
+    documents: list[KnowledgeDocumentResponse] = []
 
     class Config:
         from_attributes = True
@@ -418,25 +418,25 @@ class KnowledgeBaseResponse(KnowledgeBaseBase):
 class RoleBase(BaseModel):
     name: str
     code: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class RoleCreate(RoleBase):
-    permissions: Optional[dict] = None
+    permissions: dict | None = None
     is_active: bool = True
 
 
 class RoleUpdate(BaseModel):
-    name: Optional[str] = None
-    code: Optional[str] = None
-    description: Optional[str] = None
-    permissions: Optional[dict] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    code: str | None = None
+    description: str | None = None
+    permissions: dict | None = None
+    is_active: bool | None = None
 
 
 class RoleResponse(RoleBase):
     id: int
-    permissions: Optional[dict]
+    permissions: dict | None
     is_system: bool
     is_active: bool
     created_at: datetime
@@ -449,14 +449,14 @@ class RoleResponse(RoleBase):
 # ==================== Task Schemas ====================
 class TaskBase(BaseModel):
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     priority: str = "normal"
     task_type: str = "manual"
-    parent_id: Optional[int] = None
-    agent_id: Optional[int] = None
-    assignee_id: Optional[int] = None
-    due_at: Optional[datetime] = None
-    input_data: Optional[dict] = None
+    parent_id: int | None = None
+    agent_id: int | None = None
+    assignee_id: int | None = None
+    due_at: datetime | None = None
+    input_data: dict | None = None
 
 
 class TaskCreate(TaskBase):
@@ -464,27 +464,27 @@ class TaskCreate(TaskBase):
 
 
 class TaskUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
-    assignee_id: Optional[int] = None
-    due_at: Optional[datetime] = None
-    output_data: Optional[dict] = None
-    error_message: Optional[str] = None
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    priority: str | None = None
+    assignee_id: int | None = None
+    due_at: datetime | None = None
+    output_data: dict | None = None
+    error_message: str | None = None
 
 
 class TaskResponse(TaskBase):
     id: int
     status: str
-    parent_id: Optional[int] = None
-    runner_id: Optional[int]
+    parent_id: int | None = None
+    runner_id: int | None
     creator_id: int
-    input_data: Optional[dict]
-    output_data: Optional[dict]
-    error_message: Optional[str]
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    input_data: dict | None
+    output_data: dict | None
+    error_message: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -496,9 +496,9 @@ class TaskResponse(TaskBase):
 class CronJobBase(BaseModel):
     name: str
     cron_expr: str
-    agent_id: Optional[int] = None
-    input_data: Optional[dict] = None
-    description: Optional[str] = None
+    agent_id: int | None = None
+    input_data: dict | None = None
+    description: str | None = None
 
 
 class CronJobCreate(CronJobBase):
@@ -506,19 +506,19 @@ class CronJobCreate(CronJobBase):
 
 
 class CronJobUpdate(BaseModel):
-    name: Optional[str] = None
-    cron_expr: Optional[str] = None
-    agent_id: Optional[int] = None
-    input_data: Optional[dict] = None
-    description: Optional[str] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    cron_expr: str | None = None
+    agent_id: int | None = None
+    input_data: dict | None = None
+    description: str | None = None
+    is_active: bool | None = None
 
 
 class CronJobResponse(CronJobBase):
     id: int
     is_active: bool
-    last_run: Optional[datetime]
-    next_run: Optional[datetime]
+    last_run: datetime | None
+    next_run: datetime | None
     run_count: int
     created_at: datetime
     updated_at: datetime
@@ -526,17 +526,15 @@ class CronJobResponse(CronJobBase):
 
 class CronExecutionLogResponse(BaseModel):
     """Cron 任务执行日志响应"""
+
     id: int
     cron_job_id: int
     started_at: datetime
-    finished_at: Optional[datetime] = None
+    finished_at: datetime | None = None
     status: str
-    result: Optional[str] = None
-    error_message: Optional[str] = None
-    duration_ms: Optional[int] = None
-
-    class Config:
-        from_attributes = True
+    result: str | None = None
+    error_message: str | None = None
+    duration_ms: int | None = None
 
     class Config:
         from_attributes = True
@@ -546,34 +544,34 @@ class CronExecutionLogResponse(BaseModel):
 class MCPServerConfigCreate(BaseModel):
     name: str
     transport: str = "stdio"
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    env: Optional[Dict[str, str]] = None
-    url: Optional[str] = None
-    auth_config: Optional[dict] = None
+    command: str | None = None
+    args: list[str] | None = None
+    env: dict[str, str] | None = None
+    url: str | None = None
+    auth_config: dict | None = None
     is_enabled: bool = True
 
 
 class MCPServerConfigUpdate(BaseModel):
-    name: Optional[str] = None
-    transport: Optional[str] = None
-    command: Optional[str] = None
-    args: Optional[List[str]] = None
-    env: Optional[Dict[str, str]] = None
-    url: Optional[str] = None
-    auth_config: Optional[dict] = None
-    is_enabled: Optional[bool] = None
+    name: str | None = None
+    transport: str | None = None
+    command: str | None = None
+    args: list[str] | None = None
+    env: dict[str, str] | None = None
+    url: str | None = None
+    auth_config: dict | None = None
+    is_enabled: bool | None = None
 
 
 class MCPServerConfigResponse(BaseModel):
     id: int
     name: str
     transport: str
-    command: Optional[str] = None
-    args: Optional[list] = None
-    env: Optional[dict] = None
-    url: Optional[str] = None
-    auth_config: Optional[dict] = None
+    command: str | None = None
+    args: list | None = None
+    env: dict | None = None
+    url: str | None = None
+    auth_config: dict | None = None
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
@@ -587,8 +585,8 @@ class MCPConnectionStatus(BaseModel):
     status: str
     tool_count: int = 0
     resource_count: int = 0
-    server_info: Optional[dict] = None
-    error_message: Optional[str] = None
+    server_info: dict | None = None
+    error_message: str | None = None
 
 
 # ==================== Common Schemas ====================
@@ -596,7 +594,7 @@ class PaginatedResponse(BaseModel):
     total: int
     page: int
     page_size: int
-    items: List
+    items: list
 
 
 class MessageResponse(BaseModel):

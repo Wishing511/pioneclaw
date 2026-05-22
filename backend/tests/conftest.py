@@ -3,30 +3,39 @@ PioneClaw 测试配置
 
 每个测试使用独立的文件 SQLite 数据库，测试结束自动清理
 """
+
 import os
 import tempfile
 import uuid
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
-import pytest
 import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.database import Base, get_db
-from app.core.security import get_password_hash, create_access_token, create_refresh_token
-from app.models import User, UserRole, Role, Organization
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    get_password_hash,
+)
 from app.main import app
+from app.models import Organization, Role, User, UserRole
 
 
 @pytest_asyncio.fixture
 async def db_engine():
     """每个测试创建独立的 SQLite 文件数据库"""
-    db_file = os.path.join(tempfile.gettempdir(), f"pioneclaw_test_{uuid.uuid4().hex}.db")
+    db_file = os.path.join(
+        tempfile.gettempdir(), f"pioneclaw_test_{uuid.uuid4().hex}.db"
+    )
     db_url = f"sqlite+aiosqlite:///{db_file}"
-    engine = create_async_engine(db_url, connect_args={"check_same_thread": False}, echo=False)
+    engine = create_async_engine(
+        db_url, connect_args={"check_same_thread": False}, echo=False
+    )
 
     import app.models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -42,7 +51,9 @@ async def db_engine():
 @pytest_asyncio.fixture
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     """测试数据库会话"""
-    session_maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    session_maker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with session_maker() as session:
         yield session
 
@@ -50,7 +61,9 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest_asyncio.fixture
 async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
     """HTTP 测试客户端，使用测试数据库"""
-    session_maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    session_maker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async def override_get_db():
         async with session_maker() as session:
@@ -58,6 +71,7 @@ async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
 
     # 测试环境禁用限流，避免跨测试累积触发 429
     from app.core.config import settings as app_settings
+
     app_settings.RATE_LIMIT_ENABLED = False
 
     app.dependency_overrides[get_db] = override_get_db
@@ -100,9 +114,13 @@ async def test_role(db_session: AsyncSession) -> Role:
         is_default=True,
         permissions={
             "codes": [
-                "task:read", "task:create", "task:update",
-                "agent:read", "agent:create",
-                "memory:read", "memory:create",
+                "task:read",
+                "task:create",
+                "task:update",
+                "agent:read",
+                "agent:create",
+                "memory:read",
+                "memory:create",
                 "skill:read",
                 "knowledge:read",
                 "user:read",
@@ -116,7 +134,9 @@ async def test_role(db_session: AsyncSession) -> Role:
 
 
 @pytest_asyncio.fixture
-async def test_user(db_session: AsyncSession, test_org: Organization, test_role: Role) -> User:
+async def test_user(
+    db_session: AsyncSession, test_org: Organization, test_role: Role
+) -> User:
     """创建测试普通用户"""
     user = User(
         username="testuser",

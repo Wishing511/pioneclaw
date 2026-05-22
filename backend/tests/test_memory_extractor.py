@@ -3,16 +3,17 @@ MemoryExtractor 单元测试（VV.1）
 
 覆盖：prompt构建、响应解析、LLM调用、fact/trait存储、错误处理
 """
-import pytest
+
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.modules.agent.memory_extractor import (
     MemoryExtractor,
-    MEMORY_EXTRACTION_PROMPT,
 )
 
-
 # ==================== Prompt 构建 ====================
+
 
 class TestBuildExtractionPrompt:
     """测试 _build_extraction_prompt"""
@@ -56,7 +57,10 @@ class TestBuildExtractionPrompt:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "这是一张图片的描述"},
-                    {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.com/img.png"},
+                    },
                 ],
             },
         ]
@@ -77,6 +81,7 @@ class TestBuildExtractionPrompt:
 
 
 # ==================== 响应解析 ====================
+
 
 class TestParseResponse:
     """测试 _parse_response"""
@@ -162,6 +167,7 @@ class TestParseResponse:
 
 # ==================== LLM 调用 ====================
 
+
 class TestCallLLM:
     """测试 _call_llm"""
 
@@ -203,13 +209,16 @@ class TestCallLLM:
 
 # ==================== 主流程 ====================
 
+
 class TestExtractAndStore:
     """测试 extract_and_store 主入口"""
 
     @pytest.mark.asyncio
     async def test_disabled_returns_none(self):
         extractor = MemoryExtractor(enabled=False)
-        result = await extractor.extract_and_store([{"role": "user", "content": "test"}])
+        result = await extractor.extract_and_store(
+            [{"role": "user", "content": "test"}]
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -221,7 +230,9 @@ class TestExtractAndStore:
     @pytest.mark.asyncio
     async def test_no_llm_provider_returns_none(self):
         extractor = MemoryExtractor(enabled=True, llm_provider=None)
-        result = await extractor.extract_and_store([{"role": "user", "content": "test"}])
+        result = await extractor.extract_and_store(
+            [{"role": "user", "content": "test"}]
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -230,7 +241,9 @@ class TestExtractAndStore:
         mock_provider = MagicMock()
 
         async def mock_stream(messages=None, model=None):
-            yield {"content": "---FACTS---\n用户使用 Python；项目名为 PioneClaw\n---TRAITS---\n{\"preferred_language\": \"Python\"}"}
+            yield {
+                "content": '---FACTS---\n用户使用 Python；项目名为 PioneClaw\n---TRAITS---\n{"preferred_language": "Python"}'
+            }
 
         mock_provider.chat_stream = mock_stream
         extractor = MemoryExtractor(
@@ -240,15 +253,20 @@ class TestExtractAndStore:
             session_id="test-session",
         )
 
-        with patch.object(extractor, '_store_facts', new_callable=AsyncMock) as mock_facts, \
-             patch.object(extractor, '_store_traits', new_callable=AsyncMock) as mock_traits:
-
+        with (
+            patch.object(
+                extractor, "_store_facts", new_callable=AsyncMock
+            ) as mock_facts,
+            patch.object(
+                extractor, "_store_traits", new_callable=AsyncMock
+            ) as mock_traits,
+        ):
             mock_facts.return_value = 2
             mock_traits.return_value = 1
 
-            result = await extractor.extract_and_store([
-                {"role": "user", "content": "项目名叫 PioneClaw，使用 Python 开发"}
-            ])
+            result = await extractor.extract_and_store(
+                [{"role": "user", "content": "项目名叫 PioneClaw，使用 Python 开发"}]
+            )
 
             assert result is not None
             assert "2" in result
@@ -261,7 +279,9 @@ class TestExtractAndStore:
         mock_provider = MagicMock()
 
         async def mock_stream(messages=None, model=None):
-            yield {"content": "---FACTS---\n重要记忆A；重要记忆B\n---TRAITS---\n{\"skill_level\": \"senior\"}"}
+            yield {
+                "content": '---FACTS---\n重要记忆A；重要记忆B\n---TRAITS---\n{"skill_level": "senior"}'
+            }
 
         mock_provider.chat_stream = mock_stream
         extractor = MemoryExtractor(
@@ -271,9 +291,14 @@ class TestExtractAndStore:
             agent_id=7,
         )
 
-        with patch.object(extractor, '_store_facts', new_callable=AsyncMock) as mock_facts, \
-             patch.object(extractor, '_store_traits', new_callable=AsyncMock) as mock_traits:
-
+        with (
+            patch.object(
+                extractor, "_store_facts", new_callable=AsyncMock
+            ) as mock_facts,
+            patch.object(
+                extractor, "_store_traits", new_callable=AsyncMock
+            ) as mock_traits,
+        ):
             mock_facts.return_value = 2
             mock_traits.return_value = 1
 
@@ -293,9 +318,12 @@ class TestExtractAndStore:
         mock_provider.chat_stream = mock_stream
         extractor = MemoryExtractor(llm_provider=mock_provider)
 
-        with patch.object(extractor, '_store_facts', new_callable=AsyncMock) as mock_facts, \
-             patch.object(extractor, '_store_traits', new_callable=AsyncMock) as mock_traits:
-
+        with (
+            patch.object(
+                extractor, "_store_facts", new_callable=AsyncMock
+            ) as mock_facts,
+            patch.object(extractor, "_store_traits", new_callable=AsyncMock),
+        ):
             mock_facts.return_value = 0
 
             await extractor.extract_and_store([{"role": "user", "content": "hello"}])
@@ -310,11 +338,14 @@ class TestExtractAndStore:
         mock_provider.chat_stream = MagicMock(side_effect=Exception("API error"))
         extractor = MemoryExtractor(llm_provider=mock_provider)
 
-        result = await extractor.extract_and_store([{"role": "user", "content": "test"}])
+        result = await extractor.extract_and_store(
+            [{"role": "user", "content": "test"}]
+        )
         assert result is None  # 应该优雅降级
 
 
 # ==================== Traits 去重 ====================
+
 
 class TestStoreTraitsDedup:
     """验证 traits 存储逻辑"""
@@ -322,7 +353,7 @@ class TestStoreTraitsDedup:
     def test_empty_traits_not_stored(self):
         extractor = MemoryExtractor()
 
-        with patch.object(extractor, '_store_traits', new_callable=AsyncMock) as mock_traits:
+        with patch.object(extractor, "_store_traits", new_callable=AsyncMock):
             # empty traits 不应调用存储
             pass
 

@@ -1,13 +1,16 @@
 """
 LLM 用量统计 API
 """
-from datetime import datetime, timezone, timedelta
+
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core import get_db
-from app.models import User, ApiUsage
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
+from app.models import ApiUsage, User
 
 router = APIRouter(prefix="/llm", tags=["LLM用量"])
 
@@ -45,7 +48,10 @@ async def llm_usage_summary(
         .group_by(User.username)
         .order_by(func.sum(ApiUsage.total_tokens).desc())
     )
-    user_stats = [{"username": r.username, "calls": r.calls, "tokens": r.tokens} for r in by_user.all()]
+    user_stats = [
+        {"username": r.username, "calls": r.calls, "tokens": r.tokens}
+        for r in by_user.all()
+    ]
 
     # 按模型
     by_model = await db.execute(
@@ -58,7 +64,9 @@ async def llm_usage_summary(
         .group_by(ApiUsage.model)
         .order_by(func.sum(ApiUsage.total_tokens).desc())
     )
-    model_stats = [{"model": r.model, "calls": r.calls, "tokens": r.tokens} for r in by_model.all()]
+    model_stats = [
+        {"model": r.model, "calls": r.calls, "tokens": r.tokens} for r in by_model.all()
+    ]
 
     return {
         "period": "24h",
@@ -85,12 +93,18 @@ async def llm_usage_logs(
         query = query.where(ApiUsage.user_id == user_id)
     result = await db.execute(query)
     logs = result.scalars().all()
-    return [{
-        "id": l.id, "user_id": l.user_id, "model": l.model,
-        "total_tokens": l.total_tokens, "duration_ms": l.duration_ms,
-        "is_success": l.is_success,
-        "created_at": l.created_at.isoformat(),
-    } for l in logs]
+    return [
+        {
+            "id": log.id,
+            "user_id": log.user_id,
+            "model": log.model,
+            "total_tokens": log.total_tokens,
+            "duration_ms": log.duration_ms,
+            "is_success": log.is_success,
+            "created_at": log.created_at.isoformat(),
+        }
+        for log in logs
+    ]
 
 
 @router.get("/usage/hourly")
@@ -109,11 +123,15 @@ async def llm_usage_hourly(
             func.coalesce(func.sum(ApiUsage.total_tokens), 0).label("tokens"),
         )
         .where(ApiUsage.created_at >= day_ago)
-        .group_by("hour").order_by("hour")
+        .group_by("hour")
+        .order_by("hour")
     )
     hourly_map = {r.hour: {"calls": r.calls, "tokens": r.tokens} for r in result.all()}
     return [
-        {"hour": f"{h:02d}", "calls": hourly_map.get(f"{h:02d}", {}).get("calls", 0),
-         "tokens": hourly_map.get(f"{h:02d}", {}).get("tokens", 0)}
+        {
+            "hour": f"{h:02d}",
+            "calls": hourly_map.get(f"{h:02d}", {}).get("calls", 0),
+            "tokens": hourly_map.get(f"{h:02d}", {}).get("tokens", 0),
+        }
         for h in range(24)
     ]

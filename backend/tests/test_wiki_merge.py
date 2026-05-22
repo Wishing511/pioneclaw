@@ -4,22 +4,26 @@ Wiki 合并测试
 测试 Wiki 语义搜索、分块、索引功能
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.models import User, Wiki
-from app.main import app
 from app.core.database import get_db
+from app.main import app
+from app.models import User, Wiki
 from tests.conftest import auth_headers
 
 
 @pytest_asyncio.fixture
 async def wiki_client(db_engine):
     """HTTP 测试客户端"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-    session_maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    session_maker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async def override_get_db():
         async with session_maker() as session:
@@ -52,8 +56,11 @@ async def test_wiki(db_session, test_admin: User) -> Wiki:
 @pytest_asyncio.fixture
 async def admin_wiki_client(db_engine):
     """HTTP 测试客户端（管理员权限）"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-    session_maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    session_maker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async def override_get_db():
         async with session_maker() as session:
@@ -70,13 +77,17 @@ class TestWikiSemanticSearch:
     """测试 Wiki 语义搜索"""
 
     @pytest.mark.asyncio
-    async def test_semantic_search_success(self, wiki_client: AsyncClient, test_user: User, test_wiki: Wiki):
+    async def test_semantic_search_success(
+        self, wiki_client: AsyncClient, test_user: User, test_wiki: Wiki
+    ):
         """测试语义搜索成功"""
         with patch("app.modules.agent.vector_store.VectorStore") as mock_store_class:
             mock_store = MagicMock()
-            mock_store.search = AsyncMock(return_value=[
-                {"source_id": test_wiki.id, "content": "测试内容", "score": 0.9}
-            ])
+            mock_store.search = AsyncMock(
+                return_value=[
+                    {"source_id": test_wiki.id, "content": "测试内容", "score": 0.9}
+                ]
+            )
             mock_store_class.return_value = mock_store
 
             response = await wiki_client.post(
@@ -91,9 +102,14 @@ class TestWikiSemanticSearch:
         assert "total" in data
 
     @pytest.mark.asyncio
-    async def test_semantic_search_fallback(self, wiki_client: AsyncClient, test_user: User, test_wiki: Wiki):
+    async def test_semantic_search_fallback(
+        self, wiki_client: AsyncClient, test_user: User, test_wiki: Wiki
+    ):
         """测试语义搜索降级到关键词搜索"""
-        with patch("app.modules.agent.vector_store.VectorStore", side_effect=Exception("Vector store error")):
+        with patch(
+            "app.modules.agent.vector_store.VectorStore",
+            side_effect=Exception("Vector store error"),
+        ):
             response = await wiki_client.post(
                 "/api/wiki/search/semantic",
                 json={"query": "测试", "top_k": 10},
@@ -118,7 +134,9 @@ class TestWikiChunking:
     """测试 Wiki 分块"""
 
     @pytest.mark.asyncio
-    async def test_chunk_wiki_success(self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki):
+    async def test_chunk_wiki_success(
+        self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki
+    ):
         """测试分块成功"""
         response = await admin_wiki_client.post(
             f"/api/wiki/{test_wiki.id}/chunks",
@@ -134,7 +152,9 @@ class TestWikiChunking:
         assert isinstance(data["chunks"], list)
 
     @pytest.mark.asyncio
-    async def test_chunk_wiki_not_found(self, admin_wiki_client: AsyncClient, test_admin: User):
+    async def test_chunk_wiki_not_found(
+        self, admin_wiki_client: AsyncClient, test_admin: User
+    ):
         """测试分块不存在的 Wiki"""
         response = await admin_wiki_client.post(
             "/api/wiki/nonexistent/chunks",
@@ -149,7 +169,9 @@ class TestWikiIndexing:
     """测试 Wiki 索引"""
 
     @pytest.mark.asyncio
-    async def test_index_to_vector_store(self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki):
+    async def test_index_to_vector_store(
+        self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki
+    ):
         """测试索引到向量库"""
         # 这个测试需要实际的向量存储，我们跳过 mock
         # 因为 VectorStore 的初始化逻辑复杂
@@ -157,7 +179,9 @@ class TestWikiIndexing:
         pytest.skip("需要实际向量存储支持")
 
     @pytest.mark.asyncio
-    async def test_remove_from_index(self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki):
+    async def test_remove_from_index(
+        self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki
+    ):
         """测试从向量库移除"""
         pytest.skip("需要实际向量存储支持")
 
@@ -166,15 +190,19 @@ class TestWikiGraphIndexing:
     """测试 Wiki 知识图谱索引"""
 
     @pytest.mark.asyncio
-    async def test_index_to_graph(self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki):
+    async def test_index_to_graph(
+        self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki
+    ):
         """测试索引到知识图谱"""
         with patch("app.modules.graph_rag.GraphRAGClient") as mock_client_class:
             mock_client = MagicMock()
-            mock_client.index_document = AsyncMock(return_value={
-                "success": True,
-                "message": "索引成功",
-                "doc_id": test_wiki.id,
-            })
+            mock_client.index_document = AsyncMock(
+                return_value={
+                    "success": True,
+                    "message": "索引成功",
+                    "doc_id": test_wiki.id,
+                }
+            )
             mock_client_class.return_value = mock_client
 
             response = await admin_wiki_client.post(
@@ -187,7 +215,9 @@ class TestWikiGraphIndexing:
         assert data["success"] is True
 
     @pytest.mark.asyncio
-    async def test_index_to_graph_failure(self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki):
+    async def test_index_to_graph_failure(
+        self, admin_wiki_client: AsyncClient, test_admin: User, test_wiki: Wiki
+    ):
         """测试图谱索引失败"""
         with patch("app.modules.graph_rag.GraphRAGClient") as mock_client_class:
             mock_client = MagicMock()
@@ -206,7 +236,9 @@ class TestKnowledgeAPIDeprecated:
     """测试 Knowledge API 废弃"""
 
     @pytest.mark.asyncio
-    async def test_knowledge_api_returns_410(self, admin_wiki_client: AsyncClient, test_admin: User):
+    async def test_knowledge_api_returns_410(
+        self, admin_wiki_client: AsyncClient, test_admin: User
+    ):
         """测试 Knowledge API 返回 410 Gone"""
         response = await admin_wiki_client.get(
             "/api/knowledge-bases/",
@@ -216,7 +248,9 @@ class TestKnowledgeAPIDeprecated:
         assert response.status_code == 410
 
     @pytest.mark.asyncio
-    async def test_knowledge_api_post_returns_410(self, admin_wiki_client: AsyncClient, test_admin: User):
+    async def test_knowledge_api_post_returns_410(
+        self, admin_wiki_client: AsyncClient, test_admin: User
+    ):
         """测试 POST 请求返回 410"""
         response = await admin_wiki_client.post(
             "/api/knowledge-bases/",
@@ -227,7 +261,9 @@ class TestKnowledgeAPIDeprecated:
         assert response.status_code == 410
 
     @pytest.mark.asyncio
-    async def test_knowledge_api_includes_migration_info(self, admin_wiki_client: AsyncClient, test_admin: User):
+    async def test_knowledge_api_includes_migration_info(
+        self, admin_wiki_client: AsyncClient, test_admin: User
+    ):
         """测试返回迁移信息"""
         response = await admin_wiki_client.get(
             "/api/knowledge-bases/",

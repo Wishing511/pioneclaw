@@ -12,7 +12,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class ImageProvider(str, Enum):
     """图片生成提供商"""
+
     OPENAI = "openai"
     MINIMAX = "minimax"
     STABILITY = "stability"
@@ -28,11 +29,12 @@ class ImageProvider(str, Enum):
 @dataclass
 class ImageGenerationResult:
     """图片生成结果"""
+
     success: bool
-    image_url: Optional[str] = None
-    image_base64: Optional[str] = None
-    revised_prompt: Optional[str] = None
-    error: Optional[str] = None
+    image_url: str | None = None
+    image_base64: str | None = None
+    revised_prompt: str | None = None
+    error: str | None = None
 
 
 class BaseImageGenerator(ABC):
@@ -53,7 +55,7 @@ class BaseImageGenerator(ABC):
 class OpenAIImageGenerator(BaseImageGenerator):
     """OpenAI DALL-E 图片生成器"""
 
-    def __init__(self, api_key: str, base_url: Optional[str] = None):
+    def __init__(self, api_key: str, base_url: str | None = None):
         self.api_key = api_key
         self.base_url = base_url or "https://api.openai.com/v1"
 
@@ -96,14 +98,16 @@ class OpenAIImageGenerator(BaseImageGenerator):
                             image_base64=first_image.get("b64_json"),
                             revised_prompt=first_image.get("revised_prompt"),
                         )
-                    return ImageGenerationResult(success=False, error="No image returned")
+                    return ImageGenerationResult(
+                        success=False, error="No image returned"
+                    )
                 else:
                     error_msg = response.text
                     try:
                         error_json = response.json()
                         if "error" in error_json:
                             error_msg = error_json["error"].get("message", error_msg)
-                    except:
+                    except Exception:
                         pass
                     return ImageGenerationResult(success=False, error=error_msg)
 
@@ -115,7 +119,7 @@ class OpenAIImageGenerator(BaseImageGenerator):
 class MiniMaxImageGenerator(BaseImageGenerator):
     """MiniMax 图片生成器"""
 
-    def __init__(self, api_key: str, group_id: str, base_url: Optional[str] = None):
+    def __init__(self, api_key: str, group_id: str, base_url: str | None = None):
         self.api_key = api_key
         self.group_id = group_id
         self.base_url = base_url or "https://api.minimax.chat/v1"
@@ -160,7 +164,9 @@ class MiniMaxImageGenerator(BaseImageGenerator):
                             success=True,
                             image_base64=base64_image,
                         )
-                    return ImageGenerationResult(success=False, error="No image returned")
+                    return ImageGenerationResult(
+                        success=False, error="No image returned"
+                    )
                 else:
                     return ImageGenerationResult(success=False, error=response.text)
 
@@ -179,12 +185,12 @@ class ImageGenerator:
     def __init__(
         self,
         provider: ImageProvider = ImageProvider.OPENAI,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        group_id: Optional[str] = None,  # MiniMax 需要
+        api_key: str | None = None,
+        base_url: str | None = None,
+        group_id: str | None = None,  # MiniMax 需要
     ):
         self.provider = provider
-        self._generator: Optional[BaseImageGenerator] = None
+        self._generator: BaseImageGenerator | None = None
         self.api_key = api_key
         self.base_url = base_url
         self.group_id = group_id
@@ -277,6 +283,8 @@ class ImageGenerator:
                             )
                 logger.info(f"Image saved to {output_path}")
             except Exception as e:
-                return ImageGenerationResult(success=False, error=f"Failed to save image: {e}")
+                return ImageGenerationResult(
+                    success=False, error=f"Failed to save image: {e}"
+                )
 
         return result

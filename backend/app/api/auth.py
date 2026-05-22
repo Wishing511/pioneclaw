@@ -1,23 +1,37 @@
-from datetime import timedelta, datetime, timezone
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core import (
-    settings, get_db, verify_password, get_password_hash,
-    create_access_token, create_refresh_token, decode_access_token, decode_refresh_token,
-    create_reset_token, decode_reset_token, validate_password_strength,
+    create_access_token,
+    create_refresh_token,
+    create_reset_token,
+    decode_access_token,
+    decode_refresh_token,
+    decode_reset_token,
+    get_db,
+    get_password_hash,
+    settings,
+    validate_password_strength,
+    verify_password,
 )
 from app.core.config import settings as config
 from app.core.rate_limit import RateLimit
-from app.models import User, UserRole, Organization
+from app.models import Organization, User, UserRole
 from app.schemas import (
-    UserCreate, UserResponse, UserLogin,
-    RefreshTokenRequest, ProfileUpdateRequest,
-    ChangePasswordRequest, PasswordResetRequest, PasswordResetConfirmRequest,
-    Token, MessageResponse,
+    ChangePasswordRequest,
+    MessageResponse,
+    PasswordResetConfirmRequest,
+    PasswordResetRequest,
+    ProfileUpdateRequest,
+    RefreshTokenRequest,
+    UserCreate,
+    UserLogin,
+    UserResponse,
 )
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -26,8 +40,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_PREFIX}/auth/login
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db)
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
 ) -> User:
     """获取当前登录用户"""
     credentials_exception = HTTPException(
@@ -52,23 +65,27 @@ async def get_current_user(
         raise HTTPException(status_code=400, detail="用户已被禁用")
 
     # 检查账户锁定（strip tzinfo 以兼容 SQLite 存储的无时区 datetime）
-    if user.locked_until and user.locked_until.replace(tzinfo=None) > datetime.now(timezone.utc).replace(tzinfo=None):
+    if user.locked_until and user.locked_until.replace(tzinfo=None) > datetime.now(
+        timezone.utc
+    ).replace(tzinfo=None):
         raise HTTPException(
             status_code=423,
-            detail=f"账户已锁定，请于 {user.locked_until.strftime('%H:%M')} 后重试"
+            detail=f"账户已锁定，请于 {user.locked_until.strftime('%H:%M')} 后重试",
         )
 
     return user
 
 
 async def get_current_active_user(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ) -> User:
     """获取当前活跃用户"""
     return current_user
 
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED
+)
 async def register(
     user_data: UserCreate,
     db: AsyncSession = Depends(get_db),
@@ -148,10 +165,12 @@ async def login(
         )
 
     # 检查账户锁定（strip tzinfo 以兼容 SQLite 存储的无时区 datetime）
-    if user.locked_until and user.locked_until.replace(tzinfo=None) > datetime.now(timezone.utc).replace(tzinfo=None):
+    if user.locked_until and user.locked_until.replace(tzinfo=None) > datetime.now(
+        timezone.utc
+    ).replace(tzinfo=None):
         raise HTTPException(
             status_code=423,
-            detail=f"账户已锁定，请于 {user.locked_until.strftime('%H:%M')} 后重试"
+            detail=f"账户已锁定，请于 {user.locked_until.strftime('%H:%M')} 后重试",
         )
 
     if not verify_password(password, user.hashed_password):
@@ -160,11 +179,13 @@ async def login(
 
         # 超过最大尝试次数则锁定
         if user.failed_login_attempts >= config.MAX_LOGIN_ATTEMPTS:
-            user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=config.LOCKOUT_DURATION_MINUTES)
+            user.locked_until = datetime.now(timezone.utc) + timedelta(
+                minutes=config.LOCKOUT_DURATION_MINUTES
+            )
             await db.commit()
             raise HTTPException(
                 status_code=423,
-                detail=f"登录失败次数过多，账户已锁定 {config.LOCKOUT_DURATION_MINUTES} 分钟"
+                detail=f"登录失败次数过多，账户已锁定 {config.LOCKOUT_DURATION_MINUTES} 分钟",
             )
 
         await db.commit()
@@ -211,7 +232,7 @@ async def login(
 @router.post("/refresh-token")
 async def refresh_token(
     req: Request,
-    body: Optional[RefreshTokenRequest] = None,
+    body: RefreshTokenRequest | None = None,
     db: AsyncSession = Depends(get_db),
     _rate: None = Depends(RateLimit(times=20, seconds=60)),
 ):
@@ -259,9 +280,7 @@ async def refresh_token(
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(
-    current_user: User = Depends(get_current_active_user)
-):
+async def logout(current_user: User = Depends(get_current_active_user)):
     """用户登出"""
     response = JSONResponse(content={"message": "登出成功"})
     response.delete_cookie(key="refresh_token", path="/api/auth")
@@ -275,6 +294,7 @@ async def get_me(
 ):
     """获取当前用户信息"""
     from app.core.permissions import get_user_permission_codes
+
     user_data = UserResponse.model_validate(current_user)
     user_data.permissions = await get_user_permission_codes(current_user, db)
     return user_data
@@ -284,7 +304,7 @@ async def get_me(
 async def update_profile(
     profile_data: ProfileUpdateRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新用户资料"""
     if profile_data.display_name is not None:
@@ -307,7 +327,7 @@ async def update_profile(
 async def change_password(
     password_data: ChangePasswordRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """修改密码"""
     old_password = password_data.old_password
@@ -349,18 +369,21 @@ async def request_password_reset(
     )
 
     # 发送重置邮件
-    from app.core.email import send_email, build_password_reset_email
+    from app.core.email import build_password_reset_email, send_email
 
     reset_link = f"{config.FRONTEND_URL}/reset-password?token={reset_token}"
     subject, html_body, text_body = build_password_reset_email(
         reset_link=reset_link,
         username=user.display_name or user.username,
     )
-    sent = await send_email(to=user.email, subject=subject, html_body=html_body, text_body=text_body)
+    sent = await send_email(
+        to=user.email, subject=subject, html_body=html_body, text_body=text_body
+    )
 
     if not sent:
         # 开发模式：SMTP 未配置时打印到日志
         import logging
+
         _logger = logging.getLogger(__name__)
         _logger.info(f"[DEV] 密码重置链接: {reset_link}")
 
@@ -400,8 +423,6 @@ async def confirm_password_reset(
 
 
 @router.get("/validate-token")
-async def validate_token(
-    current_user: User = Depends(get_current_active_user)
-):
+async def validate_token(current_user: User = Depends(get_current_active_user)):
     """验证令牌是否有效"""
     return {"valid": True, "user_id": current_user.id}

@@ -9,7 +9,6 @@ ConfigTool — Agent 读写系统配置
 
 import json
 import logging
-from typing import Optional
 
 from app.modules.tools.base import BaseTool, ToolParameter
 
@@ -20,9 +19,9 @@ _SECURITY_CATEGORY = "security"
 
 # 写入黑名单：敏感项不允许 Agent 修改
 _WRITE_BLACKLIST = {
-    "token_expiry",       # Token 有效期
-    "smtp_pass",          # 邮箱密码
-    "multi_login",        # 多端登录策略
+    "token_expiry",  # Token 有效期
+    "smtp_pass",  # 邮箱密码
+    "multi_login",  # 多端登录策略
 }
 
 # 读取黑名单：不允许 Agent 读取敏感环境变量
@@ -65,8 +64,9 @@ class ConfigTool(BaseTool):
     }
     required = ["action"]
 
-    async def execute(self, action: str, key: str = "", value: str = "",
-                      category: str = "", **kwargs) -> str:
+    async def execute(
+        self, action: str, key: str = "", value: str = "", category: str = "", **kwargs
+    ) -> str:
         try:
             if action == "list":
                 return await self._handle_list(category)
@@ -75,18 +75,22 @@ class ConfigTool(BaseTool):
             elif action == "set":
                 return await self._handle_set(key, value)
             else:
-                return json.dumps({
-                    "success": False,
-                    "error": f"未知操作: '{action}'。支持的操作: list, get, set",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"未知操作: '{action}'。支持的操作: list, get, set",
+                    },
+                    ensure_ascii=False,
+                )
         except Exception as e:
             logger.error(f"ConfigTool execution error: {e}")
             return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
     async def _handle_list(self, category: str) -> str:
         """列出配置项"""
-        from app.core.database import async_session_maker
         from sqlalchemy import select
+
+        from app.core.database import async_session_maker
         from app.models.models import SystemSetting
 
         async with async_session_maker() as session:
@@ -100,36 +104,48 @@ class ConfigTool(BaseTool):
         for s in settings:
             if s.key in _READ_BLACKLIST:
                 continue
-            items.append({
-                "key": s.key,
-                "value": s.value,
-                "category": s.category,
-                "description": s.description or "",
-            })
+            items.append(
+                {
+                    "key": s.key,
+                    "value": s.value,
+                    "category": s.category,
+                    "description": s.description or "",
+                }
+            )
 
-        return json.dumps({
-            "success": True,
-            "settings": items,
-            "total": len(items),
-            "category_filter": category or "all",
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": True,
+                "settings": items,
+                "total": len(items),
+                "category_filter": category or "all",
+            },
+            ensure_ascii=False,
+        )
 
     async def _handle_get(self, key: str) -> str:
         """读取单个配置项"""
         if not key or not key.strip():
-            return json.dumps({
-                "success": False,
-                "error": "get 操作需要提供 key 参数",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "get 操作需要提供 key 参数",
+                },
+                ensure_ascii=False,
+            )
 
         if key in _READ_BLACKLIST:
-            return json.dumps({
-                "success": False,
-                "error": f"不允许读取配置项: '{key}'",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"不允许读取配置项: '{key}'",
+                },
+                ensure_ascii=False,
+            )
+
+        from sqlalchemy import select
 
         from app.core.database import async_session_maker
-        from sqlalchemy import select
         from app.models.models import SystemSetting
 
         async with async_session_maker() as session:
@@ -139,38 +155,51 @@ class ConfigTool(BaseTool):
             setting = result.scalar_one_or_none()
 
         if not setting:
-            return json.dumps({
-                "success": False,
-                "error": f"配置项不存在: '{key}'",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"配置项不存在: '{key}'",
+                },
+                ensure_ascii=False,
+            )
 
-        return json.dumps({
-            "success": True,
-            "key": setting.key,
-            "value": setting.value,
-            "category": setting.category,
-            "description": setting.description or "",
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": True,
+                "key": setting.key,
+                "value": setting.value,
+                "category": setting.category,
+                "description": setting.description or "",
+            },
+            ensure_ascii=False,
+        )
 
     async def _handle_set(self, key: str, value: str) -> str:
         """修改配置项（security 类需确认）"""
         if not key or not key.strip():
-            return json.dumps({
-                "success": False,
-                "error": "set 操作需要提供 key 参数",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "set 操作需要提供 key 参数",
+                },
+                ensure_ascii=False,
+            )
 
         key = key.strip()
 
         if key in _WRITE_BLACKLIST:
-            return json.dumps({
-                "success": False,
-                "error": f"不允许修改敏感配置项: '{key}'",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"不允许修改敏感配置项: '{key}'",
+                },
+                ensure_ascii=False,
+            )
 
         # 查询当前值
-        from app.core.database import async_session_maker
         from sqlalchemy import select
+
+        from app.core.database import async_session_maker
         from app.models.models import SystemSetting
 
         async with async_session_maker() as session:
@@ -185,24 +214,32 @@ class ConfigTool(BaseTool):
 
         # 值相同，无需修改
         if current_value == value:
-            return json.dumps({
-                "success": True,
-                "message": f"配置项 '{key}' 的值已经是 '{value}'，无需修改",
-                "key": key,
-                "value": value,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "message": f"配置项 '{key}' 的值已经是 '{value}'，无需修改",
+                    "key": key,
+                    "value": value,
+                },
+                ensure_ascii=False,
+            )
 
         # security 类需要用户确认
         if current_category == _SECURITY_CATEGORY:
-            confirmed = await self._confirm_change(key, current_value, value, current_desc)
+            confirmed = await self._confirm_change(
+                key, current_value, value, current_desc
+            )
             if not confirmed:
-                return json.dumps({
-                    "success": False,
-                    "error": "用户拒绝了配置变更",
-                    "key": key,
-                    "old_value": current_value,
-                    "rejected_value": value,
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "用户拒绝了配置变更",
+                        "key": key,
+                        "old_value": current_value,
+                        "rejected_value": value,
+                    },
+                    ensure_ascii=False,
+                )
 
         # 写入 DB
         async with async_session_maker() as session:
@@ -215,28 +252,36 @@ class ConfigTool(BaseTool):
                 setting.value = value
             else:
                 setting = SystemSetting(
-                    key=key, value=value, category="custom",
+                    key=key,
+                    value=value,
+                    category="custom",
                     description="Agent 自定义配置",
                 )
                 session.add(setting)
 
             await session.commit()
 
-        return json.dumps({
-            "success": True,
-            "key": key,
-            "old_value": current_value,
-            "new_value": value,
-            "category": current_category,
-            "message": f"配置项 '{key}' 已从 '{current_value}' 修改为 '{value}'",
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": True,
+                "key": key,
+                "old_value": current_value,
+                "new_value": value,
+                "category": current_category,
+                "message": f"配置项 '{key}' 已从 '{current_value}' 修改为 '{value}'",
+            },
+            ensure_ascii=False,
+        )
 
-    async def _confirm_change(self, key: str, old_value: Optional[str],
-                               new_value: str, description: str) -> bool:
+    async def _confirm_change(
+        self, key: str, old_value: str | None, new_value: str, description: str
+    ) -> bool:
         """通过 InterruptManager 让用户确认安全类配置变更"""
         try:
             from app.modules.agent.interrupt import (
-                get_interrupt_manager, InterruptReason, InterruptOption,
+                InterruptOption,
+                InterruptReason,
+                get_interrupt_manager,
             )
 
             manager = get_interrupt_manager()
@@ -270,11 +315,16 @@ class ConfigTool(BaseTool):
                 message=message,
                 options=options,
                 ttl=300,
-                details={"config_key": key, "old_value": old_value, "new_value": new_value},
+                details={
+                    "config_key": key,
+                    "old_value": old_value,
+                    "new_value": new_value,
+                },
             )
 
             # 轮询等待用户响应（最多 300 秒）
             import asyncio
+
             timeout = 300
             elapsed = 0.0
             interval = 2.0

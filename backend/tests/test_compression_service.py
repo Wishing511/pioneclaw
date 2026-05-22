@@ -8,15 +8,16 @@ Test ContextCompressionService fixes from PR #3 review
 4. FileTracker get_recent 跳过超大文件继续尝试后续
 5. CompressionService _rebuild_after_compact 恢复 FileTracker 记录
 """
+
 import pytest
-from unittest.mock import AsyncMock
 
-from app.modules.agent.compression_service import ContextCompressionService, CompressionReport
-from app.modules.agent.compactor import Compactor, CompactionConfig, CompactionResult
+from app.modules.agent.compactor import CompactionConfig, CompactionResult, Compactor
+from app.modules.agent.compression_service import (
+    ContextCompressionService,
+)
 from app.modules.agent.context_pruner import ContextPruner
-from app.modules.agent.token_budget import TokenBudget
 from app.modules.agent.file_tracker import FileTracker
-
+from app.modules.agent.token_budget import TokenBudget
 
 # --- Compactor._call_llm chat_stream 支持 ---
 
@@ -89,7 +90,10 @@ async def test_compactor_force_bypasses_should_compact():
         llm_client=provider,
     )
     # 只有 2 条消息，远未达阈值
-    messages = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
 
     # force=False 不压缩
     result_normal = await compactor.compact(messages, force=False)
@@ -106,12 +110,14 @@ async def test_compactor_force_bypasses_should_compact():
 
 class FakeProviderWithStaleTokens:
     """模拟 provider.last_input_tokens 滞后的情况"""
+
     last_input_tokens = 100
     last_output_tokens = 20
 
 
 class FakeProviderNoTokens:
     """模拟 provider 无 token 记录"""
+
     last_input_tokens = 0
     last_output_tokens = 0
 
@@ -181,7 +187,9 @@ async def test_rebuild_after_compact_restores_files():
     """P2: service 主路径压缩后包含 restored files"""
     budget = TokenBudget(context_window=200_000)
     tracker = FileTracker(max_files=5, max_tokens=50_000)
-    tracker.record_access(path="/app/main.py", content="def main(): pass", was_edited=True)
+    tracker.record_access(
+        path="/app/main.py", content="def main(): pass", was_edited=True
+    )
 
     service = ContextCompressionService(
         budget=budget,
@@ -209,7 +217,11 @@ async def test_rebuild_after_compact_restores_files():
     assert "user" in roles
 
     # 找到 restored files 消息
-    restored_msgs = [m for m in rebuilt if m.get("role") == "system" and "Restored files" in m.get("content", "")]
+    restored_msgs = [
+        m
+        for m in rebuilt
+        if m.get("role") == "system" and "Restored files" in m.get("content", "")
+    ]
     assert len(restored_msgs) == 1
     assert "/app/main.py" in restored_msgs[0]["content"]
 
@@ -260,9 +272,14 @@ async def test_manual_compact_uses_force():
     )
 
     messages = [{"role": "user", "content": "hi"}]
-    report, compacted = await service.manual_compact(messages, instruction="keep API design")
+    report, compacted = await service.manual_compact(
+        messages, instruction="keep API design"
+    )
 
     assert report.summary == "manual summary"
     assert report.removed_messages == 1  # keep_recent=0，全部总结
     assert len(compacted) > 0
-    assert any("[Previous conversation summary]" in str(m.get("content", "")) for m in compacted)
+    assert any(
+        "[Previous conversation summary]" in str(m.get("content", ""))
+        for m in compacted
+    )

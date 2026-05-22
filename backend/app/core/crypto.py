@@ -13,7 +13,6 @@ API Key 加密/解密工具
 import base64
 import hashlib
 import logging
-from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 _PLAINTEXT_PREFIX = b"PLAINTEXT:"
 
 
-def _get_fernet() -> Optional[Fernet]:
+def _get_fernet() -> Fernet | None:
     """获取 Fernet 实例。未配置密钥时返回 None（透传模式）。"""
     key = settings.ENCRYPTION_KEY
     if not key:
@@ -61,7 +60,7 @@ def decrypt(ciphertext: str) -> str:
     encoded = ciphertext.encode("utf-8")
     # 明文透传（开发模式或迁移期数据）
     if encoded.startswith(_PLAINTEXT_PREFIX):
-        return encoded[len(_PLAINTEXT_PREFIX):].decode("utf-8")
+        return encoded[len(_PLAINTEXT_PREFIX) :].decode("utf-8")
     f = _get_fernet()
     if f is None:
         # 未配置密钥但遇到非明文数据 → 可能是旧明文数据，直接返回
@@ -71,5 +70,7 @@ def decrypt(ciphertext: str) -> str:
         return f.decrypt(encoded).decode("utf-8")
     except InvalidToken:
         # 可能是未加密的旧数据，直接返回原文
-        logger.warning("Failed to decrypt — returning value as-is (possibly legacy plaintext)")
+        logger.warning(
+            "Failed to decrypt — returning value as-is (possibly legacy plaintext)"
+        )
         return ciphertext

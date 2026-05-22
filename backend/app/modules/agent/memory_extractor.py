@@ -14,8 +14,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.database import async_session_maker
 
@@ -79,7 +78,7 @@ class MemoryExtractor:
         model: str = "gpt-4",
         user_id: int = 1,
         session_id: str = "",
-        agent_id: Optional[int] = None,
+        agent_id: int | None = None,
         enabled: bool = True,
         memory_store: Any = None,
     ):
@@ -93,8 +92,8 @@ class MemoryExtractor:
 
     async def extract_and_store(
         self,
-        messages: List[Dict[str, Any]],
-    ) -> Optional[str]:
+        messages: list[dict[str, Any]],
+    ) -> str | None:
         """
         主入口：从对话中提取记忆并写入 L2
 
@@ -133,14 +132,16 @@ class MemoryExtractor:
                 await self._store_traits(traits)
 
             if stored_count > 0:
-                logger.info(f"MemoryExtractor: stored {stored_count} facts and {len(traits)} traits")
+                logger.info(
+                    f"MemoryExtractor: stored {stored_count} facts and {len(traits)} traits"
+                )
             return f"{stored_count} facts, {len(traits)} traits"
 
         except Exception as e:
             logger.error(f"MemoryExtractor: extraction failed: {e}", exc_info=True)
             return None
 
-    def _build_extraction_prompt(self, messages: List[Dict[str, Any]]) -> str:
+    def _build_extraction_prompt(self, messages: list[dict[str, Any]]) -> str:
         """将对话消息格式化为提取 prompt"""
         formatted = []
         total_chars = 0
@@ -175,13 +176,13 @@ class MemoryExtractor:
 
         return MEMORY_EXTRACTION_PROMPT.format(messages=conversation_text)
 
-    async def _call_llm(self, prompt: str) -> Optional[str]:
+    async def _call_llm(self, prompt: str) -> str | None:
         """调用 LLM 提取记忆"""
         try:
             messages = [{"role": "user", "content": prompt}]
 
             # 尝试流式调用并收集结果
-            if hasattr(self.llm_provider, 'chat_stream'):
+            if hasattr(self.llm_provider, "chat_stream"):
                 chunks = []
                 async for chunk in self.llm_provider.chat_stream(
                     messages=messages,
@@ -192,13 +193,15 @@ class MemoryExtractor:
                         if content:
                             chunks.append(content)
                 return "".join(chunks).strip()
-            elif hasattr(self.llm_provider, 'chat'):
+            elif hasattr(self.llm_provider, "chat"):
                 response = await self.llm_provider.chat(messages)
                 if isinstance(response, dict):
                     return response.get("content", "").strip()
                 return str(response).strip()
             else:
-                logger.warning("MemoryExtractor: LLM provider has no chat_stream or chat method")
+                logger.warning(
+                    "MemoryExtractor: LLM provider has no chat_stream or chat method"
+                )
                 return None
         except Exception as e:
             logger.error(f"MemoryExtractor: LLM call failed: {e}")
@@ -214,11 +217,13 @@ class MemoryExtractor:
         ---TRAITS---
         {"key": "value"}
         """
-        facts: List[str] = []
+        facts: list[str] = []
         traits: dict = {}
 
         # 解析 facts
-        facts_match = re.search(r'---FACTS---\s*\n?(.*?)(?=---TRAITS---|---|$)', text, re.DOTALL)
+        facts_match = re.search(
+            r"---FACTS---\s*\n?(.*?)(?=---TRAITS---|---|$)", text, re.DOTALL
+        )
         if facts_match:
             facts_text = facts_match.group(1).strip()
             if facts_text and "无需记录" not in facts_text:
@@ -226,30 +231,38 @@ class MemoryExtractor:
                 facts = [f.strip() for f in facts_text.split("；") if f.strip()]
                 # 也支持换行分隔
                 if len(facts) <= 1:
-                    facts = [f.strip() for f in facts_text.split("\n") if f.strip() and f.strip() != "无需记录"]
+                    facts = [
+                        f.strip()
+                        for f in facts_text.split("\n")
+                        if f.strip() and f.strip() != "无需记录"
+                    ]
 
         # 解析 traits
-        traits_match = re.search(r'---TRAITS---\s*\n?(.*?)$', text, re.DOTALL)
+        traits_match = re.search(r"---TRAITS---\s*\n?(.*?)$", text, re.DOTALL)
         if traits_match:
             traits_text = traits_match.group(1).strip()
             if traits_text and traits_text != "{}":
                 try:
                     # 提取 JSON 对象
-                    json_match = re.search(r'\{[^}]+\}', traits_text)
+                    json_match = re.search(r"\{[^}]+\}", traits_text)
                     if json_match:
                         traits = json.loads(json_match.group(0))
                 except json.JSONDecodeError:
-                    logger.warning(f"MemoryExtractor: failed to parse traits JSON: {traits_text[:100]}")
+                    logger.warning(
+                        f"MemoryExtractor: failed to parse traits JSON: {traits_text[:100]}"
+                    )
 
         return facts, traits
 
-    async def _store_facts(self, facts: List[str]) -> int:
+    async def _store_facts(self, facts: list[str]) -> int:
         """将提取的 facts 写入 L2 + Track 1 (MEMORY.md)"""
         if not facts:
             return 0
 
         try:
-            from app.modules.agent.layered_memory.memory_orchestrator import MemoryOrchestrator
+            from app.modules.agent.layered_memory.memory_orchestrator import (
+                MemoryOrchestrator,
+            )
 
             stored = 0
             async with async_session_maker() as db:
@@ -268,7 +281,9 @@ class MemoryExtractor:
                         )
                         stored += 1
                     except Exception as e:
-                        logger.warning(f"MemoryExtractor: failed to store fact '{fact[:50]}': {e}")
+                        logger.warning(
+                            f"MemoryExtractor: failed to store fact '{fact[:50]}': {e}"
+                        )
                 await db.commit()
 
             # 同时写入 Track 1 (MEMORY.md)
@@ -279,7 +294,9 @@ class MemoryExtractor:
                         source="memory_extractor",
                         content=combined,
                     )
-                    logger.info(f"MemoryExtractor: wrote {len(facts)} facts to MEMORY.md (Track 1)")
+                    logger.info(
+                        f"MemoryExtractor: wrote {len(facts)} facts to MEMORY.md (Track 1)"
+                    )
                 except Exception as e:
                     logger.warning(f"MemoryExtractor: failed to write to Track 1: {e}")
 
@@ -294,7 +311,9 @@ class MemoryExtractor:
             return 0
 
         try:
-            from app.modules.agent.layered_memory.memory_orchestrator import MemoryOrchestrator
+            from app.modules.agent.layered_memory.memory_orchestrator import (
+                MemoryOrchestrator,
+            )
 
             stored = 0
             async with async_session_maker() as db:
@@ -315,7 +334,9 @@ class MemoryExtractor:
                         )
                         stored += 1
                     except Exception as e:
-                        logger.warning(f"MemoryExtractor: failed to store trait '{key}': {e}")
+                        logger.warning(
+                            f"MemoryExtractor: failed to store trait '{key}': {e}"
+                        )
                 await db.commit()
 
             # 同时写入 Track 1 (MEMORY.md)
@@ -326,9 +347,13 @@ class MemoryExtractor:
                             source="memory_extractor",
                             content=f"用户画像 - {key}: {value}",
                         )
-                    logger.info(f"MemoryExtractor: wrote {len(traits)} traits to MEMORY.md (Track 1)")
+                    logger.info(
+                        f"MemoryExtractor: wrote {len(traits)} traits to MEMORY.md (Track 1)"
+                    )
                 except Exception as e:
-                    logger.warning(f"MemoryExtractor: failed to write traits to Track 1: {e}")
+                    logger.warning(
+                        f"MemoryExtractor: failed to write traits to Track 1: {e}"
+                    )
 
             return stored
         except Exception as e:

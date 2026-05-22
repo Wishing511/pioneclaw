@@ -24,7 +24,6 @@ Layer 2 (Post-DNS): DNS 解析后检查解析结果（防止 DNS rebinding）
 import ipaddress
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -39,12 +38,14 @@ class SsrFBlockedError(ValueError):
 
 
 # 借鉴 OpenClaw BLOCKED_HOSTNAMES
-_BLOCKED_HOSTNAMES = frozenset({
-    "localhost",
-    "localhost.localdomain",
-    "metadata.google.internal",  # GCP 元数据端点
-    "169.254.169.254",          # AWS/云 元数据端点（IP 字面量也阻止）
-})
+_BLOCKED_HOSTNAMES = frozenset(
+    {
+        "localhost",
+        "localhost.localdomain",
+        "metadata.google.internal",  # GCP 元数据端点
+        "169.254.169.254",  # AWS/云 元数据端点（IP 字面量也阻止）
+    }
+)
 
 # 借鉴 OpenClaw isBlockedHostnameNormalized: *.localhost / *.local / *.internal
 _BLOCKED_HOSTNAME_SUFFIXES = (".localhost", ".local", ".internal")
@@ -62,6 +63,7 @@ class SsrFPolicy:
         allowed_hostnames: 白名单 hostname 列表（这些 hostname 跳过私有网络检查）
         hostname_allowlist: hostname 通配符白名单（支持 *.example.com 格式）
     """
+
     allow_private_network: bool = False
     dangerously_allow_private_network: bool = False
     allow_rfc2544_benchmark: bool = False
@@ -70,7 +72,7 @@ class SsrFPolicy:
     hostname_allowlist: list[str] = field(default_factory=list)
 
 
-def _is_private_ip(ip_str: str, policy: Optional[SsrFPolicy] = None) -> bool:
+def _is_private_ip(ip_str: str, policy: SsrFPolicy | None = None) -> bool:
     """检查 IP 地址是否为私有/特殊用途地址 —— 借鉴 OpenClaw isPrivateIpAddress
 
     Python 的 ipaddress 模块覆盖了 OpenClaw isBlockedSpecialUseIpv4Address +
@@ -136,10 +138,7 @@ def _is_blocked_ipv4(addr: ipaddress.IPv4Address, policy: SsrFPolicy) -> bool:
         return True
 
     # 保留: 240.0.0.0/4
-    if addr.is_reserved:
-        return True
-
-    return False
+    return bool(addr.is_reserved)
 
 
 def _is_blocked_ipv6(addr: ipaddress.IPv6Address, policy: SsrFPolicy) -> bool:
@@ -165,7 +164,9 @@ def _is_blocked_ipv6(addr: ipaddress.IPv6Address, policy: SsrFPolicy) -> bool:
         return True
 
     # 私有 (Unique Local): fc00::/7
-    if addr.is_private and not (policy.allow_private_network or policy.allow_ipv6_unique_local):
+    if addr.is_private and not (
+        policy.allow_private_network or policy.allow_ipv6_unique_local
+    ):
         return True
 
     # 检查嵌入的 IPv4 地址 —— 借鉴 OpenClaw extractEmbeddedIpv4FromIpv6
@@ -173,10 +174,7 @@ def _is_blocked_ipv6(addr: ipaddress.IPv6Address, policy: SsrFPolicy) -> bool:
         return _is_blocked_ipv4(addr.ipv4_mapped, policy)
 
     # 检查 6to4、Teredo 等（包含在 ipaddress 的 is_reserved 中）
-    if addr.is_reserved:
-        return True
-
-    return False
+    return bool(addr.is_reserved)
 
 
 def _is_blocked_hostname(hostname: str) -> bool:
@@ -224,14 +222,14 @@ def _matches_hostname_allowlist(hostname: str, allowlist: list[str]) -> bool:
     return False
 
 
-def _is_private_network_allowed(policy: Optional[SsrFPolicy]) -> bool:
+def _is_private_network_allowed(policy: SsrFPolicy | None) -> bool:
     """是否允许私有网络 —— 借鉴 OpenClaw isPrivateNetworkAllowedByPolicy"""
     if policy is None:
         return False
     return policy.dangerously_allow_private_network or policy.allow_private_network
 
 
-def _should_skip_private_checks(hostname: str, policy: Optional[SsrFPolicy]) -> bool:
+def _should_skip_private_checks(hostname: str, policy: SsrFPolicy | None) -> bool:
     """是否跳过私有网络检查 —— 借鉴 OpenClaw shouldSkipPrivateNetworkChecks
 
     如果 hostname 在 allowed_hostnames 中，则跳过私有 IP 检查
@@ -239,9 +237,9 @@ def _should_skip_private_checks(hostname: str, policy: Optional[SsrFPolicy]) -> 
     """
     if _is_private_network_allowed(policy):
         return True
-    if policy and hostname.lower() in {h.lower() for h in policy.allowed_hostnames}:
-        return True
-    return False
+    return bool(
+        policy and hostname.lower() in {h.lower() for h in policy.allowed_hostnames}
+    )
 
 
 def _looks_like_ipv4_literal(addr: str) -> bool:
@@ -255,7 +253,7 @@ def _looks_like_ipv4_literal(addr: str) -> bool:
     return all(p.isdigit() or p.lower().startswith("0x") for p in parts)
 
 
-def is_blocked_hostname_or_ip(hostname: str, policy: Optional[SsrFPolicy] = None) -> bool:
+def is_blocked_hostname_or_ip(hostname: str, policy: SsrFPolicy | None = None) -> bool:
     """检查 hostname 或 IP 是否应被阻止 —— 借鉴 OpenClaw isBlockedHostnameOrIp
 
     这是 SSRF 检查的核心入口函数。
@@ -289,7 +287,7 @@ def is_blocked_hostname_or_ip(hostname: str, policy: Optional[SsrFPolicy] = None
     return False
 
 
-def validate_hostname_ssrf(hostname: str, policy: Optional[SsrFPolicy] = None) -> str:
+def validate_hostname_ssrf(hostname: str, policy: SsrFPolicy | None = None) -> str:
     """验证 hostname 是否安全，不通过则抛异常 —— 借鉴 OpenClaw assertHostnameAllowedWithPolicy
 
     Returns:
@@ -319,7 +317,7 @@ def validate_hostname_ssrf(hostname: str, policy: Optional[SsrFPolicy] = None) -
     return normalized
 
 
-def validate_url_ssrf(url: str, policy: Optional[SsrFPolicy] = None) -> str:
+def validate_url_ssrf(url: str, policy: SsrFPolicy | None = None) -> str:
     """验证 URL 是否安全（SSRF 防护） —— 借鉴 OpenClaw fetchWithSsrFGuard 中的检查逻辑
 
     Args:
@@ -349,7 +347,7 @@ def validate_url_ssrf(url: str, policy: Optional[SsrFPolicy] = None) -> str:
     return validate_hostname_ssrf(parsed.hostname, policy)
 
 
-def validate_url_ssrf_or_none(url: str, policy: Optional[SsrFPolicy] = None) -> Optional[str]:
+def validate_url_ssrf_or_none(url: str, policy: SsrFPolicy | None = None) -> str | None:
     """便捷方法：验证 URL，失败返回 SsrFBlockedError 的字符串消息而非抛异常
 
     适应 PioneClaw 工具 execute() 返回字符串错误消息的模式。

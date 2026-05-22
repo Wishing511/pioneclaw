@@ -9,32 +9,31 @@ RetrievalEngine — 层级检索引擎
 """
 
 import math
-from datetime import datetime
-from typing import Optional, List
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from loguru import logger
-from sqlalchemy import select, and_, or_
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.layered_memory import LayeredMemory, MemoryLayer
+from app.models.layered_memory import LayeredMemory
 
 
 @dataclass
 class RetrievalResult:
     """检索结果"""
+
     uri: str
     name: str
     layer: int
     context_type: str
     text: str
     score: float
-    abstract: Optional[str] = None
-    overview: Optional[str] = None
+    abstract: str | None = None
+    overview: str | None = None
     access_count: int = 0
-    source: Optional[str] = None
-    updated_at: Optional[str] = None
-    parent_uri: Optional[str] = None
+    source: str | None = None
+    updated_at: str | None = None
+    parent_uri: str | None = None
 
 
 class RetrievalEngine:
@@ -65,14 +64,14 @@ class RetrievalEngine:
     async def retrieve(
         self,
         query: str,
-        layers: Optional[List[int]] = None,
+        layers: list[int] | None = None,
         top_k: int = None,
-        user_id: Optional[int] = None,
-        agent_id: Optional[int] = None,
-        session_id: Optional[str] = None,
-        context_type: Optional[str] = None,
-        uri_prefix: Optional[str] = None,
-    ) -> List[RetrievalResult]:
+        user_id: int | None = None,
+        agent_id: int | None = None,
+        session_id: str | None = None,
+        context_type: str | None = None,
+        uri_prefix: str | None = None,
+    ) -> list[RetrievalResult]:
         """
         主检索方法：
         1. 语义搜索（通过 VectorStore）
@@ -126,14 +125,14 @@ class RetrievalEngine:
     async def _semantic_search(
         self,
         query: str,
-        layers: List[int],
+        layers: list[int],
         top_k: int,
-        user_id: Optional[int] = None,
-        agent_id: Optional[int] = None,
-        session_id: Optional[str] = None,
-        context_type: Optional[str] = None,
-        uri_prefix: Optional[str] = None,
-    ) -> List[RetrievalResult]:
+        user_id: int | None = None,
+        agent_id: int | None = None,
+        session_id: str | None = None,
+        context_type: str | None = None,
+        uri_prefix: str | None = None,
+    ) -> list[RetrievalResult]:
         """通过 VectorStore 语义搜索，然后匹配 DB 记录"""
         if not self.vector_store:
             return await self._keyword_fallback(
@@ -160,7 +159,7 @@ class RetrievalEngine:
             stmt = select(LayeredMemory).where(
                 and_(
                     LayeredMemory.vector_id.in_(vector_ids),
-                    LayeredMemory.is_active == True,
+                    LayeredMemory.is_active,
                     LayeredMemory.layer.in_(layers),
                 )
             )
@@ -183,22 +182,28 @@ class RetrievalEngine:
                 semantic_score = score_map.get(mem.vector_id, 0.0)
                 # 混合语义分数和热度分数
                 hotness = self._calc_hotness(mem.access_count)
-                combined_score = self.alpha * semantic_score + (1 - self.alpha) * hotness
+                combined_score = (
+                    self.alpha * semantic_score + (1 - self.alpha) * hotness
+                )
 
-                results.append(RetrievalResult(
-                    uri=mem.uri,
-                    name=mem.name,
-                    layer=mem.layer,
-                    context_type=mem.context_type,
-                    text=mem.get_text_for_embedding(),
-                    score=combined_score,
-                    abstract=mem.abstract,
-                    overview=mem.overview,
-                    access_count=mem.access_count,
-                    source=mem.source,
-                    updated_at=mem.updated_at.isoformat() if mem.updated_at else None,
-                    parent_uri=mem.parent_uri,
-                ))
+                results.append(
+                    RetrievalResult(
+                        uri=mem.uri,
+                        name=mem.name,
+                        layer=mem.layer,
+                        context_type=mem.context_type,
+                        text=mem.get_text_for_embedding(),
+                        score=combined_score,
+                        abstract=mem.abstract,
+                        overview=mem.overview,
+                        access_count=mem.access_count,
+                        source=mem.source,
+                        updated_at=mem.updated_at.isoformat()
+                        if mem.updated_at
+                        else None,
+                        parent_uri=mem.parent_uri,
+                    )
+                )
 
             return results
 
@@ -211,18 +216,18 @@ class RetrievalEngine:
     async def _keyword_fallback(
         self,
         query_text: str,
-        layers: List[int],
+        layers: list[int],
         top_k: int,
-        user_id: Optional[int] = None,
-        agent_id: Optional[int] = None,
-        session_id: Optional[str] = None,
-        context_type: Optional[str] = None,
-    ) -> List[RetrievalResult]:
+        user_id: int | None = None,
+        agent_id: int | None = None,
+        session_id: str | None = None,
+        context_type: str | None = None,
+    ) -> list[RetrievalResult]:
         """关键词搜索回退"""
         keywords = query_text.strip().split()
 
         conditions = [
-            LayeredMemory.is_active == True,
+            LayeredMemory.is_active,
             LayeredMemory.layer.in_(layers),
         ]
         if user_id:
@@ -250,31 +255,35 @@ class RetrievalEngine:
         results = []
         for mem in memories:
             # 关键词匹配数作为粗略分数
-            match_count = sum(1 for kw in keywords if kw in mem.content or kw in mem.name)
+            match_count = sum(
+                1 for kw in keywords if kw in mem.content or kw in mem.name
+            )
             score = match_count / max(len(keywords), 1)
 
-            results.append(RetrievalResult(
-                uri=mem.uri,
-                name=mem.name,
-                layer=mem.layer,
-                context_type=mem.context_type,
-                text=mem.get_text_for_embedding(),
-                score=score,
-                abstract=mem.abstract,
-                overview=mem.overview,
-                access_count=mem.access_count,
-                source=mem.source,
-                updated_at=mem.updated_at.isoformat() if mem.updated_at else None,
-                parent_uri=mem.parent_uri,
-            ))
+            results.append(
+                RetrievalResult(
+                    uri=mem.uri,
+                    name=mem.name,
+                    layer=mem.layer,
+                    context_type=mem.context_type,
+                    text=mem.get_text_for_embedding(),
+                    score=score,
+                    abstract=mem.abstract,
+                    overview=mem.overview,
+                    access_count=mem.access_count,
+                    source=mem.source,
+                    updated_at=mem.updated_at.isoformat() if mem.updated_at else None,
+                    parent_uri=mem.parent_uri,
+                )
+            )
 
         return results
 
     # ==================== 层级扩展 ====================
 
     async def _hierarchical_expansion(
-        self, candidates: List[RetrievalResult]
-    ) -> List[RetrievalResult]:
+        self, candidates: list[RetrievalResult]
+    ) -> list[RetrievalResult]:
         """BFS 沿 parent_uri 扩展父子节点"""
         expanded = list(candidates)
         visited = {r.uri for r in candidates}
@@ -285,61 +294,72 @@ class RetrievalEngine:
                 parent = await self._get_memory_by_uri(candidate.parent_uri)
                 if parent:
                     propagated_score = candidate.score * 0.5
-                    expanded.append(RetrievalResult(
-                        uri=parent.uri,
-                        name=parent.name,
-                        layer=parent.layer,
-                        context_type=parent.context_type,
-                        text=parent.get_text_for_embedding(),
-                        score=propagated_score,
-                        abstract=parent.abstract,
-                        overview=parent.overview,
-                        access_count=parent.access_count,
-                        source=parent.source,
-                        updated_at=parent.updated_at.isoformat() if parent.updated_at else None,
-                        parent_uri=parent.parent_uri,
-                    ))
+                    expanded.append(
+                        RetrievalResult(
+                            uri=parent.uri,
+                            name=parent.name,
+                            layer=parent.layer,
+                            context_type=parent.context_type,
+                            text=parent.get_text_for_embedding(),
+                            score=propagated_score,
+                            abstract=parent.abstract,
+                            overview=parent.overview,
+                            access_count=parent.access_count,
+                            source=parent.source,
+                            updated_at=parent.updated_at.isoformat()
+                            if parent.updated_at
+                            else None,
+                            parent_uri=parent.parent_uri,
+                        )
+                    )
                     visited.add(parent.uri)
 
             # 向下扩展：获取子节点
             children = await self._get_children(candidate.uri)
             for child in children:
                 if child.uri not in visited:
-                    propagated_score = self.alpha * child.access_count * 0.01 + (1 - self.alpha) * candidate.score * 0.5
-                    expanded.append(RetrievalResult(
-                        uri=child.uri,
-                        name=child.name,
-                        layer=child.layer,
-                        context_type=child.context_type,
-                        text=child.get_text_for_embedding(),
-                        score=propagated_score,
-                        abstract=child.abstract,
-                        overview=child.overview,
-                        access_count=child.access_count,
-                        source=child.source,
-                        updated_at=child.updated_at.isoformat() if child.updated_at else None,
-                        parent_uri=child.parent_uri,
-                    ))
+                    propagated_score = (
+                        self.alpha * child.access_count * 0.01
+                        + (1 - self.alpha) * candidate.score * 0.5
+                    )
+                    expanded.append(
+                        RetrievalResult(
+                            uri=child.uri,
+                            name=child.name,
+                            layer=child.layer,
+                            context_type=child.context_type,
+                            text=child.get_text_for_embedding(),
+                            score=propagated_score,
+                            abstract=child.abstract,
+                            overview=child.overview,
+                            access_count=child.access_count,
+                            source=child.source,
+                            updated_at=child.updated_at.isoformat()
+                            if child.updated_at
+                            else None,
+                            parent_uri=child.parent_uri,
+                        )
+                    )
                     visited.add(child.uri)
 
         return expanded
 
     # ==================== 辅助方法 ====================
 
-    async def _get_memory_by_uri(self, uri: str) -> Optional[LayeredMemory]:
+    async def _get_memory_by_uri(self, uri: str) -> LayeredMemory | None:
         """按 URI 获取记忆"""
         stmt = select(LayeredMemory).where(
-            and_(LayeredMemory.uri == uri, LayeredMemory.is_active == True)
+            and_(LayeredMemory.uri == uri, LayeredMemory.is_active)
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def _get_children(self, parent_uri: str) -> List[LayeredMemory]:
+    async def _get_children(self, parent_uri: str) -> list[LayeredMemory]:
         """获取子节点"""
         stmt = select(LayeredMemory).where(
             and_(
                 LayeredMemory.parent_uri == parent_uri,
-                LayeredMemory.is_active == True,
+                LayeredMemory.is_active,
             )
         )
         result = await self.db.execute(stmt)

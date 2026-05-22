@@ -6,86 +6,89 @@ Agent Loop - 核心 Agent 循环处理逻辑
 
 import asyncio
 import json
+import logging
 import time
 import uuid
-import logging
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, TYPE_CHECKING, Union
-
-# 使用新的 CancellationToken
-from app.modules.agent.task_manager import CancellationToken
+from typing import (
+    TYPE_CHECKING,
+    Any,
+)
 
 # Guardrails 和 Tool Hooks（借鉴 CrewAI + PraisonAI）
 from app.modules.agent.guardrails import (
     Guardrail,
-    GuardrailConfig,
     GuardrailExecutor,
     ValidationResult,
-    builtin_validators,
 )
-from app.modules.agent.tool_hooks import (
-    HookEvent,
-    HookContext,
-    HookResult,
-    ToolHook,
-    ToolHookRunner,
-    builtin_hooks,
-)
+
 # 中断与恢复机制（借鉴 LangGraph）
 from app.modules.agent.interrupt import (
+    Checkpoint,
     InterruptManager,
+    InterruptOption,
     InterruptPoint,
     InterruptReason,
     InterruptStatus,
-    InterruptOption,
-    Checkpoint,
     get_interrupt_manager,
     interrupt_options,
 )
+
+# 使用新的 CancellationToken
+from app.modules.agent.task_manager import CancellationToken
+from app.modules.agent.tool_hooks import (
+    HookContext,
+    HookEvent,
+    ToolHook,
+    ToolHookRunner,
+)
+
 # 执行追踪（借鉴 LangSmith）
 from app.modules.agent.tracing import (
     AgentTracer,
+    Span,
     SpanKind,
     SpanStatus,
-    Span,
-    Trace,
     TokenUsage,
+    Trace,
     get_tracer,
 )
 
 if TYPE_CHECKING:
     pass
 
-from app.core.bash_safety import CommandConfirmationRequired, CommandAssessment, DangerLevel
-from app.core.sandbox import SensitiveFileAccessRequired, PathOutsideWorkspaceError
-from app.core.recovery_recipes import (
-    RecoverableToolError,
-    RecoveryExecutor,
-    RecoveryContext,
-    classify_error,
-    recipe_for,
-    RecoveryResult,
+from app.core.bash_safety import (
+    CommandAssessment,
+    CommandConfirmationRequired,
+    DangerLevel,
 )
 from app.core.permission_mode import (
-    PermissionMode,
     PermissionChecker,
-    PermissionCheckResult,
+    PermissionMode,
     resolve_permission_mode,
-    get_max_mode_for_role,
 )
+from app.core.recovery_recipes import (
+    RecoverableToolError,
+    RecoveryContext,
+    RecoveryExecutor,
+    classify_error,
+    recipe_for,
+)
+from app.core.sandbox import SensitiveFileAccessRequired
 from app.core.sandbox_policy import resolve_tool_policy
+from app.modules.tools.scheduler import partition_tool_calls, run_concurrent_batch
 
 # 新工具系统（ai-agent-toolkit 架构移植）
 from app.modules.tools.types import ToolUse as _ToolUse
-from app.modules.tools.scheduler import partition_tool_calls, run_concurrent_batch
 
 logger = logging.getLogger(__name__)
 
 
 class AgentStatus(Enum):
     """Agent 执行状态"""
+
     IDLE = "idle"
     RUNNING = "running"
     WAITING_TOOL = "waiting_tool"
@@ -102,26 +105,29 @@ CancelToken = CancellationToken
 @dataclass
 class ToolCall:
     """工具调用"""
+
     id: str
     name: str
     arguments: dict[str, Any]
-    result: Optional[str] = None
-    error: Optional[str] = None
+    result: str | None = None
+    error: str | None = None
 
 
 @dataclass
 class AgentIteration:
     """单次迭代记录"""
+
     iteration: int
     content: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
-    finish_reason: Optional[str] = None
+    finish_reason: str | None = None
     latency_ms: int = 0
 
 
 @dataclass
 class AgentExecutionResult:
     """Agent 执行结果"""
+
     status: AgentStatus
     content: str
     iterations: list[AgentIteration]
@@ -129,19 +135,19 @@ class AgentExecutionResult:
     total_tool_calls: int
     total_tokens: int
     latency_ms: int
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class AgentLoop:
     """Agent 主循环类 - 处理消息、调用 LLM、执行工具、生成响应
-    
+
     ReAct 循环：
     1. 接收用户消息
     2. 调用 LLM 生成响应
     3. 如果有工具调用，执行工具
     4. 将工具结果加入上下文
     5. 重复 2-4 直到 LLM 不再调用工具或达到最大迭代次数
-    
+
     支持：
     - Key 轮换重试
     - 模型覆盖配置
@@ -156,33 +162,34 @@ class AgentLoop:
     def __init__(
         self,
         provider,  # LLM 提供商（调用 chat_stream）
-        tools: Optional[Any] = None,  # 工具注册表
-        model: Optional[str] = None,
+        tools: Any | None = None,  # 工具注册表
+        model: str | None = None,
         max_iterations: int = 25,
         max_retries: int = 3,
         retry_delay: float = 1.0,
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        api_keys: Optional[list[str]] = None,  # 多 Key 轮换
-        session_id: Optional[str] = None,  # WebSocket 会话 ID
-        agent_config: Optional[Dict[str, Any]] = None,  # Agent 配置（含 tool_policy）
-        permission_mode: Optional[str] = None,  # 权限模式（若不传则按角色解析）
-        user_role: Optional[Any] = None,  # UserRole（用于确定权限上限）
-        handoffs: Optional[List[Any]] = None,  # Handoff 列表（借鉴 PraisonAI）
-        agent_id: Optional[str] = None,  # Agent ID（用于 handoff 追踪）
-        agent_name: Optional[str] = None,  # Agent 名称
-        guardrails: Optional[List[Guardrail]] = None,  # 输出验证器（借鉴 CrewAI）
-        tool_hooks: Optional[ToolHookRunner] = None,  # 工具拦截器（借鉴 PraisonAI）
-        interrupt_manager: Optional[InterruptManager] = None,  # 中断管理器（借鉴 LangGraph）
-        tracer: Optional[AgentTracer] = None,  # 执行追踪器（借鉴 LangSmith）
-        inbox_queue: Optional[Any] = None,  # Agent 间消息收件箱（asyncio.Queue）
-        system_prompt: Optional[str] = None,  # 系统提示词（覆盖默认）
+        api_keys: list[str] | None = None,  # 多 Key 轮换
+        session_id: str | None = None,  # WebSocket 会话 ID
+        agent_config: dict[str, Any] | None = None,  # Agent 配置（含 tool_policy）
+        permission_mode: str | None = None,  # 权限模式（若不传则按角色解析）
+        user_role: Any | None = None,  # UserRole（用于确定权限上限）
+        handoffs: list[Any] | None = None,  # Handoff 列表（借鉴 PraisonAI）
+        agent_id: str | None = None,  # Agent ID（用于 handoff 追踪）
+        agent_name: str | None = None,  # Agent 名称
+        guardrails: list[Guardrail] | None = None,  # 输出验证器（借鉴 CrewAI）
+        tool_hooks: ToolHookRunner | None = None,  # 工具拦截器（借鉴 PraisonAI）
+        interrupt_manager: InterruptManager
+        | None = None,  # 中断管理器（借鉴 LangGraph）
+        tracer: AgentTracer | None = None,  # 执行追踪器（借鉴 LangSmith）
+        inbox_queue: Any | None = None,  # Agent 间消息收件箱（asyncio.Queue）
+        system_prompt: str | None = None,  # 系统提示词（覆盖默认）
         # Context 压缩（Phase 1: Context 卫生）
-        compactor: Optional[Any] = None,  # Compactor 实例（LLM 级压缩）
-        context_pruner: Optional[Any] = None,  # ContextPruner 实例（Microcompact + Snip）
-        compression_service: Optional[Any] = None,  # ContextCompressionService 统一入口
-        file_tracker: Optional[Any] = None,  # FileTracker 实例（Phase 6: 压缩后文件恢复）
-        security_client: Optional[Any] = None,  # 安全网关 HTTP Client
+        compactor: Any | None = None,  # Compactor 实例（LLM 级压缩）
+        context_pruner: Any | None = None,  # ContextPruner 实例（Microcompact + Snip）
+        compression_service: Any | None = None,  # ContextCompressionService 统一入口
+        file_tracker: Any | None = None,  # FileTracker 实例（Phase 6: 压缩后文件恢复）
+        security_client: Any | None = None,  # 安全网关 HTTP Client
     ):
         """
         初始化 AgentLoop
@@ -222,24 +229,30 @@ class AgentLoop:
         self.retry_delay = retry_delay
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.last_tool_results: dict[str, str] = {}  # 记录最后一次工具调用结果（key=tool_call_id）
-        self.last_tool_durations: dict[str, int] = {}  # 记录最后一次工具调用耗时(ms)（key=tool_call_id）
+        self.last_tool_results: dict[
+            str, str
+        ] = {}  # 记录最后一次工具调用结果（key=tool_call_id）
+        self.last_tool_durations: dict[
+            str, int
+        ] = {}  # 记录最后一次工具调用耗时(ms)（key=tool_call_id）
         self.session_id = session_id  # WebSocket 会话 ID
         self.agent_config = agent_config or {}  # Agent 配置（含 tool_policy）
 
         # 权限模式与检查器
-        self._permission_mode = PermissionMode(permission_mode) if permission_mode else None
+        self._permission_mode = (
+            PermissionMode(permission_mode) if permission_mode else None
+        )
         self._user_role = user_role
-        self._permission_checker: Optional[PermissionChecker] = None  # 延迟初始化
+        self._permission_checker: PermissionChecker | None = None  # 延迟初始化
 
         # Handoff 支持（借鉴 PraisonAI）
-        self._handoffs: List[Any] = handoffs or []
+        self._handoffs: list[Any] = handoffs or []
         self._agent_id = agent_id or str(uuid.uuid4())
         self._agent_name = agent_name or "Agent"
 
         # Guardrails 输出验证（借鉴 CrewAI）
-        self._guardrails: List[Guardrail] = guardrails or []
-        self._guardrail_executor: Optional[GuardrailExecutor] = None
+        self._guardrails: list[Guardrail] = guardrails or []
+        self._guardrail_executor: GuardrailExecutor | None = None
         if self._guardrails:
             self._guardrail_executor = GuardrailExecutor(self._guardrails)
 
@@ -249,7 +262,12 @@ class AgentLoop:
         # 安全网关 ToolHook 注册（pre_tool_call）
         self._security_client = security_client
         if security_client:
-            from app.modules.agent.tool_hooks import ToolHook, HookEvent, HookContext, HookResult
+            from app.modules.agent.tool_hooks import (
+                HookContext,
+                HookEvent,
+                HookResult,
+                ToolHook,
+            )
 
             async def _security_tool_hook(ctx: HookContext) -> HookResult:
                 result = await security_client.check_tool(
@@ -259,7 +277,7 @@ class AgentLoop:
                         "agent_id": ctx.agent_id,
                         "agent_name": ctx.agent_name,
                         "conversation_id": ctx.conversation_id,
-                    }
+                    },
                 )
                 if result.action == "block":
                     return HookResult(
@@ -268,20 +286,22 @@ class AgentLoop:
                     )
                 return HookResult()
 
-            self._tool_hooks.register(ToolHook(
-                event=HookEvent.BEFORE_TOOL,
-                callback=_security_tool_hook,
-                priority=0,  # 最高优先级
-            ))
+            self._tool_hooks.register(
+                ToolHook(
+                    event=HookEvent.BEFORE_TOOL,
+                    callback=_security_tool_hook,
+                    priority=0,  # 最高优先级
+                )
+            )
 
         # 中断与恢复机制（借鉴 LangGraph）
         self._interrupt_manager = interrupt_manager or get_interrupt_manager()
-        self._current_interrupt: Optional[InterruptPoint] = None
+        self._current_interrupt: InterruptPoint | None = None
         self._status: AgentStatus = AgentStatus.IDLE
 
         # 执行追踪（借鉴 LangSmith）
         self._tracer = tracer or get_tracer()
-        self._current_trace: Optional[Trace] = None
+        self._current_trace: Trace | None = None
 
         # Agent 间消息收件箱
         self._inbox_queue = inbox_queue
@@ -296,31 +316,33 @@ class AgentLoop:
             self._file_tracker = file_tracker
         else:
             from app.modules.agent.file_tracker import FileTracker
+
             self._file_tracker = FileTracker(max_files=5, max_tokens=50_000)
 
         # 工具调用去重
         self.seen_tool_call_ids: set[str] = set()
 
         # 请求追踪 ID
-        self.request_trace_id: Optional[str] = None
+        self.request_trace_id: str | None = None
 
         # 插件事件回调
-        self.tool_event_handler: Optional[Callable] = None
-        self.reasoning_event_handler: Optional[Callable] = None
+        self.tool_event_handler: Callable | None = None
+        self.reasoning_event_handler: Callable | None = None
 
         # Stage VV: Post-turn 服务（记忆提取、session memory 等）
         self._post_turn_services: list = []
-        
+
         # Key 轮换
         self._api_keys = api_keys or []
         self._key_rotator = None
         self._key_rotation_count = 0
-        
+
         if self._api_keys:
             from app.modules.providers import get_key_rotator
-            provider_id = getattr(provider, 'provider_id', 'default')
+
+            provider_id = getattr(provider, "provider_id", "default")
             self._key_rotator = get_key_rotator(provider_id, self._api_keys)
-        
+
         logger.debug(
             f"AgentLoop initialized: max_iterations={max_iterations}, "
             f"max_retries={max_retries}, temperature={temperature}, "
@@ -329,14 +351,14 @@ class AgentLoop:
 
     def _resolve_execution_runtime(
         self,
-        model_override: Optional[dict[str, Any]] = None,
-    ) -> tuple[Any, Optional[str], float, int, int]:
+        model_override: dict[str, Any] | None = None,
+    ) -> tuple[Any, str | None, float, int, int]:
         """
         解析当前消息执行应使用的 provider 和模型参数
-        
+
         Args:
             model_override: 可选的模型覆盖参数，来自会话运行时配置
-        
+
         Returns:
             tuple: (provider, model, temperature, max_tokens, max_iterations)
         """
@@ -373,9 +395,12 @@ class AgentLoop:
         current_api_base = getattr(base_provider, "api_base", None) or ""
 
         # 如果 api_key 或 api_base 不同，需要创建新的 provider
-        if override_api_key and override_api_key != current_api_key:
-            needs_new_provider = True
-        elif override_api_base and override_api_base != current_api_base:
+        if (
+            override_api_key
+            and override_api_key != current_api_key
+            or override_api_base
+            and override_api_base != current_api_base
+        ):
             needs_new_provider = True
         else:
             needs_new_provider = False
@@ -389,9 +414,9 @@ class AgentLoop:
                 f"model={candidate_model}, api_base={override_api_base}"
             )
             if override_api_key:
-                setattr(base_provider, "api_key", override_api_key)
+                base_provider.api_key = override_api_key
             if override_api_base:
-                setattr(base_provider, "api_base", override_api_base)
+                base_provider.api_base = override_api_base
 
         return (
             candidate_provider,
@@ -401,9 +426,10 @@ class AgentLoop:
             candidate_max_iterations,
         )
 
-    async def _poll_inbox(self, timeout: float = 0.1) -> Optional[dict]:
+    async def _poll_inbox(self, timeout: float = 0.1) -> dict | None:
         """检查收件箱中是否有来自其他 Agent 的消息，非阻塞"""
         import asyncio
+
         try:
             return await asyncio.wait_for(self._inbox_queue.get(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -417,21 +443,23 @@ class AgentLoop:
 
     async def _run_post_turn(self, messages: list) -> None:
         """fire-and-forget 执行所有 post-turn 服务"""
-        for name, service in self._post_turn_services:
+        for _name, service in self._post_turn_services:
             try:
                 # VV.1: MemoryExtractor (双轨写入)
-                if hasattr(service, 'extract_and_store'):
+                if hasattr(service, "extract_and_store"):
                     await service.extract_and_store(messages)
                 # VV.2: ConversationSummarizer (Track 1)
-                if hasattr(service, 'summarize_conversation'):
-                    token_count = sum(len(str(m.get("content", ""))) for m in messages) // 4
+                if hasattr(service, "summarize_conversation"):
+                    token_count = (
+                        sum(len(str(m.get("content", ""))) for m in messages) // 4
+                    )
                     tool_call_count = sum(
                         1 for m in messages if m.get("role") == "tool"
                     )
                     if service.should_summarize(token_count, tool_call_count):
                         await service.summarize_conversation(messages)
                 # VV.3: MagicDocUpdater
-                if hasattr(service, 'update_all'):
+                if hasattr(service, "update_all"):
                     await service.update_all()
             except Exception:
                 pass  # 静默失败，不影响主流程
@@ -439,16 +467,16 @@ class AgentLoop:
     async def process_message(
         self,
         message: str,
-        context: Optional[list[dict[str, Any]]] = None,
-        system_prompt: Optional[str] = None,
-        cancel_token: Optional[CancelToken] = None,
+        context: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+        cancel_token: CancelToken | None = None,
         yield_intermediate: bool = True,
-        model_override: Optional[dict[str, Any]] = None,  # 会话级模型覆盖
+        model_override: dict[str, Any] | None = None,  # 会话级模型覆盖
         use_sse: bool = False,  # 是否使用 SSE 流式（前端实时展示）
     ) -> AsyncIterator[str]:
         """
         处理用户消息并生成流式响应
-        
+
         Args:
             message: 用户消息
             context: 对话历史
@@ -456,7 +484,7 @@ class AgentLoop:
             cancel_token: 取消令牌
             yield_intermediate: 是否输出中间迭代内容（Web UI 流式模式）
             model_override: 会话级模型覆盖配置
-        
+
         Yields:
             str: 流式响应内容
         """
@@ -470,38 +498,42 @@ class AgentLoop:
 
         # 清空去重集合
         self.seen_tool_call_ids.clear()
-        
+
         # 解析执行时配置（支持会话级模型覆盖）
-        runtime_provider, runtime_model, runtime_temperature, runtime_max_tokens, runtime_max_iterations = (
-            self._resolve_execution_runtime(model_override)
-        )
-        
+        (
+            runtime_provider,
+            runtime_model,
+            runtime_temperature,
+            runtime_max_tokens,
+            runtime_max_iterations,
+        ) = self._resolve_execution_runtime(model_override)
+
         # 构建消息列表
         if context is None:
             context = []
-        
+
         messages = list(context)
         if system_prompt:
             messages.insert(0, {"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": message})
-        
+
         iteration = 0
         total_tool_calls = 0
         final_content = ""
         iterations_log: list[AgentIteration] = []
         self.last_tool_results = {}  # 清空上次的工具调用结果
         self.last_tool_durations = {}  # 清空上次的工具调用耗时
-        
+
         try:
             while iteration < runtime_max_iterations:
                 iteration += 1
-                
+
                 # 检查是否被取消
                 if cancel_token and cancel_token.is_cancelled:
                     logger.info(f"AgentLoop cancelled at iteration {iteration}")
                     yield "\n\n[任务被取消]"
                     return
-                
+
                 logger.debug(f"Agent iteration {iteration}/{runtime_max_iterations}")
 
                 # 检查 Agent 间收件箱
@@ -510,11 +542,15 @@ class AgentLoop:
                     if inbox_msg is not None:
                         sender = inbox_msg.get("from", "unknown")
                         body = inbox_msg.get("message", "")
-                        messages.append({
-                            "role": "system",
-                            "content": f"[来自 '{sender}' 的 Agent 间消息]: {body}"
-                        })
-                        logger.debug(f"Inbox message from '{sender}' injected at iteration {iteration}")
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": f"[来自 '{sender}' 的 Agent 间消息]: {body}",
+                            }
+                        )
+                        logger.debug(
+                            f"Inbox message from '{sender}' injected at iteration {iteration}"
+                        )
 
                 # Context 压缩链（Phase 1: Context 卫生）
                 # 顺序：Snip (零成本) → MicroCompacter (清除旧工具结果) → Compactor (LLM 级压缩)
@@ -523,7 +559,9 @@ class AgentLoop:
                 # 调用 LLM
                 iter_start = time.time()
                 content_buffer = ""
-                reasoning_content_buffer = ""  # DeepSeek thinking mode reasoning_content
+                reasoning_content_buffer = (
+                    ""  # DeepSeek thinking mode reasoning_content
+                )
                 tool_calls_buffer: list[dict] = []
                 tool_calls_aggregate: dict[int, dict] = {}  # 按聚合增量式 tool_calls
                 finish_reason = None
@@ -533,8 +571,11 @@ class AgentLoop:
                 if self.tools:
                     tool_definitions = self.tools.get_definitions()
                     # 工具池过滤：plan mode 或 agent config 中的 tool_pool_mode
-                    from app.modules.tools.pool_filter import ToolPoolMode, get_pool_tool_policy
                     from app.modules.tools.plan_mode import is_plan_mode_active
+                    from app.modules.tools.pool_filter import (
+                        ToolPoolMode,
+                        get_pool_tool_policy,
+                    )
 
                     if is_plan_mode_active():
                         # plan mode 优先（临时进入的只读模式）
@@ -545,17 +586,20 @@ class AgentLoop:
 
                     if policy:
                         tool_definitions = [
-                            t for t in tool_definitions
+                            t
+                            for t in tool_definitions
                             if policy.is_allowed(t.get("function", {}).get("name"))[0]
                         ]
                     logger.info(f"Tool definitions count: {len(tool_definitions)}")
-                    logger.debug(f"Tool names: {[t.get('function', {}).get('name') for t in tool_definitions]}")
+                    logger.debug(
+                        f"Tool names: {[t.get('function', {}).get('name') for t in tool_definitions]}"
+                    )
                 else:
                     logger.warning("No tools registry available!")
 
                 # 流式调用 LLM
                 if yield_intermediate:
-                    yield f"\n[思考中...]"
+                    yield "\n[思考中...]"
                 async for chunk in self._call_llm_stream(
                     messages=messages,
                     tools=tool_definitions,
@@ -588,7 +632,9 @@ class AgentLoop:
                         if tc.get("name"):
                             tool_calls_aggregate[tc_index]["name"] = tc["name"]
                         if tc.get("arguments"):
-                            tool_calls_aggregate[tc_index]["arguments"] += tc["arguments"]
+                            tool_calls_aggregate[tc_index]["arguments"] += tc[
+                                "arguments"
+                            ]
 
                     if chunk.get("finish_reason"):
                         finish_reason = chunk["finish_reason"]
@@ -614,7 +660,9 @@ class AgentLoop:
                             "session_id": self.session_id,
                             "request_trace_id": self.request_trace_id,
                         }
-                        result = await self._security_client.filter_output(content_buffer, sg_context)
+                        result = await self._security_client.filter_output(
+                            content_buffer, sg_context
+                        )
                         if result.action == "block":
                             yield f"\n\n[安全拦截] {result.reason or '模型输出被安全策略拦截'}"
                             return
@@ -622,33 +670,39 @@ class AgentLoop:
                             content_buffer = result.content
                             if yield_intermediate:
                                 # 通知前端输出被修改
-                                yield f"\n<!--SECURITY:输出已脱敏-->\n"
+                                yield "\n<!--SECURITY:输出已脱敏-->\n"
                     except Exception as e:
                         logger.error(f"Security client filter_output failed: {e}")
 
                 iter_latency = int((time.time() - iter_start) * 1000)
-                
+
                 # 记录本次迭代
-                iterations_log.append(AgentIteration(
-                    iteration=iteration,
-                    content=content_buffer,
-                    tool_calls=[],  # 稍后填充
-                    finish_reason=finish_reason,
-                    latency_ms=iter_latency,
-                ))
-                
+                iterations_log.append(
+                    AgentIteration(
+                        iteration=iteration,
+                        content=content_buffer,
+                        tool_calls=[],  # 稍后填充
+                        finish_reason=finish_reason,
+                        latency_ms=iter_latency,
+                    )
+                )
+
                 if content_buffer:
                     final_content = content_buffer
-                
+
                 # 如果没有工具调用，结束循环
                 if not tool_calls_buffer:
-                    logger.info(f"No tool calls received from LLM at iteration {iteration}, finish_reason={finish_reason}")
+                    logger.info(
+                        f"No tool calls received from LLM at iteration {iteration}, finish_reason={finish_reason}"
+                    )
                     # 非流式模式：输出最终内容
                     if not yield_intermediate and content_buffer:
                         yield content_buffer
                     break
 
-                logger.info(f"Tool calls received: {len(tool_calls_buffer)} calls - {[tc.get('name') for tc in tool_calls_buffer]}")
+                logger.info(
+                    f"Tool calls received: {len(tool_calls_buffer)} calls - {[tc.get('name') for tc in tool_calls_buffer]}"
+                )
 
                 # 并行执行优化：如果所有工具都是 parallel_safe，并行执行
                 # 成功后清空 tool_calls_buffer，下面的 for 循环跳过
@@ -661,8 +715,12 @@ class AgentLoop:
                                 tc.get("name", ""), tc.get("arguments", {})
                             )
                     tool_calls_buffer = await self._try_parallel_execute(
-                        tool_calls_buffer, messages, content_buffer,
-                        reasoning_content_buffer, cancel_token, yield_intermediate,
+                        tool_calls_buffer,
+                        messages,
+                        content_buffer,
+                        reasoning_content_buffer,
+                        cancel_token,
+                        yield_intermediate,
                     )
 
                     # 如果并行执行成功（返回空列表），yield 所有标记
@@ -678,7 +736,13 @@ class AgentLoop:
                             if tc_id in self.last_tool_results:
                                 result = self.last_tool_results[tc_id]
                                 duration_ms = self.last_tool_durations.get(tc_id)
-                                yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'tool_call_id': tc_id, 'result': result, 'duration_ms': duration_ms}, ensure_ascii=False)}-->"
+                                payload = {
+                                    'name': tc_name,
+                                    'tool_call_id': tc_id,
+                                    'result': result,
+                                    'duration_ms': duration_ms,
+                                }
+                                yield f"<!--TOOL_RESULT:{json.dumps(payload, ensure_ascii=False)}-->"
                         content_buffer = ""  # 与 for 循环结束后的清理保持一致
                         continue  # 跳过 for 循环，进入下一轮迭代
 
@@ -694,7 +758,7 @@ class AgentLoop:
 
                         # 检查是否被取消
                         if cancel_token and cancel_token.is_cancelled:
-                            logger.info(f"AgentLoop cancelled before tool execution")
+                            logger.info("AgentLoop cancelled before tool execution")
                             yield "\n\n[任务被取消]"
                             return
 
@@ -727,11 +791,13 @@ class AgentLoop:
                         if isinstance(tc_args, str):
                             try:
                                 tc_args = json.loads(tc_args)
-                            except:
+                            except Exception:
                                 tc_args = {}
                         elif isinstance(tc_args, list):
                             # 如果 arguments 是 list，转换为 dict
-                            logger.warning(f"Tool arguments is a list: {tc_args}, converting to dict")
+                            logger.warning(
+                                f"Tool arguments is a list: {tc_args}, converting to dict"
+                            )
                             tc_args = {"args": tc_args}
                         elif not isinstance(tc_args, dict):
                             tc_args = {}
@@ -743,7 +809,9 @@ class AgentLoop:
 
                         # 检查取消令牌
                         if self._is_cancelled():
-                            logger.info(f"Agent cancelled before executing tool {tc_name}")
+                            logger.info(
+                                f"Agent cancelled before executing tool {tc_name}"
+                            )
                             yield "\n\n[执行已取消]"
                             return
 
@@ -756,18 +824,24 @@ class AgentLoop:
                         yield f"<!--TOOL_START:{json.dumps({'name': tc_name, 'tool_call_id': tc_id}, ensure_ascii=False)}-->"
 
                         # 插件事件：工具开始
-                        await self._emit_plugin_event("tool_start", {
-                            "trace_id": self.request_trace_id,
-                            "tool_name": tc_name,
-                            "tool_call_id": tc_id,
-                            "arguments": tc_args,
-                        })
+                        await self._emit_plugin_event(
+                            "tool_start",
+                            {
+                                "trace_id": self.request_trace_id,
+                                "tool_name": tc_name,
+                                "tool_call_id": tc_id,
+                                "arguments": tc_args,
+                            },
+                        )
 
                         # 执行工具（带重试 + 恢复配方）
                         tool_start_time = time.time()
                         result = None
                         last_error = None
-                        recovery_executor = getattr(self, '_recovery_executor', None) or RecoveryExecutor()
+                        recovery_executor = (
+                            getattr(self, "_recovery_executor", None)
+                            or RecoveryExecutor()
+                        )
                         recovery_context = RecoveryContext()
 
                         for attempt in range(self.max_retries):
@@ -787,18 +861,24 @@ class AgentLoop:
                                     f"scenario={scenario.value}, error={e}"
                                 )
                                 if recipe is not None:
-                                    recovery_result = recovery_executor.attempt_recovery(
-                                        scenario, recovery_context, e
+                                    recovery_result = (
+                                        recovery_executor.attempt_recovery(
+                                            scenario, recovery_context, e
+                                        )
                                     )
                                     if recovery_result.should_retry:
                                         if recovery_result.auto_fix_command:
                                             # 自动修复（如 rm -f .git/index.lock）
                                             try:
-                                                import subprocess
                                                 import shlex
+                                                import subprocess
+
                                                 subprocess.run(
-                                                    shlex.split(recovery_result.auto_fix_command),
-                                                    shell=False, timeout=10,
+                                                    shlex.split(
+                                                        recovery_result.auto_fix_command
+                                                    ),
+                                                    shell=False,
+                                                    timeout=10,
                                                     capture_output=True,
                                                 )
                                                 logger.info(
@@ -842,86 +922,120 @@ class AgentLoop:
                             self.last_tool_durations[tc_id] = tool_duration_ms
 
                             # SSE 实时通知：工具执行完成
-                            yield f"<!--TOOL_RESULT:{json.dumps({'name': tc_name, 'tool_call_id': tc_id, 'result': result, 'duration_ms': tool_duration_ms}, ensure_ascii=False)}-->"
+                            payload = {
+                                'name': tc_name,
+                                'tool_call_id': tc_id,
+                                'result': result,
+                                'duration_ms': tool_duration_ms,
+                            }
+                            yield f"<!--TOOL_RESULT:{json.dumps(payload, ensure_ascii=False)}-->"
 
                             # WebSocket 通知：工具调用成功
                             if tool_handler:
                                 await tool_handler.notify_complete(result)
 
                             # 插件事件：工具完成
-                            await self._emit_plugin_event("tool_complete", {
-                                "trace_id": self.request_trace_id,
-                                "tool_name": tc_name,
-                                "tool_call_id": tc_id,
-                                "result": result[:200] if result else None,
-                            })
+                            await self._emit_plugin_event(
+                                "tool_complete",
+                                {
+                                    "trace_id": self.request_trace_id,
+                                    "tool_name": tc_name,
+                                    "tool_call_id": tc_id,
+                                    "result": result[:200] if result else None,
+                                },
+                            )
 
                             # 添加 assistant 消息（包含 tool_calls）
                             assistant_msg = {
                                 "role": "assistant",
                                 "content": content_buffer or "",
-                                "tool_calls": [{
-                                    "id": tc_id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc_name,
-                                        "arguments": json.dumps(tc_args),
+                                "tool_calls": [
+                                    {
+                                        "id": tc_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc_name,
+                                            "arguments": json.dumps(tc_args),
+                                        },
                                     }
-                                }]
+                                ],
                             }
                             if reasoning_content_buffer:
-                                assistant_msg["reasoning_content"] = reasoning_content_buffer
+                                assistant_msg["reasoning_content"] = (
+                                    reasoning_content_buffer
+                                )
                             messages.append(assistant_msg)
                             # 添加 tool 结果消息
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc_id,
-                                "tool_name": tc_name,
-                                "content": result,
-                            })
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc_id,
+                                    "tool_name": tc_name,
+                                    "content": result,
+                                }
+                            )
                         else:
                             # 工具执行失败
                             error_msg = f"Tool execution failed after {self.max_retries} attempts: {str(last_error)}"
-                            logger.error(f"Tool {tc_name} failed permanently: {error_msg}")
+                            logger.error(
+                                f"Tool {tc_name} failed permanently: {error_msg}"
+                            )
 
                             # SSE 实时通知：工具执行错误
-                            yield f"<!--TOOL_ERROR:{json.dumps({'name': tc_name, 'tool_call_id': tc_id, 'error': str(last_error), 'duration_ms': tool_duration_ms}, ensure_ascii=False)}-->"
+                            payload = {
+                                'name': tc_name,
+                                'tool_call_id': tc_id,
+                                'error': str(last_error),
+                                'duration_ms': tool_duration_ms,
+                            }
+                            yield f"<!--TOOL_ERROR:{json.dumps(payload, ensure_ascii=False)}-->"
 
                             # WebSocket 通知：工具错误
                             if tool_handler:
                                 await tool_handler.notify_error(str(last_error))
 
                             # 插件事件：工具失败
-                            await self._emit_plugin_event("tool_error", {
-                                "trace_id": self.request_trace_id,
-                                "tool_name": tc_name,
-                                "tool_call_id": tc_id,
-                                "error": str(last_error),
-                            })
+                            await self._emit_plugin_event(
+                                "tool_error",
+                                {
+                                    "trace_id": self.request_trace_id,
+                                    "tool_name": tc_name,
+                                    "tool_call_id": tc_id,
+                                    "error": str(last_error),
+                                },
+                            )
 
                             assistant_msg = {
                                 "role": "assistant",
                                 "content": content_buffer or "",
-                                "tool_calls": [{
-                                    "id": tc_id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc_name,
-                                        "arguments": json.dumps(tc_args),
+                                "tool_calls": [
+                                    {
+                                        "id": tc_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": tc_name,
+                                            "arguments": json.dumps(tc_args),
+                                        },
                                     }
-                                }]
+                                ],
                             }
                             if reasoning_content_buffer:
-                                assistant_msg["reasoning_content"] = reasoning_content_buffer
+                                assistant_msg["reasoning_content"] = (
+                                    reasoning_content_buffer
+                                )
                             messages.append(assistant_msg)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tc_id,
-                                "tool_name": tc_name,
-                                "content": error_msg,
-                            })
+                            messages.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc_id,
+                                    "tool_name": tc_name,
+                                    "content": error_msg,
+                                }
+                            )
                     except Exception as tool_error:
-                        logger.error(f"Tool processing error: {tool_error}", exc_info=True)
+                        logger.error(
+                            f"Tool processing error: {tool_error}", exc_info=True
+                        )
                         yield f"\n\n[工具处理错误: {tool_error}]"
 
             # 检查是否达到限制
@@ -930,14 +1044,14 @@ class AgentLoop:
                 warning_msg = f"\n\n[达到最大迭代次数 {runtime_max_iterations}]"
                 yield warning_msg
                 final_content += warning_msg
-            
+
             # 循环结束
             total_latency = int((time.time() - start_time) * 1000)
             logger.info(
                 f"AgentLoop completed: iterations={iteration}, "
                 f"tool_calls={total_tool_calls}, latency={total_latency}ms"
             )
-            
+
             # WebSocket 通知：Agent 完成
             await self._emit_agent_complete(
                 content=final_content,
@@ -949,10 +1063,12 @@ class AgentLoop:
             # Stage VV: 后台触发 post-turn 服务（fire-and-forget）
             if self._post_turn_services:
                 import asyncio as _asyncio
+
                 _asyncio.create_task(self._run_post_turn(messages))
 
         except Exception as e:
             import traceback
+
             logger.error(f"AgentLoop error: {e}\n{traceback.format_exc()}")
             yield f"\n\n[错误: {e}]"
 
@@ -961,9 +1077,9 @@ class AgentLoop:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         provider: Any = None,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         use_sse: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         """
@@ -987,15 +1103,19 @@ class AgentLoop:
         max_tokens = max_tokens or self.max_tokens
 
         # 调试日志：记录工具定义
-        logger.info(f"_call_llm_stream: tools_count={len(tools) if tools else 0}, use_sse={use_sse}")
+        logger.info(
+            f"_call_llm_stream: tools_count={len(tools) if tools else 0}, use_sse={use_sse}"
+        )
         if tools:
-            logger.debug(f"Tool names: {[t.get('function', {}).get('name') for t in tools]}")
+            logger.debug(
+                f"Tool names: {[t.get('function', {}).get('name') for t in tools]}"
+            )
 
         # 选择调用方法：SSE 流式 或 普通非流式
-        if use_sse and hasattr(provider, 'chat_stream_sse'):
+        if use_sse and hasattr(provider, "chat_stream_sse"):
             chat_method = provider.chat_stream_sse
             logger.info("Using SSE streaming method")
-        elif hasattr(provider, 'chat_stream'):
+        elif hasattr(provider, "chat_stream"):
             chat_method = provider.chat_stream
         else:
             chat_method = None
@@ -1013,14 +1133,18 @@ class AgentLoop:
                     ):
                         converted = self._convert_stream_chunk(chunk)
                         # 检测 prompt_too_long
-                        if converted.get("error") and self._is_prompt_too_long(converted["error"]):
+                        if converted.get("error") and self._is_prompt_too_long(
+                            converted["error"]
+                        ):
                             if attempt < max_retries and self._compression_service:
                                 logger.warning(
                                     f"Prompt too long detected, emergency compact "
                                     f"attempt {attempt + 1}/{max_retries}"
                                 )
-                                compacted = await self._compression_service.emergency_compact(
-                                    messages, attempt=attempt + 1
+                                compacted = (
+                                    await self._compression_service.emergency_compact(
+                                        messages, attempt=attempt + 1
+                                    )
                                 )
                                 messages[:] = compacted  # 更新调用方的消息列表
                                 break  # 跳出 async for，外层循环继续重试
@@ -1034,7 +1158,10 @@ class AgentLoop:
                     continue
                 except Exception as e:
                     import traceback
-                    logger.error(f"_call_llm_stream error (attempt {attempt + 1}/{max_retries}): {e}\n{traceback.format_exc()}")
+
+                    logger.error(
+                        f"_call_llm_stream error (attempt {attempt + 1}/{max_retries}): {e}\n{traceback.format_exc()}"
+                    )
 
                     # Key 轮换：如果是认证/限流错误，尝试轮换 Key
                     if self._key_rotator and self._key_rotator.should_rotate_key(e):
@@ -1052,7 +1179,7 @@ class AgentLoop:
 
                     # 瞬态错误（502/503/504/连接超时）：重试
                     if self._is_transient_error(e) and attempt < max_retries:
-                        delay = min(2.0 * (2 ** attempt), 16.0)
+                        delay = min(2.0 * (2**attempt), 16.0)
                         logger.info(
                             f"Transient error, retrying in {delay}s "
                             f"(attempt {attempt + 1}/{max_retries})"
@@ -1083,13 +1210,13 @@ class AgentLoop:
         result: dict[str, Any] = {}
 
         # 处理 StreamChunk 的 delta 字段
-        if hasattr(chunk, 'delta') and chunk.delta:
+        if hasattr(chunk, "delta") and chunk.delta:
             content = chunk.delta.get("content", "")
             if content:
                 result["content"] = content
 
         # 处理 tool_calls 字段
-        if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
+        if hasattr(chunk, "tool_calls") and chunk.tool_calls:
             for tc in chunk.tool_calls:
                 # OpenAI 格式的 tool_calls 是增量式的，需要聚合
                 # 每个 chunk 可能只包含部分 arguments
@@ -1114,15 +1241,15 @@ class AgentLoop:
                 }
 
         # 处理 finish_reason 字段
-        if hasattr(chunk, 'finish_reason') and chunk.finish_reason:
+        if hasattr(chunk, "finish_reason") and chunk.finish_reason:
             result["finish_reason"] = chunk.finish_reason
 
         # 处理 thinking 字段（Anthropic Extended Thinking）
-        if hasattr(chunk, 'thinking') and chunk.thinking:
+        if hasattr(chunk, "thinking") and chunk.thinking:
             result["thinking"] = chunk.thinking
 
         # 处理 usage 字段
-        if hasattr(chunk, 'usage') and chunk.usage:
+        if hasattr(chunk, "usage") and chunk.usage:
             result["usage"] = chunk.usage
 
         return result
@@ -1131,8 +1258,14 @@ class AgentLoop:
         """判断是否为可重试的瞬态错误（502/503/504/连接超时）"""
         error_text = f"{type(error).__name__}: {error}".lower()
         transient_hints = (
-            "502", "503", "504", "connection", "timeout",
-            "read error", "server disconnected", "eof",
+            "502",
+            "503",
+            "504",
+            "connection",
+            "timeout",
+            "read error",
+            "server disconnected",
+            "eof",
         )
         return any(hint in error_text for hint in transient_hints)
 
@@ -1140,21 +1273,26 @@ class AgentLoop:
         """判断是否为上下文过长错误"""
         text = error_text.lower()
         hints = (
-            "prompt_too_long", "context length", "maximum context",
-            "token limit", "too many tokens", "exceeds maximum",
-            "context_length_exceeded", "maximum token",
+            "prompt_too_long",
+            "context length",
+            "maximum context",
+            "token limit",
+            "too many tokens",
+            "exceeds maximum",
+            "context_length_exceeded",
+            "maximum token",
         )
         return any(hint in text for hint in hints)
 
     async def _try_parallel_execute(
         self,
-        tool_calls_buffer: List[Dict[str, Any]],
-        messages: List[Dict[str, Any]],
+        tool_calls_buffer: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         content_buffer: str,
         reasoning_content_buffer: str,
-        cancel_token: Optional[CancelToken],
+        cancel_token: CancelToken | None,
         yield_intermediate: bool,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """尝试并行执行安全工具（使用新调度器 partition_tool_calls + run_concurrent_batch）
 
         返回空列表表示已执行（for 循环跳过），否则返回原始 buffer。
@@ -1206,10 +1344,26 @@ class AgentLoop:
             start = time.time()
             try:
                 result = await self._execute_tool(tool_use.tool_id, tool_use.input)
-                self._track_file_access(tool_use.tool_id, tool_use.input, result, tool_use.id)
-                return (tool_use.id, tool_use.tool_id, tool_use.input, result, None, int((time.time() - start) * 1000))
+                self._track_file_access(
+                    tool_use.tool_id, tool_use.input, result, tool_use.id
+                )
+                return (
+                    tool_use.id,
+                    tool_use.tool_id,
+                    tool_use.input,
+                    result,
+                    None,
+                    int((time.time() - start) * 1000),
+                )
             except Exception as e:
-                return (tool_use.id, tool_use.tool_id, tool_use.input, None, e, int((time.time() - start) * 1000))
+                return (
+                    tool_use.id,
+                    tool_use.tool_id,
+                    tool_use.input,
+                    None,
+                    e,
+                    int((time.time() - start) * 1000),
+                )
 
         results = await run_concurrent_batch(batches[0].tools, _execute_one)
 
@@ -1225,65 +1379,81 @@ class AgentLoop:
                 assistant_msg = {
                     "role": "assistant",
                     "content": content_buffer or "",
-                    "tool_calls": [{
-                        "id": tc_id,
-                        "type": "function",
-                        "function": {
-                            "name": tc_name,
-                            "arguments": json.dumps(tc_args),
-                        },
-                    }],
+                    "tool_calls": [
+                        {
+                            "id": tc_id,
+                            "type": "function",
+                            "function": {
+                                "name": tc_name,
+                                "arguments": json.dumps(tc_args),
+                            },
+                        }
+                    ],
                 }
                 if reasoning_content_buffer:
                     assistant_msg["reasoning_content"] = reasoning_content_buffer
                 messages.append(assistant_msg)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "tool_name": tc_name,
-                    "content": result,
-                })
-            else:
-                if has_failure:
-                    messages.append({
-                        "role": "assistant",
-                        "content": content_buffer or "",
-                        "tool_calls": [{
-                            "id": tc_id,
-                            "type": "function",
-                            "function": {
-                                "name": tc_name,
-                                "arguments": json.dumps(tc_args),
-                            },
-                        }],
-                    })
-                    messages.append({
+                messages.append(
+                    {
                         "role": "tool",
                         "tool_call_id": tc_id,
                         "tool_name": tc_name,
-                        "content": "[Skipped: sibling tool failed]",
-                    })
+                        "content": result,
+                    }
+                )
+            else:
+                if has_failure:
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content_buffer or "",
+                            "tool_calls": [
+                                {
+                                    "id": tc_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_name,
+                                        "arguments": json.dumps(tc_args),
+                                    },
+                                }
+                            ],
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "tool_name": tc_name,
+                            "content": "[Skipped: sibling tool failed]",
+                        }
+                    )
                 else:
                     has_failure = True
                     error_msg = f"Tool execution failed: {str(error) if error else 'unknown error'}"
-                    messages.append({
-                        "role": "assistant",
-                        "content": content_buffer or "",
-                        "tool_calls": [{
-                            "id": tc_id,
-                            "type": "function",
-                            "function": {
-                                "name": tc_name,
-                                "arguments": json.dumps(tc_args),
-                            },
-                        }],
-                    })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "tool_name": tc_name,
-                        "content": error_msg,
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": content_buffer or "",
+                            "tool_calls": [
+                                {
+                                    "id": tc_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc_name,
+                                        "arguments": json.dumps(tc_args),
+                                    },
+                                }
+                            ],
+                        }
+                    )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc_id,
+                            "tool_name": tc_name,
+                            "content": error_msg,
+                        }
+                    )
 
         if yield_intermediate:
             logger.info(f"Parallel tool execution complete for {len(tool_uses)} tools")
@@ -1292,9 +1462,9 @@ class AgentLoop:
 
     async def _prune_context(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         iteration: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Context 压缩链：Snip → MicroCompacter → Compactor
 
         每轮 LLM 调用前执行，逐层压缩释放 context 空间。
@@ -1306,9 +1476,13 @@ class AgentLoop:
         # 优先使用 ContextCompressionService（Phase 1 改造后的统一入口）
         if self._compression_service is not None:
             try:
-                return await self._compression_service.auto_prune(messages, self.provider)
+                return await self._compression_service.auto_prune(
+                    messages, self.provider
+                )
             except Exception as e:
-                logger.warning(f"CompressionService auto_prune failed: {e}, falling back")
+                logger.warning(
+                    f"CompressionService auto_prune failed: {e}, falling back"
+                )
 
         # Fallback：直接调用各组件（向后兼容）
         total_saved = 0
@@ -1342,9 +1516,9 @@ class AgentLoop:
 
     def _rebuild_after_compact(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         compact_result: Any,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Compactor 压缩后重建消息列表：
 
         system prompt + 压缩摘要（注入为 user 消息）+ 最近 N 条消息
@@ -1374,19 +1548,23 @@ class AgentLoop:
 
         if not summary:
             # Fallback: 如果压缩失败，只保留最近消息
-            rebuilt = [{"role": "system", "content": system_prompt}] if system_prompt else []
+            rebuilt = (
+                [{"role": "system", "content": system_prompt}] if system_prompt else []
+            )
             rebuilt.extend(recent)
             return rebuilt
 
         # 重建：system + 摘要 + 最近消息
-        rebuilt: List[Dict[str, Any]] = []
+        rebuilt: list[dict[str, Any]] = []
         if system_prompt:
             rebuilt.append({"role": "system", "content": system_prompt})
 
-        rebuilt.append({
-            "role": "user",
-            "content": f"[Previous conversation summary]\n{summary}",
-        })
+        rebuilt.append(
+            {
+                "role": "user",
+                "content": f"[Previous conversation summary]\n{summary}",
+            }
+        )
         rebuilt.extend(recent)
 
         # Phase 6: 恢复关键文件内容
@@ -1402,10 +1580,12 @@ class AgentLoop:
                         f"(edited={record.was_edited}, "
                         f"tokens={record.estimated_tokens})"
                     )
-                rebuilt.append({
-                    "role": "system",
-                    "content": "\n".join(restored_lines),
-                })
+                rebuilt.append(
+                    {
+                        "role": "system",
+                        "content": "\n".join(restored_lines),
+                    }
+                )
                 logger.info(
                     f"Restored {len(restored_files)} files after compaction: "
                     f"{[r.path for r in restored_files]}"
@@ -1485,9 +1665,7 @@ class AgentLoop:
                 tool_name, modified_args, e.assessment
             )
         except SensitiveFileAccessRequired as e:
-            return await self._handle_sensitive_file_access(
-                tool_name, modified_args, e
-            )
+            return await self._handle_sensitive_file_access(tool_name, modified_args, e)
         except Exception as e:
             logger.error(f"Tool execution failed: {tool_name} - {e}")
             raise
@@ -1496,14 +1674,14 @@ class AgentLoop:
         self,
         tool_name: str,
         arguments: dict[str, Any],
-    ) -> Optional[str]:
+    ) -> str | None:
         """处理 Handoff 工具调用
 
         借鉴 PraisonAI Handoff 作为工具暴露给 LLM 的模式
         """
         for handoff in self._handoffs:
             if handoff.tool_name == tool_name:
-                prompt = arguments.get('prompt', '')
+                prompt = arguments.get("prompt", "")
                 if not prompt:
                     return "Error: Handoff requires 'prompt' argument"
 
@@ -1524,13 +1702,13 @@ class AgentLoop:
 
         return None  # 不是 Handoff 工具
 
-    def _get_handoff_context(self) -> List[Dict]:
+    def _get_handoff_context(self) -> list[dict]:
         """获取用于 Handoff 的上下文"""
         # 从当前对话历史获取上下文
         # 这里简化实现，实际可以从 self._messages 或其他地方获取
         return []
 
-    def get_handoff_tools(self) -> List[Dict]:
+    def get_handoff_tools(self) -> list[dict]:
         """获取所有 Handoff 工具定义（用于 LLM function calling）"""
         return [h.to_tool() for h in self._handoffs]
 
@@ -1546,7 +1724,7 @@ class AgentLoop:
         # 重新创建 executor
         self._guardrail_executor = GuardrailExecutor(self._guardrails)
 
-    def get_guardrails(self) -> List[Guardrail]:
+    def get_guardrails(self) -> list[Guardrail]:
         """获取所有 Guardrail"""
         return list(self._guardrails)
 
@@ -1561,7 +1739,7 @@ class AgentLoop:
         self,
         func: Callable,
         *args,
-        context: Optional[str] = None,
+        context: str | None = None,
         **kwargs,
     ) -> Any:
         """执行函数并验证输出（失败则重试）"""
@@ -1585,11 +1763,11 @@ class AgentLoop:
         """移除工具拦截器"""
         self._tool_hooks.unregister(hook)
 
-    def clear_tool_hooks(self, event: Optional[HookEvent] = None) -> None:
+    def clear_tool_hooks(self, event: HookEvent | None = None) -> None:
         """清除工具拦截器"""
         self._tool_hooks.clear(event)
 
-    def get_tool_hooks(self) -> List[ToolHook]:
+    def get_tool_hooks(self) -> list[ToolHook]:
         """获取所有 Tool Hooks"""
         result = []
         for event in HookEvent:
@@ -1599,24 +1777,24 @@ class AgentLoop:
     async def process_direct(
         self,
         message: str,
-        context: Optional[list[dict[str, Any]]] = None,
-        system_prompt: Optional[str] = None,
-        model_override: Optional[dict[str, Any]] = None,
+        context: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+        model_override: dict[str, Any] | None = None,
     ) -> str:
         """
         直接处理消息（非流式，用于 CLI 或 cron）
-        
+
         Args:
             message: 消息内容
             context: 对话历史
             system_prompt: 系统提示词
             model_override: 会话级模型覆盖配置
-        
+
         Returns:
             str: Agent 的完整响应
         """
         response_parts = []
-        
+
         async for chunk in self.process_message(
             message=message,
             context=context,
@@ -1624,17 +1802,18 @@ class AgentLoop:
             model_override=model_override,
         ):
             response_parts.append(chunk)
-        
+
         return "".join(response_parts)
-    
+
     # ==================== WebSocket 通知方法 ====================
-    
+
     def _is_cancelled(self) -> bool:
         """检查会话是否被取消"""
         if not self.session_id:
             return False
         try:
             from app.core.websocket import manager
+
             token = manager.get_cancel_token(self.session_id)
             return token.is_cancelled
         except Exception:
@@ -1651,7 +1830,9 @@ class AgentLoop:
             tc_args = {"args": tc_args}
         elif not isinstance(tc_args, dict):
             tc_args = {}
-        args_hash = hash(json.dumps(tc_args, sort_keys=True, ensure_ascii=False)) & 0xFFFFFFFF
+        args_hash = (
+            hash(json.dumps(tc_args, sort_keys=True, ensure_ascii=False)) & 0xFFFFFFFF
+        )
         # 加入 uuid 后缀确保调用级唯一，避免同名同参工具被 seen_tool_call_ids 误判为重复
         return f"__fb_{tc_name}_{args_hash}_{uuid.uuid4().hex[:8]}"
 
@@ -1684,13 +1865,16 @@ class AgentLoop:
         checker = self._get_permission_checker()
         result = checker.check_tool(tool_name)
         return result.allowed, result.reason
-    
-    async def _create_tool_handler(self, tool_name: str, tool_call_id: Optional[str] = None):
+
+    async def _create_tool_handler(
+        self, tool_name: str, tool_call_id: str | None = None
+    ):
         """创建工具通知处理器"""
         if not self.session_id:
             return None
         try:
             from app.core.websocket import ToolNotificationHandler
+
             return ToolNotificationHandler(
                 session_id=self.session_id,
                 tool_name=tool_name,
@@ -1699,13 +1883,14 @@ class AgentLoop:
         except Exception as e:
             logger.debug(f"Failed to create tool handler: {e}")
             return None
-    
+
     async def _emit_tool_start(self, tool_name: str, arguments: dict) -> None:
         """发送工具调用开始通知（向后兼容）"""
         if not self.session_id:
             return
         try:
             from app.core.websocket import emit_tool_call_start
+
             await emit_tool_call_start(
                 session_id=self.session_id,
                 tool_name=tool_name,
@@ -1713,13 +1898,16 @@ class AgentLoop:
             )
         except Exception as e:
             logger.debug(f"Failed to emit tool start: {e}")
-    
-    async def _emit_tool_result(self, tool_name: str, result: str, latency_ms: int) -> None:
+
+    async def _emit_tool_result(
+        self, tool_name: str, result: str, latency_ms: int
+    ) -> None:
         """发送工具调用结果通知（向后兼容）"""
         if not self.session_id:
             return
         try:
             from app.core.websocket import emit_tool_call_result
+
             await emit_tool_call_result(
                 session_id=self.session_id,
                 tool_name=tool_name,
@@ -1732,7 +1920,7 @@ class AgentLoop:
     def _track_file_access(
         self,
         tool_name: str,
-        arguments: Dict[str, Any],
+        arguments: dict[str, Any],
         result: str,
         tool_call_id: str,
     ) -> None:
@@ -1771,6 +1959,7 @@ class AgentLoop:
             return
         try:
             from app.core.websocket import emit_agent_complete
+
             await emit_agent_complete(
                 session_id=self.session_id,
                 content=content,
@@ -1801,6 +1990,7 @@ class AgentLoop:
         # 2. 全局事件总线
         try:
             from app.api.plugins import get_event_bus
+
             bus = get_event_bus()
             await bus.publish(event_type, data)
         except Exception as e:
@@ -1818,11 +2008,11 @@ class AgentLoop:
         reason: InterruptReason,
         message: str,
         title: str = "",
-        details: Dict[str, Any] = None,
-        options: List[InterruptOption] = None,
-        state: Dict[str, Any] = None,
-        messages: List[Dict] = None,
-        ttl: Optional[float] = None,
+        details: dict[str, Any] = None,
+        options: list[InterruptOption] = None,
+        state: dict[str, Any] = None,
+        messages: list[dict] = None,
+        ttl: float | None = None,
     ) -> InterruptPoint:
         """创建中断点，暂停执行
 
@@ -1864,9 +2054,9 @@ class AgentLoop:
         self,
         interrupt_id: str,
         resolution: str,
-        resolved_by: Optional[int] = None,
+        resolved_by: int | None = None,
         resolution_note: str = "",
-        modified_state: Dict[str, Any] = None,
+        modified_state: dict[str, Any] = None,
     ) -> InterruptPoint:
         """恢复执行
 
@@ -1894,7 +2084,7 @@ class AgentLoop:
         logger.info(f"Agent {self._agent_name} resumed: {resolution}")
         return interrupt
 
-    async def get_pending_interrupts(self) -> List[InterruptPoint]:
+    async def get_pending_interrupts(self) -> list[InterruptPoint]:
         """获取待处理中断列表"""
         return await self._interrupt_manager.get_pending_interrupts(
             agent_id=self._agent_id,
@@ -1943,11 +2133,11 @@ class AgentLoop:
     async def save_checkpoint(
         self,
         name: str = "",
-        state: Dict[str, Any] = None,
-        messages: List[Dict] = None,
+        state: dict[str, Any] = None,
+        messages: list[dict] = None,
         iteration: int = 0,
-        tool_calls: List[Dict] = None,
-        metadata: Dict[str, Any] = None,
+        tool_calls: list[dict] = None,
+        metadata: dict[str, Any] = None,
     ) -> Checkpoint:
         """保存检查点
 
@@ -1972,7 +2162,7 @@ class AgentLoop:
             metadata=metadata,
         )
 
-    async def restore_checkpoint(self, checkpoint_id: str) -> Dict[str, Any]:
+    async def restore_checkpoint(self, checkpoint_id: str) -> dict[str, Any]:
         """恢复到检查点
 
         Args:
@@ -1983,7 +2173,7 @@ class AgentLoop:
         """
         return await self._interrupt_manager.restore_checkpoint(checkpoint_id)
 
-    async def list_checkpoints(self, limit: int = 10) -> List[Checkpoint]:
+    async def list_checkpoints(self, limit: int = 10) -> list[Checkpoint]:
         """列出检查点"""
         return await self._interrupt_manager.list_checkpoints(
             agent_id=self._agent_id,
@@ -1999,7 +2189,7 @@ class AgentLoop:
     async def _handle_command_confirmation(
         self,
         tool_name: str,
-        arguments: Dict[str, Any],
+        arguments: dict[str, Any],
         assessment: CommandAssessment,
     ) -> str:
         """处理需要确认的命令（CAUTION 或 DANGEROUS 级别）
@@ -2073,7 +2263,11 @@ class AgentLoop:
                 f"**命令需要确认**\n\n"
                 f"```bash\n{command}\n```\n\n"
                 f"**风险**: {assessment.risk_summary}\n"
-                + (f"**确认短语**: `{assessment.confirmation_phrase}`\n" if assessment.confirmation_phrase else "")
+                + (
+                    f"**确认短语**: `{assessment.confirmation_phrase}`\n"
+                    if assessment.confirmation_phrase
+                    else ""
+                )
             ),
             title="命令执行确认",
             details={
@@ -2081,7 +2275,9 @@ class AgentLoop:
                 "level": assessment.level.value,
                 "risk": assessment.risk_summary,
                 "confirmation_phrase": assessment.confirmation_phrase,
-                "matched_categories": list({r.category for r in assessment.matched_rules}),
+                "matched_categories": list(
+                    {r.category for r in assessment.matched_rules}
+                ),
             },
             options=options,
         )
@@ -2121,7 +2317,7 @@ class AgentLoop:
     async def _handle_sensitive_file_access(
         self,
         tool_name: str,
-        arguments: Dict[str, Any],
+        arguments: dict[str, Any],
         exception: SensitiveFileAccessRequired,
     ) -> str:
         """处理敏感文件访问确认（类似 _handle_command_confirmation）
@@ -2187,7 +2383,7 @@ class AgentLoop:
                 interrupt.id, timeout=300.0
             )
         except TimeoutError:
-            return f"错误: 文件访问确认超时（300秒），已自动取消"
+            return "错误: 文件访问确认超时（300秒），已自动取消"
 
         if resolved.status != InterruptStatus.APPROVED:
             return f"用户拒绝了文件访问: {path}"
@@ -2209,7 +2405,7 @@ class AgentLoop:
     async def confirm_sensitive_action(
         self,
         action: str,
-        details: Dict[str, Any] = None,
+        details: dict[str, Any] = None,
     ) -> bool:
         """确认敏感操作
 
@@ -2236,7 +2432,7 @@ class AgentLoop:
     async def request_human_review(
         self,
         content: str,
-        details: Dict[str, Any] = None,
+        details: dict[str, Any] = None,
     ) -> InterruptPoint:
         """请求人工审核
 
@@ -2276,7 +2472,7 @@ class AgentLoop:
         self._current_trace = trace
         return trace
 
-    def end_trace(self) -> Optional[Trace]:
+    def end_trace(self) -> Trace | None:
         """结束追踪"""
         trace = self._tracer.end_trace()
         self._current_trace = None
@@ -2286,7 +2482,7 @@ class AgentLoop:
         self,
         kind: SpanKind,
         name: str,
-        input_data: Dict[str, Any] = None,
+        input_data: dict[str, Any] = None,
     ) -> Span:
         """开始跨度
 
@@ -2303,11 +2499,11 @@ class AgentLoop:
     def end_span(
         self,
         status: SpanStatus = SpanStatus.SUCCESS,
-        output_data: Dict[str, Any] = None,
+        output_data: dict[str, Any] = None,
         error: str = None,
         error_stack: str = None,
         tokens: TokenUsage = None,
-    ) -> Optional[Span]:
+    ) -> Span | None:
         """结束跨度
 
         Args:
@@ -2328,11 +2524,11 @@ class AgentLoop:
             tokens=tokens,
         )
 
-    def get_current_trace(self) -> Optional[Trace]:
+    def get_current_trace(self) -> Trace | None:
         """获取当前追踪"""
         return self._current_trace
 
-    def get_current_span(self) -> Optional[Span]:
+    def get_current_span(self) -> Span | None:
         """获取当前跨度"""
         return self._tracer.current_span
 
@@ -2345,7 +2541,7 @@ class AgentLoop:
         func: Callable,
         kind: SpanKind = SpanKind.AGENT,
         name: str = "",
-        input_data: Dict[str, Any] = None,
+        input_data: dict[str, Any] = None,
     ) -> Any:
         """带追踪的执行
 
@@ -2358,8 +2554,8 @@ class AgentLoop:
         Returns:
             Any: 执行结果
         """
-        span_name = name or func.__name__ if hasattr(func, '__name__') else "execution"
-        span = self.start_span(kind, span_name, input_data)
+        span_name = name or func.__name__ if hasattr(func, "__name__") else "execution"
+        self.start_span(kind, span_name, input_data)
 
         try:
             result = func()
@@ -2374,6 +2570,7 @@ class AgentLoop:
 
         except Exception as e:
             import traceback
+
             self.end_span(
                 status=SpanStatus.ERROR,
                 error=str(e),

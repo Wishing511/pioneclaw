@@ -30,17 +30,23 @@ class TaskGetTool(BaseTool):
     async def execute(self, task_id: str, **kwargs) -> str:
         try:
             if not task_id or not task_id.strip():
-                return json.dumps({
-                    "success": False,
-                    "error": "task_id 不能为空",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "task_id 不能为空",
+                    },
+                    ensure_ascii=False,
+                )
 
             task = _store_get_task(task_id.strip())
             if not task:
-                return json.dumps({
-                    "success": False,
-                    "error": f"任务不存在: '{task_id}'",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"任务不存在: '{task_id}'",
+                    },
+                    ensure_ascii=False,
+                )
 
             result_info = task.copy()
             # 截断过长结果

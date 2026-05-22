@@ -1,37 +1,49 @@
 """
 权限管理 API
 """
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from app.core.database import get_db
+
 from app.api.auth import get_current_active_user
+from app.core.database import get_db
 from app.core.permissions import PermissionChecker
-from app.models import User, Permission, DEFAULT_PERMISSIONS
+from app.models import DEFAULT_PERMISSIONS, Permission, User
 from app.schemas import MessageResponse
 from app.schemas.permission import (
-    PermissionCreate, PermissionUpdate, PermissionInDB,
-    PermissionTree, PermissionSimple, PermissionListResponse,
+    PermissionCreate,
+    PermissionInDB,
+    PermissionListResponse,
+    PermissionTree,
+    PermissionUpdate,
     UserPermissionsResponse,
 )
-from app.models.models import Role
 
 router = APIRouter(prefix="/permissions", tags=["权限管理"])
 
 
-def build_permission_tree(permissions: List[Permission], parent_id: str = None) -> List[PermissionTree]:
+def build_permission_tree(
+    permissions: list[Permission], parent_id: str = None
+) -> list[PermissionTree]:
     """构建权限树"""
     tree = []
     children = [p for p in permissions if p.parent_id == parent_id]
     for perm in children:
         node = PermissionTree(
-            id=perm.id, name=perm.name, code=perm.code,
-            description=perm.description, type=perm.type,
-            resource=perm.resource, action=perm.action,
-            parent_id=perm.parent_id, menu_id=perm.menu_id,
-            is_system=perm.is_system, is_active=perm.is_active,
-            sort_order=perm.sort_order, created_at=perm.created_at,
+            id=perm.id,
+            name=perm.name,
+            code=perm.code,
+            description=perm.description,
+            type=perm.type,
+            resource=perm.resource,
+            action=perm.action,
+            parent_id=perm.parent_id,
+            menu_id=perm.menu_id,
+            is_system=perm.is_system,
+            is_active=perm.is_active,
+            sort_order=perm.sort_order,
+            created_at=perm.created_at,
         )
         node.children = build_permission_tree(permissions, perm.id)
         tree.append(node)
@@ -40,9 +52,9 @@ def build_permission_tree(permissions: List[Permission], parent_id: str = None) 
 
 @router.get("/", response_model=PermissionListResponse)
 async def list_permissions(
-    type: Optional[str] = None,
-    resource: Optional[str] = None,
-    is_active: Optional[bool] = None,
+    type: str | None = None,
+    resource: str | None = None,
+    is_active: bool | None = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -75,7 +87,7 @@ async def list_permissions(
     )
 
 
-@router.get("/tree", response_model=List[PermissionTree])
+@router.get("/tree", response_model=list[PermissionTree])
 async def get_permission_tree(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -86,7 +98,7 @@ async def get_permission_tree(
     return build_permission_tree(list(permissions))
 
 
-@router.get("/resources", response_model=List[str])
+@router.get("/resources", response_model=list[str])
 async def list_resources(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -112,7 +124,9 @@ async def create_permission(
 
     # 检查父权限
     if data.parent_id:
-        result = await db.execute(select(Permission).where(Permission.id == data.parent_id))
+        result = await db.execute(
+            select(Permission).where(Permission.id == data.parent_id)
+        )
         if not result.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="父权限不存在")
 
@@ -178,7 +192,9 @@ async def delete_permission(
         raise HTTPException(status_code=400, detail="系统权限不可删除")
 
     # 检查是否有子权限
-    result = await db.execute(select(Permission).where(Permission.parent_id == permission_id).limit(1))
+    result = await db.execute(
+        select(Permission).where(Permission.parent_id == permission_id).limit(1)
+    )
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="存在子权限，不可删除")
 
@@ -194,7 +210,9 @@ async def init_default_permissions(
     """初始化默认权限（仅超级管理员）"""
     created = 0
     for perm_data in DEFAULT_PERMISSIONS:
-        result = await db.execute(select(Permission).where(Permission.code == perm_data["code"]))
+        result = await db.execute(
+            select(Permission).where(Permission.code == perm_data["code"])
+        )
         if not result.scalar_one_or_none():
             perm = Permission(**perm_data)
             db.add(perm)
@@ -217,6 +235,7 @@ async def get_user_permissions(
         raise HTTPException(status_code=404, detail="用户不存在")
 
     from app.core.permissions import get_user_permission_codes
+
     permission_codes = await get_user_permission_codes(user, db)
 
     return UserPermissionsResponse(

@@ -18,19 +18,25 @@ SubagentManager - 子 Agent 管理器
 """
 
 import asyncio
+import contextlib
+import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Callable
+from typing import TYPE_CHECKING, Any, Optional
 
-import logging
+if TYPE_CHECKING:
+    from app.modules.agent.handoff import HandoffConfig, HandoffResult
+
 logger = logging.getLogger(__name__)
 
 
 class TaskStatus(Enum):
     """任务状态枚举"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -40,9 +46,10 @@ class TaskStatus(Enum):
 
 class TaskType(Enum):
     """任务类型枚举"""
-    GENERAL = "general"     # 通用任务
-    RESEARCH = "research"   # 研究任务（深度分析）
-    BUILD = "build"         # 构建任务（代码生成）
+
+    GENERAL = "general"  # 通用任务
+    RESEARCH = "research"  # 研究任务（深度分析）
+    BUILD = "build"  # 构建任务（代码生成）
 
 
 class BuiltinAgentType(str, Enum):
@@ -51,16 +58,18 @@ class BuiltinAgentType(str, Enum):
     借鉴 Claude Code src/tools/AgentTool/built-in/ 的 5 种 built-in agent types，
     加上 SubagentManager 原有的 3 种 TaskType，共 7 种。
     """
-    GENERAL = "general"             # 通用 Agent — 完整工具集
-    RESEARCH = "research"           # 研究 Agent — 深度分析
-    BUILD = "build"                 # 构建 Agent — 代码生成
-    EXPLORE = "explore"             # 探索 Agent — 代码库只读探索（Glob+Grep+Read）
-    PLAN = "plan"                   # 方案 Agent — 架构设计（Plan 模式）
-    VERIFICATION = "verification"   # 验证 Agent — 运行测试+E2E
-    GUIDE = "guide"                 # 指南 Agent — PioneClaw 使用指南
+
+    GENERAL = "general"  # 通用 Agent — 完整工具集
+    RESEARCH = "research"  # 研究 Agent — 深度分析
+    BUILD = "build"  # 构建 Agent — 代码生成
+    EXPLORE = "explore"  # 探索 Agent — 代码库只读探索（Glob+Grep+Read）
+    PLAN = "plan"  # 方案 Agent — 架构设计（Plan 模式）
+    VERIFICATION = "verification"  # 验证 Agent — 运行测试+E2E
+    GUIDE = "guide"  # 指南 Agent — PioneClaw 使用指南
 
 
 # ==================== 深度与角色系统（借鉴 OpenClaw subagent-capabilities.ts）====================
+
 
 class SubagentRole(Enum):
     """子 Agent 角色枚举
@@ -72,6 +81,7 @@ class SubagentRole(Enum):
 
     默认 max_spawn_depth=1，即深度1就是leaf，保持扁平架构。
     """
+
     MAIN = "main"
     ORCHESTRATOR = "orchestrator"
     LEAF = "leaf"
@@ -83,10 +93,10 @@ class SubagentConfig:
     借鉴 OpenClaw config/agent-limits.ts
     """
 
-    DEFAULT_MAX_SPAWN_DEPTH = 1        # 默认扁平：深度1=leaf
+    DEFAULT_MAX_SPAWN_DEPTH = 1  # 默认扁平：深度1=leaf
     DEFAULT_MAX_CHILDREN_PER_AGENT = 5  # 每个 Agent 最多 spawn 5 个子任务
-    DEFAULT_MAX_CONCURRENT = 8         # 全局最大并发子 Agent
-    DEFAULT_AGENT_MAX_CONCURRENT = 4   # 单 Agent 最大并发
+    DEFAULT_MAX_CONCURRENT = 8  # 全局最大并发子 Agent
+    DEFAULT_AGENT_MAX_CONCURRENT = 4  # 单 Agent 最大并发
 
     def __init__(
         self,
@@ -101,7 +111,9 @@ class SubagentConfig:
         self.agent_max_concurrent = agent_max_concurrent
 
 
-def resolve_subagent_role(depth: int, max_spawn_depth: int = SubagentConfig.DEFAULT_MAX_SPAWN_DEPTH) -> SubagentRole:
+def resolve_subagent_role(
+    depth: int, max_spawn_depth: int = SubagentConfig.DEFAULT_MAX_SPAWN_DEPTH
+) -> SubagentRole:
     """根据深度决定角色
 
     借鉴 OpenClaw resolveSubagentRoleForDepth
@@ -111,7 +123,7 @@ def resolve_subagent_role(depth: int, max_spawn_depth: int = SubagentConfig.DEFA
     return SubagentRole.ORCHESTRATOR if depth < max_spawn_depth else SubagentRole.LEAF
 
 
-def resolve_subagent_capabilities(role: SubagentRole) -> Dict[str, Any]:
+def resolve_subagent_capabilities(role: SubagentRole) -> dict[str, Any]:
     """根据角色决定能力
 
     借鉴 OpenClaw resolveSubagentCapabilities
@@ -125,15 +137,17 @@ def resolve_subagent_capabilities(role: SubagentRole) -> Dict[str, Any]:
 
 # ==================== 并发隔离 Lane（借鉴 OpenClaw lanes.ts）====================
 
+
 class LaneType(Enum):
     """并发隔离 Lane 类型
 
     不同来源的 Agent 运行在不同 Lane，防止自死锁。
     借鉴 OpenClaw lanes.ts: nested / subagent / cron
     """
-    NESTED = "nested"       # 嵌套调用
-    SUBAGENT = "subagent"   # 子 Agent
-    CRON = "cron"           # 定时任务
+
+    NESTED = "nested"  # 嵌套调用
+    SUBAGENT = "subagent"  # 子 Agent
+    CRON = "cron"  # 定时任务
 
 
 class SubagentLane:
@@ -170,6 +184,7 @@ class SubagentLane:
 
 # ==================== Agent 间访问控制（借鉴 OpenClaw subagent-target-policy.ts）====================
 
+
 class SubagentTargetPolicy:
     """Agent 间 spawn 访问控制
 
@@ -179,7 +194,7 @@ class SubagentTargetPolicy:
     - allow_agents=["agent-a", "agent-b"] → 白名单
     """
 
-    def __init__(self, allow_agents: Optional[List[str]] = None):
+    def __init__(self, allow_agents: list[str] | None = None):
         self.allow_agents = allow_agents
 
     def can_spawn_target(self, source_agent_id: str, target_agent_id: str) -> bool:
@@ -193,6 +208,7 @@ class SubagentTargetPolicy:
 
 # ==================== Push-based 结果回传（借鉴 OpenClaw subagent-announce.ts）====================
 
+
 class SubagentAnnouncer:
     """子 Agent 结果推送器
 
@@ -203,15 +219,15 @@ class SubagentAnnouncer:
 
     def __init__(self):
         # parent_task_id → list of completed child events
-        self._pending_announcements: Dict[str, List[Dict[str, Any]]] = {}
+        self._pending_announcements: dict[str, list[dict[str, Any]]] = {}
 
     async def announce(
         self,
         child_task_id: str,
-        parent_task_id: Optional[str],
-        result: Optional[str],
+        parent_task_id: str | None,
+        result: str | None,
         status: str,
-        manager: 'SubagentManager',
+        manager: "SubagentManager",
     ) -> None:
         """子 Agent 完成后主动推送结果给父 Agent"""
         event = {
@@ -235,14 +251,18 @@ class SubagentAnnouncer:
         parent_task = manager.tasks.get(parent_task_id)
         if parent_task and parent_task.event_callback:
             try:
-                cb_result = parent_task.event_callback("subagent_child_completed", event)
+                cb_result = parent_task.event_callback(
+                    "subagent_child_completed", event
+                )
                 if asyncio.iscoroutine(cb_result):
                     await cb_result
-                logger.debug(f"Announced child {child_task_id} completion to parent {parent_task_id}")
+                logger.debug(
+                    f"Announced child {child_task_id} completion to parent {parent_task_id}"
+                )
             except Exception as e:
                 logger.warning(f"Failed to announce to parent {parent_task_id}: {e}")
 
-    def get_pending_announcements(self, parent_task_id: str) -> List[Dict[str, Any]]:
+    def get_pending_announcements(self, parent_task_id: str) -> list[dict[str, Any]]:
         """获取父任务待处理的子任务完成事件"""
         return self._pending_announcements.pop(parent_task_id, [])
 
@@ -280,41 +300,42 @@ SUBAGENT_SYSTEM_PROMPT_TEMPLATE = """# 子 Agent 上下文
 @dataclass
 class SubagentTask:
     """子 Agent 任务"""
+
     task_id: str
     label: str
     message: str
     task_type: TaskType = TaskType.GENERAL
-    session_id: Optional[str] = None
-    system_prompt: Optional[str] = None
-    event_callback: Optional[Callable] = None
+    session_id: str | None = None
+    system_prompt: str | None = None
+    event_callback: Callable | None = None
     enable_tools: bool = True
-    model_override: Optional[Dict[str, Any]] = None
-    cancel_token: Optional[Any] = None
+    model_override: dict[str, Any] | None = None
+    cancel_token: Any | None = None
     max_retries: int = 2
     retry_count: int = 0
 
     # 深度与角色（借鉴 OpenClaw）
     depth: int = 0
     role: SubagentRole = SubagentRole.MAIN
-    parent_task_id: Optional[str] = None   # 父任务 ID，用于 Push-based 回传
-    agent_id: Optional[str] = None         # 所属 Agent ID，用于 target policy
+    parent_task_id: str | None = None  # 父任务 ID，用于 Push-based 回传
+    agent_id: str | None = None  # 所属 Agent ID，用于 target policy
 
     # 状态
     status: TaskStatus = TaskStatus.PENDING
     progress: int = 0
-    result: Optional[str] = None
-    error: Optional[str] = None
+    result: str | None = None
+    error: str | None = None
 
     # 时间戳
     created_at: datetime = field(default_factory=datetime.now)
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
 
     # 心跳
     last_heartbeat: float = field(default_factory=time.time)
 
     # 工具调用记录
-    tool_call_records: List[Dict[str, Any]] = field(default_factory=list)
+    tool_call_records: list[dict[str, Any]] = field(default_factory=list)
 
     # 完成事件
     done_event: asyncio.Event = field(default_factory=asyncio.Event)
@@ -324,7 +345,7 @@ class SubagentTask:
         """当前任务是否可以 spawn 子任务"""
         return resolve_subagent_capabilities(self.role)["can_spawn"]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "task_id": self.task_id,
@@ -344,7 +365,9 @@ class SubagentTask:
             "agent_id": self.agent_id,
             "created_at": self.created_at.isoformat(),
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
             "tool_call_records": self.tool_call_records,
         }
 
@@ -370,8 +393,8 @@ class SubagentManager:
         timeout_seconds: int = 600,
         heartbeat_interval: float = 30.0,
         heartbeat_timeout: float = 300.0,
-        config: Optional[SubagentConfig] = None,
-        target_policy: Optional[SubagentTargetPolicy] = None,
+        config: SubagentConfig | None = None,
+        target_policy: SubagentTargetPolicy | None = None,
     ):
         """
         初始化 SubagentManager
@@ -396,16 +419,20 @@ class SubagentManager:
         self.target_policy = target_policy or SubagentTargetPolicy()
 
         # 任务存储
-        self.tasks: Dict[str, SubagentTask] = {}
-        self.running_tasks: Dict[str, asyncio.Task] = {}
+        self.tasks: dict[str, SubagentTask] = {}
+        self.running_tasks: dict[str, asyncio.Task] = {}
 
         # 信号量控制并发
         self._semaphore = asyncio.Semaphore(max_concurrent)
 
         # 并发隔离 Lane（借鉴 OpenClaw）
-        self._lanes: Dict[LaneType, SubagentLane] = {
-            LaneType.NESTED: SubagentLane(LaneType.NESTED, max_concurrent=self.config.agent_max_concurrent),
-            LaneType.SUBAGENT: SubagentLane(LaneType.SUBAGENT, max_concurrent=self.config.max_concurrent),
+        self._lanes: dict[LaneType, SubagentLane] = {
+            LaneType.NESTED: SubagentLane(
+                LaneType.NESTED, max_concurrent=self.config.agent_max_concurrent
+            ),
+            LaneType.SUBAGENT: SubagentLane(
+                LaneType.SUBAGENT, max_concurrent=self.config.max_concurrent
+            ),
             LaneType.CRON: SubagentLane(LaneType.CRON, max_concurrent=2),
         }
 
@@ -414,26 +441,28 @@ class SubagentManager:
 
         # 心跳监控
         self._heartbeat_running = False
-        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: asyncio.Task | None = None
 
-        logger.debug(f"SubagentManager initialized: max_concurrent={max_concurrent}, "
-                     f"max_spawn_depth={self.config.max_spawn_depth}")
+        logger.debug(
+            f"SubagentManager initialized: max_concurrent={max_concurrent}, "
+            f"max_spawn_depth={self.config.max_spawn_depth}"
+        )
 
     def create_task(
         self,
         label: str,
         message: str,
         task_type: TaskType = TaskType.GENERAL,
-        session_id: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        event_callback: Optional[Callable] = None,
+        session_id: str | None = None,
+        system_prompt: str | None = None,
+        event_callback: Callable | None = None,
         enable_tools: bool = True,
-        model_override: Optional[Dict[str, Any]] = None,
-        cancel_token: Optional[Any] = None,
+        model_override: dict[str, Any] | None = None,
+        cancel_token: Any | None = None,
         max_retries: int = 2,
         depth: int = 0,
-        parent_task_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        parent_task_id: str | None = None,
+        agent_id: str | None = None,
         lane_type: LaneType = LaneType.SUBAGENT,
     ) -> str:
         """
@@ -462,10 +491,13 @@ class SubagentManager:
         if parent_task_id:
             parent = self.tasks.get(parent_task_id)
             if parent:
-                sibling_count = len([
-                    t for t in self.tasks.values()
-                    if t.parent_task_id == parent_task_id
-                ])
+                sibling_count = len(
+                    [
+                        t
+                        for t in self.tasks.values()
+                        if t.parent_task_id == parent_task_id
+                    ]
+                )
                 if sibling_count >= self.config.max_children_per_agent:
                     raise ValueError(
                         f"Parent task {parent_task_id} already has {sibling_count} children "
@@ -500,8 +532,10 @@ class SubagentManager:
         )
 
         self.tasks[task_id] = task
-        logger.info(f"Created task {task_id}: {label} (type={task_type.value}, "
-                    f"depth={depth}, role={role.value})")
+        logger.info(
+            f"Created task {task_id}: {label} (type={task_type.value}, "
+            f"depth={depth}, role={role.value})"
+        )
 
         return task_id
 
@@ -512,7 +546,9 @@ class SubagentManager:
             raise ValueError(f"Task {task_id} not found")
 
         if task.status != TaskStatus.PENDING:
-            logger.warning(f"Task {task_id} is not pending, current status: {task.status}")
+            logger.warning(
+                f"Task {task_id} is not pending, current status: {task.status}"
+            )
             return
 
         task.status = TaskStatus.RUNNING
@@ -529,14 +565,15 @@ class SubagentManager:
         """执行任务（内部方法）"""
         try:
             await asyncio.wait_for(
-                self._run_task_impl(task),
-                timeout=self._timeout_seconds
+                self._run_task_impl(task), timeout=self._timeout_seconds
             )
         except asyncio.TimeoutError:
             task.status = TaskStatus.FAILED
             task.error = f"任务超时（超过{self._timeout_seconds}秒）"
             task.completed_at = datetime.now()
-            logger.error(f"Task {task.task_id} timed out after {self._timeout_seconds}s")
+            logger.error(
+                f"Task {task.task_id} timed out after {self._timeout_seconds}s"
+            )
             await self._emit_event(task, "task_failed", {"error": task.error})
             # 尝试重试
             await self._maybe_retry(task)
@@ -564,73 +601,80 @@ class SubagentManager:
         # 选择 Lane（根据深度和来源）
         lane = self._resolve_lane(task)
 
-        async with lane:
-            async with self._semaphore:
-                await self._emit_event(task, "task_started", {
+        async with lane, self._semaphore:
+            await self._emit_event(
+                task,
+                "task_started",
+                {
                     "label": task.label,
                     "message": task.message,
                     "task_type": task.task_type.value,
                     "depth": task.depth,
                     "role": task.role.value,
-                })
+                },
+            )
 
-                # 检查取消
-                if self._is_cancelled(task):
-                    raise asyncio.CancelledError("Task cancelled before start")
+            # 检查取消
+            if self._is_cancelled(task):
+                raise asyncio.CancelledError("Task cancelled before start")
 
-                # 更新心跳
-                task.last_heartbeat = time.time()
+            # 更新心跳
+            task.last_heartbeat = time.time()
 
-                # 构建系统提示词
-                system_prompt = task.system_prompt or self._build_default_prompt(task)
+            # 构建系统提示词
+            system_prompt = task.system_prompt or self._build_default_prompt(task)
 
-                # 如果有重试历史，注入失败原因
-                if task.retry_count > 0:
-                    system_prompt += (
-                        f"\n\n注意：这是第 {task.retry_count + 1} 次尝试。"
-                        f"之前的失败原因：{task.error or '未知'}\n"
-                        "请分析失败原因并尝试不同的方法。"
-                    )
+            # 如果有重试历史，注入失败原因
+            if task.retry_count > 0:
+                system_prompt += (
+                    f"\n\n注意：这是第 {task.retry_count + 1} 次尝试。"
+                    f"之前的失败原因：{task.error or '未知'}\n"
+                    "请分析失败原因并尝试不同的方法。"
+                )
 
-                if self._agent_loop:
-                    # 执行 AgentLoop
-                    result = await self._agent_loop.process_direct(
-                        message=task.message,
-                        system_prompt=system_prompt,
-                        model_override=task.model_override,
-                    )
-                else:
-                    # 无 agent_loop，返回模拟结果
-                    result = f"[模拟] 任务 '{task.label}' 执行完成"
+            if self._agent_loop:
+                # 执行 AgentLoop
+                result = await self._agent_loop.process_direct(
+                    message=task.message,
+                    system_prompt=system_prompt,
+                    model_override=task.model_override,
+                )
+            else:
+                # 无 agent_loop，返回模拟结果
+                result = f"[模拟] 任务 '{task.label}' 执行完成"
 
-                # 更新心跳
-                task.last_heartbeat = time.time()
+            # 更新心跳
+            task.last_heartbeat = time.time()
 
-                # 检查取消
-                if self._is_cancelled(task):
-                    raise asyncio.CancelledError("Task cancelled after execution")
+            # 检查取消
+            if self._is_cancelled(task):
+                raise asyncio.CancelledError("Task cancelled after execution")
 
-                # 标记完成
-                task.status = TaskStatus.COMPLETED
-                task.result = result
-                task.progress = 100
-                task.completed_at = datetime.now()
+            # 标记完成
+            task.status = TaskStatus.COMPLETED
+            task.result = result
+            task.progress = 100
+            task.completed_at = datetime.now()
 
-                logger.info(f"Task {task.task_id} completed successfully")
+            logger.info(f"Task {task.task_id} completed successfully")
 
-                await self._emit_event(task, "task_completed", {
+            await self._emit_event(
+                task,
+                "task_completed",
+                {
                     "result": result,
                     "progress": 100,
-                })
+                },
+            )
 
-                # Push-based 结果回传：子 Agent 完成后主动通知父 Agent
-                await self.announcer.announce(
-                    child_task_id=task.task_id,
-                    parent_task_id=task.parent_task_id,
-                    result=result,
-                    status="completed",
-                    manager=self,
-                )
+            # Push-based 结果回传：子 Agent 完成后主动通知父 Agent
+            await self.announcer.announce(
+                child_task_id=task.task_id,
+                parent_task_id=task.parent_task_id,
+                result=result,
+                status="completed",
+                manager=self,
+            )
 
     def _resolve_lane(self, task: SubagentTask) -> SubagentLane:
         """根据任务属性选择并发隔离 Lane"""
@@ -645,8 +689,10 @@ class SubagentManager:
             return
 
         # 指数退避
-        backoff = min(2 ** task.retry_count, 30)  # 最大 30 秒
-        logger.info(f"Task {task.task_id} retrying in {backoff}s (attempt {task.retry_count + 1}/{task.max_retries})")
+        backoff = min(2**task.retry_count, 30)  # 最大 30 秒
+        logger.info(
+            f"Task {task.task_id} retrying in {backoff}s (attempt {task.retry_count + 1}/{task.max_retries})"
+        )
 
         await asyncio.sleep(backoff)
 
@@ -658,14 +704,20 @@ class SubagentManager:
         task.progress = 0
         task.last_heartbeat = time.time()
 
-        await self._emit_event(task, "task_retrying", {
-            "retry_count": task.retry_count,
-            "max_retries": task.max_retries,
-        })
+        await self._emit_event(
+            task,
+            "task_retrying",
+            {
+                "retry_count": task.retry_count,
+                "max_retries": task.max_retries,
+            },
+        )
 
         await self.execute_task(task.task_id)
 
-    async def _emit_event(self, task: SubagentTask, event_type: str, data: dict) -> None:
+    async def _emit_event(
+        self, task: SubagentTask, event_type: str, data: dict
+    ) -> None:
         """发送事件"""
         if task.event_callback:
             try:
@@ -677,7 +729,7 @@ class SubagentManager:
 
     def _is_cancelled(self, task: SubagentTask) -> bool:
         """检查任务是否被取消"""
-        if task.cancel_token and hasattr(task.cancel_token, 'is_cancelled'):
+        if task.cancel_token and hasattr(task.cancel_token, "is_cancelled"):
             return task.cancel_token.is_cancelled
         return False
 
@@ -714,14 +766,12 @@ class SubagentManager:
 - 采取适当的行动
 - 提供清晰准确的结果
 - 如果遇到问题，说明原因""",
-
             TaskType.RESEARCH: """你是一个研究专家。
 你的任务是深入研究给定的主题。
 - 收集相关信息和资料
 - 分析不同来源的观点
 - 提供全面准确的调研报告
 - 标注信息来源和可信度""",
-
             TaskType.BUILD: """你是一个构建和测试专家。
 你的任务是执行构建和测试任务。
 - 按照要求执行构建命令
@@ -729,35 +779,30 @@ class SubagentManager:
 - 分析构建和测试结果
 - 报告成功/失败以及原因
 - 提供错误排查建议""",
-
             "explore": """你是一个代码库探索专家。
 你的任务是深入理解代码库的结构和功能。
 - 先了解整体目录结构
 - 找到相关的核心文件和模块
 - 分析代码逻辑和依赖关系
 - 用简洁清晰的方式总结你的发现""",
-
             "plan": """你是一个架构设计专家。
 你的任务是分析需求并设计实现方案。
 - 理解业务需求和技术约束
 - 设计系统架构和模块划分
 - 制定分步骤的实施计划
 - 评估潜在风险和权衡""",
-
             "verification": """你是一个验证专家。
 你的任务是验证代码的正确性和质量。
 - 运行测试套件确认功能正确
 - 检查边界条件和异常情况
 - 验证安全和性能要求
 - 按严重程度分类问题""",
-
             "guide": """你是 PioneClaw 使用指南专家。
 你的任务是帮助用户了解和使用 PioneClaw 平台。
 - 解释 PioneClaw 的功能和概念
 - 提供操作指导和最佳实践
 - 回答使用中的问题
 - 推荐适合用户场景的配置""",
-
             "debug": """你是一个调试专家。
 你的任务是帮助定位和解决问题。
 - 首先理解问题的表现
@@ -765,7 +810,6 @@ class SubagentManager:
 - 定位可能的根本原因
 - 提供具体的修复建议
 - 验证修复方案的有效性""",
-
             "review": """你是一个代码审查专家。
 你的任务是审查代码并提供改进建议。
 - 检查代码的正确性和完整性
@@ -773,7 +817,6 @@ class SubagentManager:
 - 评估代码性能和可维护性
 - 提供具体的改进建议
 - 按照严重程度分类问题""",
-
             "long_running": """你是长时任务启动器。你的唯一职责是：分析任务 → 准备环境 → 用 run_background 启动后台命令 → 标记成功退出。
 
 ## 核心规则（必须遵守）
@@ -789,9 +832,16 @@ class SubagentManager:
         }
 
         # Try task_type first, then agent_type string
-        task_type_str = task.task_type.value if hasattr(task.task_type, 'value') else str(task.task_type)
+        task_type_str = (
+            task.task_type.value
+            if hasattr(task.task_type, "value")
+            else str(task.task_type)
+        )
         base = type_prompts.get(task_type_str, type_prompts[TaskType.GENERAL])
-        return f"{base}\n\n任务: {task.label}\n详情: {task.message}\n\n请专注于完成任务，给出清晰、详细的结果。禁止编造未获取的数据。"""
+        return (
+            f"{base}\n\n任务: {task.label}\n详情: {task.message}\n\n请专注于完成任务，给出清晰、详细的结果。禁止编造未获取的数据。"
+            ""
+        )
 
     # ==================== 心跳监控 ====================
 
@@ -809,10 +859,8 @@ class SubagentManager:
         self._heartbeat_running = False
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._heartbeat_task
-            except asyncio.CancelledError:
-                pass
             self._heartbeat_task = None
         logger.info("Heartbeat monitor stopped")
 
@@ -866,10 +914,8 @@ class SubagentManager:
         async_task = self.running_tasks.get(task_id)
         if async_task:
             async_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await async_task
-            except asyncio.CancelledError:
-                pass
 
         task.status = TaskStatus.CANCELLED
         task.completed_at = datetime.now()
@@ -888,16 +934,16 @@ class SubagentManager:
 
         return cancelled_count
 
-    def get_task(self, task_id: str) -> Optional[SubagentTask]:
+    def get_task(self, task_id: str) -> SubagentTask | None:
         """获取任务信息"""
         return self.tasks.get(task_id)
 
     def list_tasks(
         self,
-        status: Optional[TaskStatus] = None,
-        session_id: Optional[str] = None,
-        task_type: Optional[TaskType] = None,
-    ) -> List[SubagentTask]:
+        status: TaskStatus | None = None,
+        session_id: str | None = None,
+        task_type: TaskType | None = None,
+    ) -> list[SubagentTask]:
         """列出任务"""
         tasks = list(self.tasks.values())
 
@@ -913,15 +959,18 @@ class SubagentManager:
         tasks.sort(key=lambda t: t.created_at, reverse=True)
         return tasks
 
-    def get_running_tasks(self) -> List[SubagentTask]:
+    def get_running_tasks(self) -> list[SubagentTask]:
         """获取所有运行中的任务"""
         return self.list_tasks(status=TaskStatus.RUNNING)
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取任务统计信息"""
         type_stats = {}
         for t in self.tasks.values():
-            type_stats.setdefault(t.task_type.value, {"total": 0, "running": 0, "completed": 0, "failed": 0})
+            type_stats.setdefault(
+                t.task_type.value,
+                {"total": 0, "running": 0, "completed": 0, "failed": 0},
+            )
             type_stats[t.task_type.value]["total"] += 1
             if t.status == TaskStatus.RUNNING:
                 type_stats[t.task_type.value]["running"] += 1
@@ -932,11 +981,21 @@ class SubagentManager:
 
         return {
             "total": len(self.tasks),
-            "pending": len([t for t in self.tasks.values() if t.status == TaskStatus.PENDING]),
-            "running": len([t for t in self.tasks.values() if t.status == TaskStatus.RUNNING]),
-            "completed": len([t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]),
-            "failed": len([t for t in self.tasks.values() if t.status == TaskStatus.FAILED]),
-            "cancelled": len([t for t in self.tasks.values() if t.status == TaskStatus.CANCELLED]),
+            "pending": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.PENDING]
+            ),
+            "running": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.RUNNING]
+            ),
+            "completed": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.COMPLETED]
+            ),
+            "failed": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.FAILED]
+            ),
+            "cancelled": len(
+                [t for t in self.tasks.values() if t.status == TaskStatus.CANCELLED]
+            ),
             "by_type": type_stats,
         }
 
@@ -961,7 +1020,11 @@ class SubagentManager:
         cleaned = 0
 
         for task_id, task in list(self.tasks.items()):
-            if task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+            if task.status in [
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            ]:
                 if task.completed_at and task.completed_at < cutoff_time:
                     del self.tasks[task_id]
                     cleaned += 1
@@ -971,7 +1034,9 @@ class SubagentManager:
 
         return cleaned
 
-    async def wait_for_task(self, task_id: str, timeout: Optional[float] = None) -> Optional[SubagentTask]:
+    async def wait_for_task(
+        self, task_id: str, timeout: float | None = None
+    ) -> SubagentTask | None:
         """等待任务完成"""
         task = self.tasks.get(task_id)
         if not task:
@@ -990,8 +1055,8 @@ class SubagentManager:
         source_task_id: str,
         target_agent: Any,
         prompt: str,
-        config: Optional['HandoffConfig'] = None,
-    ) -> 'HandoffResult':
+        config: Optional["HandoffConfig"] = None,
+    ) -> "HandoffResult":
         """委托给目标 Agent（Handoff 模式）
 
         借鉴 PraisonAI Handoff，提供轻量级委托机制。
@@ -1015,7 +1080,7 @@ class SubagentManager:
         handoff = Handoff(target_agent, config=config)
 
         # 获取源任务的上下文（如果有）
-        context = getattr(source_task, '_context_messages', None)
+        context = getattr(source_task, "_context_messages", None)
 
         result = await handoff.execute(
             source_agent=source_task,
@@ -1028,9 +1093,9 @@ class SubagentManager:
     async def parallel_handoffs(
         self,
         source_task_id: str,
-        targets: List[tuple],  # List[(agent, prompt)] 或 List[(agent, prompt, config)]
+        targets: list[tuple],  # List[(agent, prompt)] 或 List[(agent, prompt, config)]
         max_concurrent: int = 5,
-    ) -> List['HandoffResult']:
+    ) -> list["HandoffResult"]:
         """并行委托给多个 Agent
 
         借鉴 PraisonAI parallel_handoffs

@@ -2,14 +2,14 @@
 Compactor 修复测试：user_id/session_id/agent_id 参数化 + CONVERSATION_TO_MEMORY_PROMPT
 """
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.modules.agent.compactor import (
-    Compactor,
     CompactionConfig,
+    Compactor,
     create_compactor,
-    CONVERSATION_TO_MEMORY_PROMPT,
 )
 
 
@@ -79,13 +79,17 @@ class TestConversationToMemoryPrompt:
     async def test_generate_uses_conversation_prompt(self):
         """_generate_memory_entries 应使用 CONVERSATION_TO_MEMORY_PROMPT"""
         mock_llm = MagicMock()
-        mock_llm.chat = AsyncMock(return_value={"content": "用户偏好深色主题；项目名PioneClaw"})
+        mock_llm.chat = AsyncMock(
+            return_value={"content": "用户偏好深色主题；项目名PioneClaw"}
+        )
 
         c = Compactor(llm_client=mock_llm)
-        entries = await c._generate_memory_entries([
-            {"role": "user", "content": "我喜欢深色主题"},
-            {"role": "assistant", "content": "好的，已记录"},
-        ])
+        entries = await c._generate_memory_entries(
+            [
+                {"role": "user", "content": "我喜欢深色主题"},
+                {"role": "assistant", "content": "好的，已记录"},
+            ]
+        )
 
         assert len(entries) == 2
         assert "深色主题" in entries[0]
@@ -103,9 +107,11 @@ class TestConversationToMemoryPrompt:
         mock_llm.chat = AsyncMock(return_value={"content": "无需记录"})
 
         c = Compactor(llm_client=mock_llm)
-        entries = await c._generate_memory_entries([
-            {"role": "user", "content": "你好"},
-        ])
+        entries = await c._generate_memory_entries(
+            [
+                {"role": "user", "content": "你好"},
+            ]
+        )
 
         assert entries == []
 
@@ -117,12 +123,16 @@ class TestCompactorIntegration:
     async def test_compact_writes_memories_with_params(self):
         """compact() 流程中记忆正确传递 user_id/session_id"""
         mock_llm = MagicMock()
-        mock_llm.chat = AsyncMock(return_value={"content": "用户用 FastAPI；项目名 TestApp"})
+        mock_llm.chat = AsyncMock(
+            return_value={"content": "用户用 FastAPI；项目名 TestApp"}
+        )
         mock_orchestrator = MagicMock()
         mock_orchestrator.store = AsyncMock()
 
         c = Compactor(
-            config=CompactionConfig(message_threshold=5, keep_recent_messages=2, generate_memory=True),
+            config=CompactionConfig(
+                message_threshold=5, keep_recent_messages=2, generate_memory=True
+            ),
             llm_client=mock_llm,
             memory_orchestrator=mock_orchestrator,
             user_id=99,
@@ -130,11 +140,9 @@ class TestCompactorIntegration:
         )
 
         # 构造足够多的消息触发压缩
-        messages = [
-            {"role": "user", "content": f"消息 {i}"} for i in range(8)
-        ]
+        messages = [{"role": "user", "content": f"消息 {i}"} for i in range(8)]
 
-        result = await c.compact(messages)
+        await c.compact(messages)
 
         # 验证记忆写入调用了正确参数
         if mock_orchestrator.store.call_count > 0:

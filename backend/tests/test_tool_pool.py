@@ -2,22 +2,23 @@
 工具池过滤测试：ToolPoolMode, TOOL_POOL_PRESETS, get_pool_tool_policy
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+import pytest
+
+from app.core.sandbox_policy import ToolPolicy
 from app.modules.tools.pool_filter import (
-    ToolPoolMode,
     TOOL_POOL_PRESETS,
-    get_pool_tool_policy,
+    ToolPoolMode,
     get_pool_mode_description,
+    get_pool_tool_policy,
     list_pool_modes,
 )
-from app.core.sandbox_policy import ToolPolicy, ToolPolicyConfig
-
 
 # ============================================================
 # ToolPoolMode 枚举测试
 # ============================================================
+
 
 class TestToolPoolMode:
     """测试 ToolPoolMode 枚举"""
@@ -46,6 +47,7 @@ class TestToolPoolMode:
 # TOOL_POOL_PRESETS 测试
 # ============================================================
 
+
 class TestPoolPresets:
     """测试预设定义"""
 
@@ -54,7 +56,7 @@ class TestPoolPresets:
             assert mode in TOOL_POOL_PRESETS
 
     def test_preset_has_required_keys(self):
-        for mode, preset in TOOL_POOL_PRESETS.items():
+        for _mode, preset in TOOL_POOL_PRESETS.items():
             assert "allow" in preset
             assert "deny" in preset
             assert "description" in preset
@@ -102,6 +104,7 @@ class TestPoolPresets:
 # get_pool_tool_policy 测试
 # ============================================================
 
+
 class TestGetPoolToolPolicy:
     """测试 get_pool_tool_policy 函数"""
 
@@ -143,7 +146,10 @@ class TestGetPoolToolPolicy:
         """BARE 模式: 拒绝所有已知工具"""
         with patch("app.modules.tools.registry.get_tool_registry") as mock_reg:
             mock_reg.return_value.list_tools.return_value = [
-                "read_file", "write_file", "exec", "grep"
+                "read_file",
+                "write_file",
+                "exec",
+                "grep",
             ]
             policy = get_pool_tool_policy(ToolPoolMode.BARE)
 
@@ -182,6 +188,7 @@ class TestGetPoolToolPolicy:
 # 辅助函数测试
 # ============================================================
 
+
 class TestHelperFunctions:
     """测试辅助函数"""
 
@@ -206,6 +213,7 @@ class TestHelperFunctions:
 # Plan Mode 集成测试
 # ============================================================
 
+
 class TestPlanModeIntegration:
     """测试 plan mode 与 pool preset 的集成"""
 
@@ -213,6 +221,7 @@ class TestPlanModeIntegration:
         """plan_mode.py 的 get_plan_mode_allowed_tools() 来源于 pool preset"""
         # 当工具未注册时，回退到硬编码列表
         from app.modules.tools.plan_mode import get_plan_mode_allowed_tools
+
         allowed = get_plan_mode_allowed_tools()
         # 硬编码回退列表包含这些只读工具
         assert "read_file" in allowed
@@ -225,13 +234,24 @@ class TestPlanModeIntegration:
     def test_pool_plan_preset_matches_hardcoded(self):
         """pool PLAN 预设与硬编码回退列表一致"""
         from app.modules.tools.pool_filter import TOOL_POOL_PRESETS, ToolPoolMode
+
         plan_allow = set(TOOL_POOL_PRESETS[ToolPoolMode.PLAN]["allow"])
         # 回退列表（plan_mode 模块级）
         hardcoded = {
-            "read_file", "grep", "file_search", "list_dir",
-            "web_search", "web_fetch", "current_time", "calculator",
-            "ask_user_question", "exit_plan_mode", "image",
-            "knowledge_search", "vector_memory_recall", "file_memory_read",
+            "read_file",
+            "grep",
+            "file_search",
+            "list_dir",
+            "web_search",
+            "web_fetch",
+            "current_time",
+            "calculator",
+            "ask_user_question",
+            "exit_plan_mode",
+            "image",
+            "knowledge_search",
+            "vector_memory_recall",
+            "file_memory_read",
         }
         # pool preset 包含所有回退列表的工具
         assert hardcoded.issubset(plan_allow)

@@ -1,38 +1,38 @@
+from app.models.approval import Approval, ApprovalStatus, ApprovalType
+from app.models.connection_event import ConnectionEvent
+from app.models.layered_memory import ContextType, LayeredMemory, MemoryLayer
 from app.models.models import (
-    User,
     Agent,
-    Skill,
-    AgentSkill,
-    CronJob,
-    CronExecutionLog,
-    SystemSetting,
-    ApiUsage,
-    AIModelConfig,
-    Runner,
-    Role,
-    Task,
     AgentExecution,
-    Session,
-    SessionMessage,
-    TaskTemplate,
-    TaskDependency,
+    AgentSkill,
+    AgentStatus,
+    AIModelConfig,
+    ApiUsage,
+    CronExecutionLog,
+    CronJob,
     KnowledgeBase,
     KnowledgeDocument,
-    UserRole,
-    AgentStatus,
+    Role,
+    Runner,
     RunnerStatus,
+    Session,
+    SessionMessage,
+    Skill,
     SkillScope,
+    SystemSetting,
+    Task,
+    TaskDependency,
+    TaskTemplate,
+    User,
+    UserRole,
 )
 from app.models.organization import Organization
-from app.models.permission import Permission, DEFAULT_PERMISSIONS
-from app.models.wiki import Wiki, WikiVersion, WikiSpace, WikiSpaceType
-from app.models.task_comment import TaskComment
-from app.models.layered_memory import LayeredMemory, MemoryLayer, ContextType
+from app.models.permission import DEFAULT_PERMISSIONS, Permission
 from app.models.runner_release import RunnerRelease
-from app.models.connection_event import ConnectionEvent
-from app.models.workspace import Workspace
-from app.models.approval import Approval, ApprovalStatus, ApprovalType
+from app.models.task_comment import TaskComment
 from app.models.task_flow import TaskFlow, TaskFlowState
+from app.models.wiki import Wiki, WikiSpace, WikiSpaceType, WikiVersion
+from app.models.workspace import Workspace
 
 __all__ = [
     # 原有模型

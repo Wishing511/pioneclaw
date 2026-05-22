@@ -7,8 +7,8 @@
 - CalculatorTool: 简单计算器
 """
 
-import asyncio
 import ast
+import asyncio
 import glob
 import json
 import logging
@@ -16,39 +16,44 @@ import operator
 import os
 import re
 import shlex
-import subprocess
 import uuid
-from typing import Optional, TYPE_CHECKING
 from datetime import datetime
-from app.modules.tools.base import BaseTool, ToolParameter
-from app.modules.tools.registry import register_tool_class, get_tool_registry
-from app.modules.tools.web import WebSearchTool, WebFetchTool
-from app.modules.tools.plan_mode import EnterPlanModeTool, ExitPlanModeTool
-from app.modules.tools.skill import SkillTool
-from app.modules.tools.send_message import (
-    SendMessageTool, register_agent, unregister_agent,
-)
-from app.modules.tools.config import ConfigTool
-from app.modules.tools.team import TeamCreateTool, TeamDeleteTool
+from typing import TYPE_CHECKING, Optional
 
-from app.modules.tools.task_create import TaskCreateTool
-from app.modules.tools.task_get import TaskGetTool
-from app.modules.tools.task_list import TaskListTool
-from app.modules.tools.task_update import TaskUpdateTool
-from app.modules.tools.task_stop import TaskStopTool
-from app.modules.tools.task_output import TaskOutputTool
-from app.modules.tools.todo_write import TodoWriteTool
-from app.modules.tools.mcp import MCPTool, ListMcpResourcesTool, ReadMcpResourceTool, McpAuthTool
 from app.core.bash_safety import (
-    analyze_command,
-    DangerLevel,
-    CommandBlockedError,
     CommandConfirmationRequired,
+    DangerLevel,
+    analyze_command,
 )
 from app.core.sandbox import (
     PathOutsideWorkspaceError,
     SensitiveFileAccessRequired,
 )
+from app.modules.tools.base import BaseTool, ToolParameter
+from app.modules.tools.config import ConfigTool
+from app.modules.tools.mcp import (
+    ListMcpResourcesTool,
+    McpAuthTool,
+    MCPTool,
+    ReadMcpResourceTool,
+)
+from app.modules.tools.plan_mode import EnterPlanModeTool, ExitPlanModeTool
+from app.modules.tools.registry import get_tool_registry
+from app.modules.tools.send_message import (
+    SendMessageTool,
+    register_agent,
+    unregister_agent,
+)
+from app.modules.tools.skill import SkillTool
+from app.modules.tools.task_create import TaskCreateTool
+from app.modules.tools.task_get import TaskGetTool
+from app.modules.tools.task_list import TaskListTool
+from app.modules.tools.task_output import TaskOutputTool
+from app.modules.tools.task_stop import TaskStopTool
+from app.modules.tools.task_update import TaskUpdateTool
+from app.modules.tools.team import TeamCreateTool, TeamDeleteTool
+from app.modules.tools.todo_write import TodoWriteTool
+from app.modules.tools.web import WebFetchTool, WebSearchTool
 
 if TYPE_CHECKING:
     from app.modules.tools.registry import ToolRegistry
@@ -70,7 +75,7 @@ class CurrentTimeTool(BaseTool):
         ),
     }
     required = []
-    
+
     async def execute(self, timezone: str = "local", **kwargs) -> str:
         now = datetime.now()
         return f"当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')} ({timezone})"
@@ -87,6 +92,7 @@ _SAFE_BINOPS = {
     ast.Pow: operator.pow,
     ast.BitXor: operator.pow,  # ^ 当作幂运算（如 5^2 = 25）
 }
+
 
 def _safe_eval_node(node):
     """递归安全求值 AST 节点，仅允许数学运算"""
@@ -109,6 +115,7 @@ def _safe_eval_node(node):
             return +operand
         raise ValueError(f"不支持的一元运算符: {type(node.op).__name__}")
     raise ValueError(f"不支持的表达式: {type(node).__name__}")
+
 
 def safe_eval_math(expression: str):
     """仅允许数学表达式求值，无代码执行风险"""
@@ -166,14 +173,19 @@ class ReadFileTool(BaseTool):
     }
     required = ["path"]
 
-    async def execute(self, path: str, sheet_name: str = "", max_rows: int = 200, **kwargs) -> str:
+    async def execute(
+        self, path: str, sheet_name: str = "", max_rows: int = 200, **kwargs
+    ) -> str:
         try:
             # 沙箱校验
             from pathlib import Path
+
             from app.core.config import settings
             from app.core.sandbox import validate_path_for_read
+
             safe_path = validate_path_for_read(
-                path, Path(settings.WORKSPACE_DIR),
+                path,
+                Path(settings.WORKSPACE_DIR),
                 allow_sensitive=kwargs.get("_allow_sensitive", False),
                 allow_outside=kwargs.get("_allow_outside", False),
             )
@@ -182,32 +194,32 @@ class ReadFileTool(BaseTool):
 
             sp = str(safe_path)
             # Excel 文件处理
-            if ext in ('.xlsx', '.xls'):
+            if ext in (".xlsx", ".xls"):
                 return await self._read_excel(sp, sheet_name, max_rows)
 
             # Word 文件处理
-            if ext == '.docx':
+            if ext == ".docx":
                 return await self._read_docx(sp)
 
             # PowerPoint 文件处理
-            if ext == '.pptx':
+            if ext == ".pptx":
                 return await self._read_pptx(sp)
 
             # PDF 文件处理
-            if ext == '.pdf':
+            if ext == ".pdf":
                 return await self._read_pdf(sp, max_rows)
 
             # CSV 文件处理（用 utf-8 读）
-            if ext == '.csv':
+            if ext == ".csv":
                 return await self._read_csv(sp, max_rows)
 
             # 其它文本文件
             try:
-                with open(sp, 'r', encoding='utf-8') as f:
+                with open(sp, encoding="utf-8") as f:
                     content = f.read()
             except UnicodeDecodeError:
                 # 尝试其他编码
-                with open(sp, 'r', encoding='gbk') as f:
+                with open(sp, encoding="gbk") as f:
                     content = f.read()
 
             if len(content) > 5000:
@@ -226,7 +238,9 @@ class ReadFileTool(BaseTool):
         try:
             import openpyxl
         except ImportError:
-            return "错误: 需要安装 openpyxl 库才能读取 Excel 文件 (pip install openpyxl)"
+            return (
+                "错误: 需要安装 openpyxl 库才能读取 Excel 文件 (pip install openpyxl)"
+            )
 
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
 
@@ -243,7 +257,7 @@ class ReadFileTool(BaseTool):
         for i, row in enumerate(ws.iter_rows(values_only=True)):
             if i >= max_rows:
                 break
-            rows.append([str(cell) if cell is not None else '' for cell in row])
+            rows.append([str(cell) if cell is not None else "" for cell in row])
 
         wb.close()
 
@@ -256,8 +270,8 @@ class ReadFileTool(BaseTool):
         lines.append(" | ".join(["---"] * len(rows[0])))
         for row in rows[1:]:
             # 确保每行列数一致
-            padded = row + [''] * (len(rows[0]) - len(row))
-            lines.append(" | ".join(padded[:len(rows[0])]))
+            padded = row + [""] * (len(rows[0]) - len(row))
+            lines.append(" | ".join(padded[: len(rows[0])]))
 
         if len(rows) >= max_rows:
             lines.append(f"\n... (仅显示前 {max_rows} 行)")
@@ -270,11 +284,11 @@ class ReadFileTool(BaseTool):
     async def _read_csv(self, path: str, max_rows: int) -> str:
         """读取 CSV 文件"""
         lines = []
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i >= max_rows:
                     break
-                lines.append(line.rstrip('\n'))
+                lines.append(line.rstrip("\n"))
 
         if not lines:
             return "CSV 文件为空"
@@ -299,8 +313,8 @@ class ReadFileTool(BaseTool):
             text = para.text.strip()
             if text:
                 paragraphs.append(text)
-            elif paragraphs and paragraphs[-1] != '':
-                paragraphs.append('')  # 空段落作为分隔
+            elif paragraphs and paragraphs[-1] != "":
+                paragraphs.append("")  # 空段落作为分隔
 
         if not paragraphs:
             return "Word 文档为空"
@@ -343,7 +357,9 @@ class ReadFileTool(BaseTool):
         try:
             import pdfplumber
         except ImportError:
-            return "错误: 需要安装 pdfplumber 库才能读取 PDF 文件 (pip install pdfplumber)"
+            return (
+                "错误: 需要安装 pdfplumber 库才能读取 PDF 文件 (pip install pdfplumber)"
+            )
 
         with pdfplumber.open(path) as pdf:
             if len(pdf.pages) == 0:
@@ -354,9 +370,9 @@ class ReadFileTool(BaseTool):
             for i, page in enumerate(pdf.pages, 1):
                 text = page.extract_text()
                 if text:
-                    lines = text.strip().split('\n')
+                    lines = text.strip().split("\n")
                     if total_lines + len(lines) > max_rows:
-                        lines = lines[:max_rows - total_lines]
+                        lines = lines[: max_rows - total_lines]
                         pages_output.append(f"## 第 {i} 页\n" + "\n".join(lines))
                         pages_output.append("... (已达到最大行数限制)")
                         break
@@ -374,7 +390,7 @@ class ReadFileTool(BaseTool):
 
 class WriteFileTool(BaseTool):
     """写入文件工具"""
-    
+
     name = "write_file"
     description = "将内容写入文件。支持纯文本、Markdown 表格转 Excel（.xlsx）、Word（.docx）、PowerPoint（.pptx）"
     parameters = {
@@ -388,30 +404,33 @@ class WriteFileTool(BaseTool):
         ),
     }
     required = ["path", "content"]
-    
+
     async def execute(self, path: str, content: str, **kwargs) -> str:
         try:
             # 沙箱校验
             from pathlib import Path
+
             from app.core.config import settings
             from app.core.sandbox import validate_path_for_write
+
             safe_path = validate_path_for_write(
-                path, Path(settings.WORKSPACE_DIR),
+                path,
+                Path(settings.WORKSPACE_DIR),
                 allow_sensitive=kwargs.get("_allow_sensitive", False),
             )
 
             sp = str(safe_path)
             ext = os.path.splitext(sp)[1].lower()
 
-            if ext in ('.xlsx', '.xls'):
+            if ext in (".xlsx", ".xls"):
                 return await self._write_xlsx(sp, content)
-            if ext == '.docx':
+            if ext == ".docx":
                 return await self._write_docx(sp, content)
-            if ext == '.pptx':
+            if ext == ".pptx":
                 return await self._write_pptx(sp, content)
 
             # 纯文本写入
-            with open(sp, 'w', encoding='utf-8') as f:
+            with open(sp, "w", encoding="utf-8") as f:
                 f.write(content)
             return f"成功写入文件: {sp} ({len(content)} 字符)"
         except (PathOutsideWorkspaceError, SensitiveFileAccessRequired):
@@ -424,29 +443,31 @@ class WriteFileTool(BaseTool):
         try:
             import openpyxl
         except ImportError:
-            return "错误: 需要安装 openpyxl 库才能写入 Excel 文件 (pip install openpyxl)"
+            return (
+                "错误: 需要安装 openpyxl 库才能写入 Excel 文件 (pip install openpyxl)"
+            )
 
         # 解析内容为行
-        lines = [l for l in content.strip().split('\n') if l.strip()]
+        lines = [line for line in content.strip().split("\n") if line.strip()]
         rows = []
 
         # 检测是否为 markdown table
-        if any('|' in l for l in lines):
+        if any("|" in line for line in lines):
             # Markdown table 模式：跳过分隔行（如 |---|）
             for line in lines:
                 line = line.strip()
-                if line.startswith('|') and '---' in line:
+                if line.startswith("|") and "---" in line:
                     continue
-                cells = [c.strip() for c in line.strip('|').split('|')]
+                cells = [c.strip() for c in line.strip("|").split("|")]
                 if any(c for c in cells):  # 跳过全空行
                     rows.append(cells)
         else:
             # CSV/TSV 模式
             for line in lines:
-                if '\t' in line:
-                    rows.append(line.split('\t'))
-                elif ',' in line:
-                    rows.append(line.split(','))
+                if "\t" in line:
+                    rows.append(line.split("\t"))
+                elif "," in line:
+                    rows.append(line.split(","))
                 else:
                     rows.append([line])
 
@@ -469,7 +490,7 @@ class WriteFileTool(BaseTool):
             return "错误: 需要安装 python-docx 库才能写入 Word 文件 (pip install python-docx)"
 
         doc = Document()
-        paragraphs = content.strip().split('\n\n')
+        paragraphs = content.strip().split("\n\n")
         for para_text in paragraphs:
             para_text = para_text.strip()
             if para_text:
@@ -486,7 +507,7 @@ class WriteFileTool(BaseTool):
             return "错误: 需要安装 python-pptx 库才能写入 PowerPoint 文件 (pip install python-pptx)"
 
         prs = Presentation()
-        slides = content.strip().split('\n---\n')
+        slides = content.strip().split("\n---\n")
         if len(slides) == 1:
             # 没有分隔符，尝试用空行分隔（标题独占一行模式）
             slides = [content.strip()]
@@ -495,9 +516,9 @@ class WriteFileTool(BaseTool):
             slide_text = slide_text.strip()
             if not slide_text:
                 continue
-            lines = slide_text.split('\n')
+            lines = slide_text.split("\n")
             title = lines[0].strip()
-            body = '\n'.join(l.strip() for l in lines[1:] if l.strip())
+            body = "\n".join(line.strip() for line in lines[1:] if line.strip())
 
             slide_layout = prs.slide_layouts[1]  # Title + Content
             slide = prs.slides.add_slide(slide_layout)
@@ -524,10 +545,36 @@ class ExecTool(BaseTool):
 
     # Windows CMD 内置命令列表（create_subprocess_exec 无法直接执行这些）
     _WIN_CMD_BUILTINS = {
-        "dir", "echo", "type", "cd", "chdir", "md", "mkdir", "rd", "rmdir",
-        "del", "erase", "copy", "move", "ren", "rename", "cls", "pause",
-        "ver", "vol", "path", "set", "exit", "start", "assoc", "ftype",
-        "prompt", "title", "color", "date", "time",
+        "dir",
+        "echo",
+        "type",
+        "cd",
+        "chdir",
+        "md",
+        "mkdir",
+        "rd",
+        "rmdir",
+        "del",
+        "erase",
+        "copy",
+        "move",
+        "ren",
+        "rename",
+        "cls",
+        "pause",
+        "ver",
+        "vol",
+        "path",
+        "set",
+        "exit",
+        "start",
+        "assoc",
+        "ftype",
+        "prompt",
+        "title",
+        "color",
+        "date",
+        "time",
     }
 
     async def execute(self, command: str, **kwargs) -> str:
@@ -536,12 +583,15 @@ class ExecTool(BaseTool):
         # 否则 C:\Users\file.txt 会被错误切分为 C:Usersfile.txt
         try:
             import sys
+
             is_windows = sys.platform == "win32"
             posix_mode = not is_windows
             args = shlex.split(command, posix=posix_mode)
             # 非 POSIX 模式会保留引号，这里手动去外层引号以保持行为一致
             if is_windows:
-                args = [a[1:-1] if len(a) >= 2 and a[0] == a[-1] == '"' else a for a in args]
+                args = [
+                    a[1:-1] if len(a) >= 2 and a[0] == a[-1] == '"' else a for a in args
+                ]
         except ValueError as e:
             return f"错误: 命令解析失败 - {e}"
 
@@ -560,12 +610,15 @@ class ExecTool(BaseTool):
         # 用 create_subprocess_exec 替代 create_subprocess_shell
         # shell=False 确保元字符（| ; && $() ``）不会被解释
         from pathlib import Path
+
         from app.core.config import settings
+
         workspace = Path(settings.WORKSPACE_DIR).resolve()
         workspace.mkdir(parents=True, exist_ok=True)
         cwd = str(workspace)
 
         import sys
+
         is_windows = sys.platform == "win32"
 
         # Windows 兼容性：CMD 内置命令（dir、echo、type 等）无法通过 create_subprocess_exec 直接执行
@@ -590,12 +643,12 @@ class ExecTool(BaseTool):
 
             output_parts = []
             if stdout:
-                text = stdout.decode('utf-8', errors='replace')
-                text = text.replace('\r\n', '\n').replace('\r', '\n')
+                text = stdout.decode("utf-8", errors="replace")
+                text = text.replace("\r\n", "\n").replace("\r", "\n")
                 output_parts.append(text)
             if stderr:
-                text = stderr.decode('utf-8', errors='replace')
-                text = text.replace('\r\n', '\n').replace('\r', '\n')
+                text = stderr.decode("utf-8", errors="replace")
+                text = text.replace("\r\n", "\n").replace("\r", "\n")
                 if text.strip():
                     output_parts.append(f"STDERR:\n{text}")
             if process.returncode != 0:
@@ -608,7 +661,7 @@ class ExecTool(BaseTool):
 
         try:
             return await _run_subprocess(args)
-        except FileNotFoundError as e:
+        except FileNotFoundError:
             # Windows 回退：如果找不到可执行文件，尝试用 cmd /c 包装
             if is_windows and args[0:1] != ["cmd"]:
                 try:
@@ -667,23 +720,35 @@ class EditFileTool(BaseTool):
     }
     required = ["path"]
 
-    async def execute(self, path: str, old_text: str = "", new_text: str = "",
-                      start_line: int = 0, end_line: int = 0,
-                      insert: bool = False, **kwargs) -> str:
+    async def execute(
+        self,
+        path: str,
+        old_text: str = "",
+        new_text: str = "",
+        start_line: int = 0,
+        end_line: int = 0,
+        insert: bool = False,
+        **kwargs,
+    ) -> str:
         try:
             # 沙箱校验（编辑 = 写操作）
             from pathlib import Path
+
             from app.core.config import settings
             from app.core.sandbox import validate_path_for_write
+
             safe_path = validate_path_for_write(
-                path, Path(settings.WORKSPACE_DIR),
+                path,
+                Path(settings.WORKSPACE_DIR),
                 allow_sensitive=kwargs.get("_allow_sensitive", False),
             )
 
             sp = str(safe_path)
             # 模式判断
             if start_line > 0:
-                return await self._edit_by_lines(sp, start_line, end_line, new_text, insert)
+                return await self._edit_by_lines(
+                    sp, start_line, end_line, new_text, insert
+                )
             elif old_text:
                 return await self._edit_by_text(sp, old_text, new_text)
             else:
@@ -697,7 +762,7 @@ class EditFileTool(BaseTool):
             return f"编辑文件错误: {e}"
 
     async def _edit_by_text(self, path: str, old_text: str, new_text: str) -> str:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             content = f.read()
 
         if old_text not in content:
@@ -712,13 +777,14 @@ class EditFileTool(BaseTool):
             return f"警告: old_text 出现 {count} 次，请增加上下文使其唯一"
 
         new_content = content.replace(old_text, new_text, 1)
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(new_content)
         return f"已编辑 {path}（替换 1 处）"
 
-    async def _edit_by_lines(self, path: str, start_line: int,
-                             end_line: int, new_text: str, insert: bool) -> str:
-        with open(path, 'r', encoding='utf-8') as f:
+    async def _edit_by_lines(
+        self, path: str, start_line: int, end_line: int, new_text: str, insert: bool
+    ) -> str:
+        with open(path, encoding="utf-8") as f:
             lines = f.readlines()
 
         total = len(lines)
@@ -731,20 +797,20 @@ class EditFileTool(BaseTool):
         if insert:
             # 在 start_line 前插入
             idx = start_line - 1
-            lines.insert(idx, new_text.rstrip('\n') + '\n')
+            lines.insert(idx, new_text.rstrip("\n") + "\n")
             action = f"在行 {start_line} 前插入"
         elif new_text == "":
             # 删除行
-            del lines[start_line - 1:end_line]
+            del lines[start_line - 1 : end_line]
             action = f"删除行 {start_line}-{end_line}"
         else:
             # 替换行
-            replacement = new_text.rstrip('\n').split('\n')
-            replacement = [l + '\n' for l in replacement]
-            lines[start_line - 1:end_line] = replacement
+            replacement = new_text.rstrip("\n").split("\n")
+            replacement = [line + "\n" for line in replacement]
+            lines[start_line - 1 : end_line] = replacement
             action = f"替换行 {start_line}-{end_line}"
 
-        with open(path, 'w', encoding='utf-8') as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.writelines(lines)
         return f"已编辑 {path}（{action}）"
 
@@ -777,14 +843,23 @@ class FileSearchTool(BaseTool):
     }
     required = ["path"]
 
-    async def execute(self, path: str, pattern: str = "*", recursive: bool = True,
-                      limit: int = 30, **kwargs) -> str:
+    async def execute(
+        self,
+        path: str,
+        pattern: str = "*",
+        recursive: bool = True,
+        limit: int = 30,
+        **kwargs,
+    ) -> str:
         try:
             from pathlib import Path
+
             from app.core.config import settings
             from app.core.sandbox import validate_path_for_read
+
             safe_path = validate_path_for_read(
-                path, Path(settings.WORKSPACE_DIR),
+                path,
+                Path(settings.WORKSPACE_DIR),
                 allow_sensitive=kwargs.get("_allow_sensitive", False),
                 allow_outside=kwargs.get("_allow_outside", False),
             )
@@ -806,7 +881,7 @@ class FileSearchTool(BaseTool):
                     size = os.path.getsize(f) if os.path.isfile(f) else 0
                     rel = os.path.relpath(f, path)
                     if size > 1024 * 1024:
-                        size_str = f"{size / (1024*1024):.1f}MB"
+                        size_str = f"{size / (1024 * 1024):.1f}MB"
                     elif size > 1024:
                         size_str = f"{size / 1024:.0f}KB"
                     else:
@@ -816,7 +891,10 @@ class FileSearchTool(BaseTool):
             if not results:
                 return f"未找到匹配 '{pattern}' 的文件（{path}）"
 
-            result = f"搜索 {path}，模式 '{pattern}'，找到 {len(results)} 个结果：\n" + "\n".join(results)
+            result = (
+                f"搜索 {path}，模式 '{pattern}'，找到 {len(results)} 个结果：\n"
+                + "\n".join(results)
+            )
             if len(results) >= limit:
                 result += f"\n... (结果已达上限 {limit})"
             return result
@@ -847,10 +925,13 @@ class ListDirTool(BaseTool):
     async def execute(self, path: str, limit: int = 50, **kwargs) -> str:
         try:
             from pathlib import Path
+
             from app.core.config import settings
             from app.core.sandbox import validate_path_for_read
+
             safe_path = validate_path_for_read(
-                path, Path(settings.WORKSPACE_DIR),
+                path,
+                Path(settings.WORKSPACE_DIR),
                 allow_sensitive=kwargs.get("_allow_sensitive", False),
                 allow_outside=kwargs.get("_allow_outside", False),
             )
@@ -867,7 +948,7 @@ class ListDirTool(BaseTool):
                         else:
                             size = entry.stat().st_size
                             if size > 1024 * 1024:
-                                size_str = f" ({size / (1024*1024):.1f}MB)"
+                                size_str = f" ({size / (1024 * 1024):.1f}MB)"
                             elif size > 1024:
                                 size_str = f" ({size / 1024:.0f}KB)"
                             else:
@@ -963,22 +1044,83 @@ class GrepTool(BaseTool):
 
     # 文本文件扩展名（不含二进制/媒体）
     _TEXT_EXTENSIONS = {
-        ".py", ".js", ".ts", ".tsx", ".jsx", ".vue", ".svelte",
-        ".html", ".htm", ".css", ".scss", ".sass", ".less",
-        ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg",
-        ".md", ".markdown", ".rst", ".txt", ".csv", ".log",
-        ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
-        ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".hh",
-        ".go", ".rs", ".java", ".kt", ".kts", ".scala",
-        ".rb", ".php", ".swift", ".r", ".m", ".mm",
-        ".sql", ".graphql", ".gql",
-        ".env", ".gitignore", ".dockerignore", ".editorconfig",
-        ".conf", ".service", ".socket", ".timer",
-        ".vim", ".lua", ".el", ".ex", ".exs",
-        ".tex", ".bib",
-        ".Makefile", ".makefile", ".cmake",
-        ".proto", ".thrift", ".avsc",
-        ".lock", ".toml",
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".vue",
+        ".svelte",
+        ".html",
+        ".htm",
+        ".css",
+        ".scss",
+        ".sass",
+        ".less",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".md",
+        ".markdown",
+        ".rst",
+        ".txt",
+        ".csv",
+        ".log",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".fish",
+        ".ps1",
+        ".bat",
+        ".cmd",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".hh",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".kts",
+        ".scala",
+        ".rb",
+        ".php",
+        ".swift",
+        ".r",
+        ".m",
+        ".mm",
+        ".sql",
+        ".graphql",
+        ".gql",
+        ".env",
+        ".gitignore",
+        ".dockerignore",
+        ".editorconfig",
+        ".conf",
+        ".service",
+        ".socket",
+        ".timer",
+        ".vim",
+        ".lua",
+        ".el",
+        ".ex",
+        ".exs",
+        ".tex",
+        ".bib",
+        ".Makefile",
+        ".makefile",
+        ".cmake",
+        ".proto",
+        ".thrift",
+        ".avsc",
+        ".lock",
     }
 
     _MAX_FILE_SIZE = 2 * 1024 * 1024  # 跳过超过 2MB 的文件
@@ -990,19 +1132,25 @@ class GrepTool(BaseTool):
             return True
         # 无扩展名或未知扩展名：读取头部尝试判断
         try:
-            with open(filepath, 'rb') as f:
+            with open(filepath, "rb") as f:
                 chunk = f.read(1024)
             # 检测 null 字节（二进制标志）
-            if b'\x00' in chunk:
+            if b"\x00" in chunk:
                 return False
             # 尝试 UTF-8 解码
-            chunk.decode('utf-8')
+            chunk.decode("utf-8")
             return True
-        except (UnicodeDecodeError, IOError):
+        except (OSError, UnicodeDecodeError):
             return False
 
-    async def execute(self, pattern: str, path: str = ".", glob_pattern: str = "**/*",
-                      output_mode: str = "files_with_matches", **kwargs) -> str:
+    async def execute(
+        self,
+        pattern: str,
+        path: str = ".",
+        glob_pattern: str = "**/*",
+        output_mode: str = "files_with_matches",
+        **kwargs,
+    ) -> str:
         try:
             import re
 
@@ -1038,7 +1186,9 @@ class GrepTool(BaseTool):
                 else:
                     search_glob = f"**/{glob_pattern}"
 
-                for f in glob.iglob(os.path.join(base_path, search_glob), recursive=True):
+                for f in glob.iglob(
+                    os.path.join(base_path, search_glob), recursive=True
+                ):
                     if os.path.isfile(f):
                         files_to_search.append(f)
             else:
@@ -1072,9 +1222,9 @@ class GrepTool(BaseTool):
 
                 # 读取并搜索
                 try:
-                    with open(filepath, 'r', encoding='utf-8', errors='replace') as f:
+                    with open(filepath, encoding="utf-8", errors="replace") as f:
                         file_lines = f.readlines()
-                except (IOError, PermissionError):
+                except (OSError, PermissionError):
                     continue
 
                 file_matches = []
@@ -1088,7 +1238,11 @@ class GrepTool(BaseTool):
                 files_with_matches += 1
                 total_matches += len(file_matches)
 
-                rel_path = os.path.relpath(filepath, base_path) if os.path.isdir(base_path) else os.path.basename(filepath)
+                rel_path = (
+                    os.path.relpath(filepath, base_path)
+                    if os.path.isdir(base_path)
+                    else os.path.basename(filepath)
+                )
 
                 if output_mode == "files_with_matches":
                     if head_limit > 0 and len(output_lines) >= head_limit:
@@ -1140,7 +1294,7 @@ class GrepTool(BaseTool):
                                 hit_limit = True
                                 break
                             marker = ":" if ln in file_matches else "-"
-                            line_content = file_lines[ln - 1].rstrip('\n\r')
+                            line_content = file_lines[ln - 1].rstrip("\n\r")
                             output_lines.append(f"{marker}{ln}: {line_content}")
                         if hit_limit:
                             break
@@ -1158,7 +1312,10 @@ class GrepTool(BaseTool):
             if output_mode == "files_with_matches":
                 if not output_lines:
                     return f"未找到匹配 '{pattern}' 的内容"
-                result = f"搜索 '{pattern}'，找到 {files_with_matches} 个文件（共 {total_matches} 处匹配）：\n" + "\n".join(output_lines)
+                result = (
+                    f"搜索 '{pattern}'，找到 {files_with_matches} 个文件（共 {total_matches} 处匹配）：\n"
+                    + "\n".join(output_lines)
+                )
             elif output_mode == "count":
                 if not output_lines:
                     return f"未找到匹配 '{pattern}' 的内容"
@@ -1166,7 +1323,10 @@ class GrepTool(BaseTool):
             else:
                 if not output_lines:
                     return f"未找到匹配 '{pattern}' 的内容"
-                result = f"搜索 '{pattern}'，找到 {files_with_matches} 个文件（共 {total_matches} 处匹配）：\n" + "\n".join(output_lines)
+                result = (
+                    f"搜索 '{pattern}'，找到 {files_with_matches} 个文件（共 {total_matches} 处匹配）：\n"
+                    + "\n".join(output_lines)
+                )
 
             if hit_limit:
                 result += f"\n... (输出已达上限 {head_limit} 行)"
@@ -1244,20 +1404,24 @@ class ScreenshotTool(BaseTool):
         elif mode == "webpage":
             return await self._capture_webpage(**kwargs)
         else:
-            return json.dumps({
-                "success": False,
-                "error": f"无效模式 '{mode}'，必须是 'desktop' 或 'webpage'",
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"无效模式 '{mode}'，必须是 'desktop' 或 'webpage'",
+                }
+            )
 
     async def _capture_desktop(self, **kwargs) -> str:
         try:
             import mss
             import mss.tools
         except ImportError:
-            return json.dumps({
-                "success": False,
-                "error": "mss 库未安装。安装命令: pip install mss",
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "mss 库未安装。安装命令: pip install mss",
+                }
+            )
 
         monitor_num = kwargs.get("monitor", 0)
         output_path = kwargs.get("output_path", "")
@@ -1266,16 +1430,19 @@ class ScreenshotTool(BaseTool):
             with mss.mss() as sct:
                 monitors = sct.monitors
                 if monitor_num < 0 or monitor_num >= len(monitors):
-                    return json.dumps({
-                        "success": False,
-                        "error": f"无效的显示器编号 {monitor_num}，可用范围: 0-{len(monitors)-1}",
-                    })
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"无效的显示器编号 {monitor_num}，可用范围: 0-{len(monitors) - 1}",
+                        }
+                    )
 
                 monitor = monitors[monitor_num]
                 screenshot = sct.grab(monitor)
 
                 if not output_path:
                     from datetime import datetime
+
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     output_path = f"screenshots/desktop_{timestamp}.png"
 
@@ -1284,13 +1451,15 @@ class ScreenshotTool(BaseTool):
                 mss.tools.to_png(screenshot.rgb, screenshot.size, output=str(full_path))
 
                 file_size = os.path.getsize(full_path)
-                return json.dumps({
-                    "success": True,
-                    "path": str(full_path),
-                    "size": f"{screenshot.width}x{screenshot.height}",
-                    "file_size": file_size,
-                    "monitor": monitor_num,
-                })
+                return json.dumps(
+                    {
+                        "success": True,
+                        "path": str(full_path),
+                        "size": f"{screenshot.width}x{screenshot.height}",
+                        "file_size": file_size,
+                        "monitor": monitor_num,
+                    }
+                )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -1298,10 +1467,12 @@ class ScreenshotTool(BaseTool):
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            return json.dumps({
-                "success": False,
-                "error": "playwright 库未安装。安装命令: pip install playwright && playwright install chromium",
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "playwright 库未安装。安装命令: pip install playwright && playwright install chromium",
+                }
+            )
 
         url = kwargs.get("url", "")
         output_path = kwargs.get("output_path", "")
@@ -1312,9 +1483,16 @@ class ScreenshotTool(BaseTool):
         timeout = kwargs.get("timeout", 30000)
 
         if not url:
-            return json.dumps({"success": False, "error": "webpage 模式必须提供 url 参数"})
+            return json.dumps(
+                {"success": False, "error": "webpage 模式必须提供 url 参数"}
+            )
         if not url.startswith(("http://", "https://")):
-            return json.dumps({"success": False, "error": f"无效 URL '{url}'，必须以 http:// 或 https:// 开头"})
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"无效 URL '{url}'，必须以 http:// 或 https:// 开头",
+                }
+            )
 
         try:
             async with async_playwright() as p:
@@ -1331,6 +1509,7 @@ class ScreenshotTool(BaseTool):
                 if not output_path:
                     from datetime import datetime
                     from urllib.parse import urlparse
+
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     domain = urlparse(url).netloc.replace(".", "_")
                     output_path = f"screenshots/webpage_{domain}_{timestamp}.png"
@@ -1343,23 +1522,25 @@ class ScreenshotTool(BaseTool):
                 await browser.close()
 
                 file_size = os.path.getsize(full_path)
-                return json.dumps({
-                    "success": True,
-                    "path": str(full_path),
-                    "url_source": url,
-                    "title": page_title,
-                    "viewport": f"{viewport_width}x{viewport_height}",
-                    "full_page": full_page,
-                    "file_size": file_size,
-                })
+                return json.dumps(
+                    {
+                        "success": True,
+                        "path": str(full_path),
+                        "url_source": url,
+                        "title": page_title,
+                        "viewport": f"{viewport_width}x{viewport_height}",
+                        "full_page": full_page,
+                        "file_size": file_size,
+                    }
+                )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
 
 # 媒体类型扩展名映射
-_IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico'}
-_AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma'}
-_VIDEO_EXTENSIONS = {'.mp4', '.webm', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico"}
+_AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a", ".wma"}
+_VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov", ".mkv", ".flv", ".wmv"}
 
 
 class DisplayMediaTool(BaseTool):
@@ -1400,14 +1581,18 @@ class DisplayMediaTool(BaseTool):
             return "video"
         return "file"
 
-    async def execute(self, file_path: str, media_type: str = "", caption: str = "", **kwargs) -> str:
+    async def execute(
+        self, file_path: str, media_type: str = "", caption: str = "", **kwargs
+    ) -> str:
         try:
             full_path = os.path.abspath(file_path)
             if not os.path.isfile(full_path):
-                return json.dumps({
-                    "success": False,
-                    "error": f"文件不存在: {full_path}",
-                })
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"文件不存在: {full_path}",
+                    }
+                )
 
             if not media_type:
                 media_type = self._detect_media_type(full_path)
@@ -1416,17 +1601,20 @@ class DisplayMediaTool(BaseTool):
             file_name = os.path.basename(full_path)
             # 构建文件访问 URL
             from urllib.parse import quote
+
             file_url = f"/api/files?path={quote(full_path)}"
 
-            return json.dumps({
-                "success": True,
-                "path": full_path,
-                "url": file_url,
-                "name": file_name,
-                "media_type": media_type,
-                "file_size": file_size,
-                "caption": caption or file_name,
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "path": full_path,
+                    "url": file_url,
+                    "name": file_name,
+                    "media_type": media_type,
+                    "file_size": file_size,
+                    "caption": caption or file_name,
+                }
+            )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -1461,7 +1649,9 @@ class ImageTool(BaseTool):
 
     _SUPPORTED_EXTENSIONS = _IMAGE_EXTENSIONS  # 复用已有的图片扩展名集合
 
-    async def execute(self, path: str, mode: str = "ocr", language: str = "ch_sim", **kwargs) -> str:
+    async def execute(
+        self, path: str, mode: str = "ocr", language: str = "ch_sim", **kwargs
+    ) -> str:
         try:
             full_path = os.path.abspath(path)
             if not os.path.isfile(full_path):
@@ -1469,10 +1659,12 @@ class ImageTool(BaseTool):
 
             ext = os.path.splitext(full_path)[1].lower()
             if ext not in self._SUPPORTED_EXTENSIONS:
-                return json.dumps({
-                    "success": False,
-                    "error": f"不支持的图片格式: {ext}。支持: {', '.join(sorted(self._SUPPORTED_EXTENSIONS))}"
-                })
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"不支持的图片格式: {ext}。支持: {', '.join(sorted(self._SUPPORTED_EXTENSIONS))}",
+                    }
+                )
 
             if mode == "info":
                 return await self._get_image_info(full_path)
@@ -1487,7 +1679,9 @@ class ImageTool(BaseTool):
         try:
             from PIL import Image
         except ImportError:
-            return json.dumps({"success": False, "error": "需要安装 Pillow 库 (pip install Pillow)"})
+            return json.dumps(
+                {"success": False, "error": "需要安装 Pillow 库 (pip install Pillow)"}
+            )
 
         try:
             with Image.open(path) as img:
@@ -1518,14 +1712,16 @@ class ImageTool(BaseTool):
         try:
             import easyocr
         except ImportError:
-            return json.dumps({
-                "success": False,
-                "error": "需要安装 easyocr 库才能进行 OCR 识别 (pip install easyocr)"
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "需要安装 easyocr 库才能进行 OCR 识别 (pip install easyocr)",
+                }
+            )
 
         try:
             # 解析语言列表
-            langs = [l.strip() for l in language.split(",") if l.strip()]
+            langs = [item.strip() for item in language.split(",") if item.strip()]
             if not langs:
                 langs = ["ch_sim"]
 
@@ -1536,35 +1732,43 @@ class ImageTool(BaseTool):
             results = reader.readtext(path)
 
             if not results:
-                return json.dumps({
-                    "success": True,
-                    "mode": "ocr",
-                    "language": language,
-                    "text": "",
-                    "blocks": [],
-                    "message": "图片中未检测到文字"
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": True,
+                        "mode": "ocr",
+                        "language": language,
+                        "text": "",
+                        "blocks": [],
+                        "message": "图片中未检测到文字",
+                    },
+                    ensure_ascii=False,
+                )
 
             # 提取完整文本和按块分组
             blocks = []
             all_text = []
             for i, (bbox, text, confidence) in enumerate(results):
-                blocks.append({
-                    "id": i + 1,
-                    "text": text,
-                    "confidence": round(confidence, 4),
-                    "bbox": [[int(x), int(y)] for x, y in bbox],
-                })
+                blocks.append(
+                    {
+                        "id": i + 1,
+                        "text": text,
+                        "confidence": round(confidence, 4),
+                        "bbox": [[int(x), int(y)] for x, y in bbox],
+                    }
+                )
                 all_text.append(text)
 
-            return json.dumps({
-                "success": True,
-                "mode": "ocr",
-                "language": language,
-                "text": "\n".join(all_text),
-                "blocks": blocks,
-                "block_count": len(blocks),
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "mode": "ocr",
+                    "language": language,
+                    "text": "\n".join(all_text),
+                    "blocks": blocks,
+                    "block_count": len(blocks),
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             error_msg = str(e)
@@ -1591,9 +1795,9 @@ class AskUserQuestionTool(BaseTool):
                 "- header (可选): 简短标签，最多12字符\n"
                 "- options (必填): 选项数组，每项含 label (显示文本) 和 description (说明)\n"
                 "- multiSelect (可选): 是否允许多选，默认 false\n"
-                "示例: [{\"question\":\"选择处理方式\",\"header\":\"操作\","
-                "\"options\":[{\"label\":\"继续\",\"description\":\"保持现有方案\"},"
-                "{\"label\":\"回滚\",\"description\":\"恢复到之前版本\"}]}]"
+                '示例: [{"question":"选择处理方式","header":"操作",'
+                '"options":[{"label":"继续","description":"保持现有方案"},'
+                '{"label":"回滚","description":"恢复到之前版本"}]}]'
             ),
         ),
     }
@@ -1606,29 +1810,50 @@ class AskUserQuestionTool(BaseTool):
         try:
             parsed = json.loads(questions)
         except json.JSONDecodeError as e:
-            return json.dumps({
-                "success": False,
-                "error": f"questions 参数不是有效的 JSON: {e}",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": f"questions 参数不是有效的 JSON: {e}",
+                },
+                ensure_ascii=False,
+            )
 
         if not isinstance(parsed, list) or len(parsed) == 0:
-            return json.dumps({
-                "success": False,
-                "error": "questions 必须是非空 JSON 数组",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "questions 必须是非空 JSON 数组",
+                },
+                ensure_ascii=False,
+            )
 
         # 2. 验证每个问题的结构
         for i, q in enumerate(parsed):
             if not isinstance(q, dict):
-                return json.dumps({"success": False, "error": f"问题 #{i+1} 不是有效的对象"})
+                return json.dumps(
+                    {"success": False, "error": f"问题 #{i + 1} 不是有效的对象"}
+                )
             if "question" not in q:
-                return json.dumps({"success": False, "error": f"问题 #{i+1} 缺少 'question' 字段"})
-            if "options" not in q or not isinstance(q["options"], list) or len(q["options"]) == 0:
-                return json.dumps({"success": False, "error": f"问题 #{i+1} 缺少有效的 'options' 数组"})
+                return json.dumps(
+                    {"success": False, "error": f"问题 #{i + 1} 缺少 'question' 字段"}
+                )
+            if (
+                "options" not in q
+                or not isinstance(q["options"], list)
+                or len(q["options"]) == 0
+            ):
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"问题 #{i + 1} 缺少有效的 'options' 数组",
+                    }
+                )
 
         # 3. 构建中断消息和选项
         from app.modules.agent.interrupt import (
-            get_interrupt_manager, InterruptReason, InterruptOption
+            InterruptOption,
+            InterruptReason,
+            get_interrupt_manager,
         )
 
         manager = get_interrupt_manager()
@@ -1636,12 +1861,12 @@ class AskUserQuestionTool(BaseTool):
         # 构建消息文本（Markdown 格式）
         msg_lines = []
         for i, q in enumerate(parsed):
-            header = q.get("header", f"问题 {i+1}")
+            header = q.get("header", f"问题 {i + 1}")
             msg_lines.append(f"### {header}")
             msg_lines.append(q["question"])
             msg_lines.append("")
             for j, opt in enumerate(q.get("options", [])):
-                label = opt.get("label", f"选项 {j+1}")
+                label = opt.get("label", f"选项 {j + 1}")
                 desc = opt.get("description", "")
                 msg_lines.append(f"- **{label}**{' — ' + desc if desc else ''}")
             msg_lines.append("")
@@ -1653,7 +1878,7 @@ class AskUserQuestionTool(BaseTool):
             InterruptOption(
                 label="提交答案",
                 value="approve",
-                description="请以 JSON 格式提交你的答案。格式: [{\"question_index\": 0, \"answers\": [\"选项标签\"]}, ...]",
+                description='请以 JSON 格式提交你的答案。格式: [{"question_index": 0, "answers": ["选项标签"]}, ...]',
                 style="primary",
                 requires_input=True,
                 input_placeholder='[{"question_index": 0, "answers": ["继续"]}]',
@@ -1688,47 +1913,73 @@ class AskUserQuestionTool(BaseTool):
                 if interrupt.is_resolved():
                     ip = interrupt
                 else:
-                    return json.dumps({
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "用户提问已过期，操作已取消",
+                        },
+                        ensure_ascii=False,
+                    )
+            if ip.is_expired():
+                return json.dumps(
+                    {
                         "success": False,
                         "error": "用户提问已过期，操作已取消",
-                    }, ensure_ascii=False)
-            if ip.is_expired():
-                return json.dumps({
-                    "success": False,
-                    "error": "用户提问已过期，操作已取消",
-                }, ensure_ascii=False)
+                    },
+                    ensure_ascii=False,
+                )
             if ip.is_resolved():
                 if ip.status.value == "rejected" or ip.status.value == "cancelled":
-                    return json.dumps({
-                        "success": False,
-                        "error": "用户取消了提问",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "用户取消了提问",
+                        },
+                        ensure_ascii=False,
+                    )
                 # 解析用户答案
                 try:
                     user_answers = json.loads(ip.resolution_note or "[]")
                 except json.JSONDecodeError:
-                    return json.dumps({
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "answer": ip.resolution_note or "(用户未提供额外输入)",
+                        },
+                        ensure_ascii=False,
+                    )
+                return json.dumps(
+                    {
                         "success": True,
-                        "answer": ip.resolution_note or "(用户未提供额外输入)",
-                    }, ensure_ascii=False)
-                return json.dumps({
-                    "success": True,
-                    "answers": user_answers,
-                }, ensure_ascii=False)
+                        "answers": user_answers,
+                    },
+                    ensure_ascii=False,
+                )
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
 
-        return json.dumps({
-            "success": False,
-            "error": "等待用户响应超时（5 分钟），操作已取消",
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": False,
+                "error": "等待用户响应超时（5 分钟），操作已取消",
+            },
+            ensure_ascii=False,
+        )
 
 
 # 后台任务存储（供 run_background / check_task 使用）
 # Moved to app.modules.tools.task_store for shared access
-from app.modules.tools.task_store import (
-    _background_tasks, get_task as _store_get_task,
-    create_task as _store_create_task, list_tasks as _store_list_tasks,
+from app.modules.tools.task_store import (  # noqa: E402
+    _background_tasks,
+)
+from app.modules.tools.task_store import (  # noqa: E402
+    create_task as _store_create_task,
+)
+from app.modules.tools.task_store import (  # noqa: E402
+    get_task as _store_get_task,
+)
+from app.modules.tools.task_store import (  # noqa: E402
+    list_tasks as _store_list_tasks,
 )
 
 
@@ -1748,7 +1999,7 @@ class RunBackgroundTool(BaseTool):
         ),
         "args": ToolParameter(
             type="string",
-            description="传递给目标工具的 JSON 格式参数字典，如 '{\"command\": \"dir\"}'",
+            description='传递给目标工具的 JSON 格式参数字典，如 \'{"command": "dir"}\'',
         ),
         "label": ToolParameter(
             type="string",
@@ -1758,27 +2009,36 @@ class RunBackgroundTool(BaseTool):
     }
     required = ["tool_name", "args"]
 
-    async def execute(self, tool_name: str, args: str, label: str = "", **kwargs) -> str:
+    async def execute(
+        self, tool_name: str, args: str, label: str = "", **kwargs
+    ) -> str:
         try:
             # 解析 args JSON
             try:
                 tool_args = json.loads(args)
                 if not isinstance(tool_args, dict):
-                    return json.dumps({"success": False, "error": "args 必须是 JSON 对象"})
+                    return json.dumps(
+                        {"success": False, "error": "args 必须是 JSON 对象"}
+                    )
             except json.JSONDecodeError as e:
-                return json.dumps({"success": False, "error": f"args JSON 解析失败: {e}"})
+                return json.dumps(
+                    {"success": False, "error": f"args JSON 解析失败: {e}"}
+                )
 
             # 从全局注册表获取工具
             global_registry = get_tool_registry()
             tool = global_registry.get_tool(tool_name)
             if not tool:
-                return json.dumps({
-                    "success": False,
-                    "error": f"工具不存在: {tool_name}。可用工具: {global_registry.list_tools()}",
-                })
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"工具不存在: {tool_name}。可用工具: {global_registry.list_tools()}",
+                    }
+                )
 
             # 生成 task_id
             import uuid
+
             task_id = str(uuid.uuid4())[:8]
             label = label or f"后台任务: {tool_name}"
 
@@ -1791,29 +2051,34 @@ class RunBackgroundTool(BaseTool):
                     # Register inbox for inter-agent messaging
                     inbox = register_agent(agent_id=task_id, label=label)
 
-                    from app.core.database import async_session_maker
                     from sqlalchemy import select
+
+                    from app.api.chat import SimpleLLMProvider
+                    from app.core.database import async_session_maker
                     from app.models.models import AIModelConfig
                     from app.modules.agent import AgentLoop
                     from app.modules.agent.prompts import get_tool_calling_prompt
-                    from app.api.chat import SimpleLLMProvider
 
                     # Get model config
                     async with async_session_maker() as session:
                         result = await session.execute(
-                            select(AIModelConfig).where(
-                                AIModelConfig.is_active == True
-                            ).order_by(AIModelConfig.is_default.desc())
+                            select(AIModelConfig)
+                            .where(AIModelConfig.is_active)
+                            .order_by(AIModelConfig.is_default.desc())
                         )
                         config = result.scalars().first()
 
                     if not config:
                         from app.modules.tools.task_store import update_task_status
-                        update_task_status(task_id, "failed", error="No AI model config available")
+
+                        update_task_status(
+                            task_id, "failed", error="No AI model config available"
+                        )
                         return
 
                     # Build tool registry for the sub-agent
                     from app.modules.tools import ToolRegistry, register_builtin_tools
+
                     agent_tool_registry = ToolRegistry()
                     register_builtin_tools(agent_tool_registry)
 
@@ -1830,6 +2095,7 @@ class RunBackgroundTool(BaseTool):
                     provider = SimpleLLMProvider(config=config)
 
                     from app.core.security_client import security_client
+
                     sub_agent = AgentLoop(
                         provider=provider,
                         tools=agent_tool_registry,
@@ -1865,14 +2131,16 @@ class RunBackgroundTool(BaseTool):
 
             asyncio.create_task(_run_background())
 
-            return json.dumps({
-                "success": True,
-                "task_id": task_id,
-                "label": label,
-                "tool_name": tool_name,
-                "status": "running",
-                "message": f"后台任务已启动。使用 check_task(task_id='{task_id}') 查询结果。",
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "task_id": task_id,
+                    "label": label,
+                    "tool_name": tool_name,
+                    "status": "running",
+                    "message": f"后台任务已启动。使用 check_task(task_id='{task_id}') 查询结果。",
+                }
+            )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -1900,10 +2168,12 @@ class CheckTaskTool(BaseTool):
                 # 查询单个任务
                 task = _store_get_task(task_id)
                 if not task:
-                    return json.dumps({
-                        "success": False,
-                        "error": f"任务不存在: {task_id}",
-                    })
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"任务不存在: {task_id}",
+                        }
+                    )
 
                 result_info = task.copy()
                 # 截断过长结果
@@ -1913,10 +2183,13 @@ class CheckTaskTool(BaseTool):
             else:
                 # 列出所有任务
                 tasks = _store_list_tasks()
-                return json.dumps({
-                    "total": len(tasks),
-                    "tasks": tasks,
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "total": len(tasks),
+                        "tasks": tasks,
+                    },
+                    ensure_ascii=False,
+                )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -1948,7 +2221,9 @@ class VectorMemoryRecallTool(BaseTool):
     }
     required = ["query"]
 
-    async def execute(self, query: str, source_type: str = "all", top_k: int = 5, **kwargs) -> str:
+    async def execute(
+        self, query: str, source_type: str = "all", top_k: int = 5, **kwargs
+    ) -> str:
         try:
             from app.modules.agent.vector_store import get_vector_store
 
@@ -1961,18 +2236,25 @@ class VectorMemoryRecallTool(BaseTool):
 
             formatted = []
             for r in results:
-                formatted.append({
-                    "id": r.id,
-                    "content": r.content[:500] if len(r.content) > 500 else r.content,
-                    "source_type": r.source_type,
-                    "score": round(r.score, 3),
-                })
+                formatted.append(
+                    {
+                        "id": r.id,
+                        "content": r.content[:500]
+                        if len(r.content) > 500
+                        else r.content,
+                        "source_type": r.source_type,
+                        "score": round(r.score, 3),
+                    }
+                )
 
-            return json.dumps({
-                "results": formatted,
-                "total": len(formatted),
-                "query": query,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "results": formatted,
+                    "total": len(formatted),
+                    "query": query,
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -2013,14 +2295,23 @@ class VectorMemoryStoreTool(BaseTool):
     }
     required = ["content", "name"]
 
-    async def execute(self, content: str, name: str, context_type: str = "memory",
-                      tags: str = "", importance: int = 3, **kwargs) -> str:
+    async def execute(
+        self,
+        content: str,
+        name: str,
+        context_type: str = "memory",
+        tags: str = "",
+        importance: int = 3,
+        **kwargs,
+    ) -> str:
         try:
             from app.core.database import async_session_maker
             from app.modules.agent.layered_memory import MemoryOrchestrator
             from app.modules.agent.vector_store import get_vector_store
 
-            tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+            tag_list = (
+                [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+            )
 
             async with async_session_maker() as session:
                 orchestrator = MemoryOrchestrator(
@@ -2037,14 +2328,17 @@ class VectorMemoryStoreTool(BaseTool):
                 )
                 await session.commit()
 
-            return json.dumps({
-                "success": True,
-                "uri": memory.uri,
-                "name": memory.name,
-                "context_type": memory.context_type,
-                "layer": memory.layer,
-                "message": f"记忆已存储: {name}",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "uri": memory.uri,
+                    "name": memory.name,
+                    "context_type": memory.context_type,
+                    "layer": memory.layer,
+                    "message": f"记忆已存储: {name}",
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -2075,15 +2369,27 @@ class VectorMemoryGetTool(BaseTool):
                 memory = await orchestrator.get_with_context(uri)
 
             if not memory:
-                return json.dumps({"success": False, "error": f"Memory not found: {uri}"})
+                return json.dumps(
+                    {"success": False, "error": f"Memory not found: {uri}"}
+                )
 
             result = {}
             for level, data in memory.items():
-                result[level] = {
-                    "uri": data.uri if hasattr(data, 'uri') else str(data.get('uri', '')),
-                    "content": data.content if hasattr(data, 'content') else str(data.get('content', '')),
-                    "name": data.name if hasattr(data, 'name') else str(data.get('name', '')),
-                } if hasattr(data, 'uri') else data
+                result[level] = (
+                    {
+                        "uri": data.uri
+                        if hasattr(data, "uri")
+                        else str(data.get("uri", "")),
+                        "content": data.content
+                        if hasattr(data, "content")
+                        else str(data.get("content", "")),
+                        "name": data.name
+                        if hasattr(data, "name")
+                        else str(data.get("name", "")),
+                    }
+                    if hasattr(data, "uri")
+                    else data
+                )
 
             return json.dumps({"success": True, "memory": result}, ensure_ascii=False)
         except Exception as e:
@@ -2116,6 +2422,7 @@ class VectorMemoryStatsTool(BaseTool):
 # Track 1: MEMORY.md 纯文本记忆工具
 # ============================================================
 
+
 class FileMemoryWriteTool(BaseTool):
     """Track 1: 追加记忆到 MEMORY.md 纯文本文件"""
 
@@ -2141,9 +2448,12 @@ class FileMemoryWriteTool(BaseTool):
     async def execute(self, content: str, source: str = "agent", **kwargs) -> str:
         try:
             from app.modules.agent.memory import get_memory_store
+
             store = get_memory_store()
             line_number = store.append_entry(source=source, content=content)
-            return json.dumps({"success": True, "line_number": line_number, "track": "file"})
+            return json.dumps(
+                {"success": True, "line_number": line_number, "track": "file"}
+            )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -2175,13 +2485,17 @@ class FileMemorySearchTool(BaseTool):
     }
     required = ["keywords"]
 
-    async def execute(self, keywords: str, match_mode: str = "or",
-                      max_results: int = 15, **kwargs) -> str:
+    async def execute(
+        self, keywords: str, match_mode: str = "or", max_results: int = 15, **kwargs
+    ) -> str:
         try:
             from app.modules.agent.memory import get_memory_store
+
             store = get_memory_store()
             kw_list = keywords.split()
-            result = store.search(kw_list, max_results=max_results, match_mode=match_mode)
+            result = store.search(
+                kw_list, max_results=max_results, match_mode=match_mode
+            )
             if isinstance(result, str):
                 return result
             return json.dumps({"results": result, "track": "file"}, ensure_ascii=False)
@@ -2216,9 +2530,12 @@ class FileMemoryReadTool(BaseTool):
     }
     required = []
 
-    async def execute(self, start: int = 0, end: int = 0, recent: int = 10, **kwargs) -> str:
+    async def execute(
+        self, start: int = 0, end: int = 0, recent: int = 10, **kwargs
+    ) -> str:
         try:
             from app.modules.agent.memory import get_memory_store
+
             store = get_memory_store()
             if start > 0:
                 result = store.read_paragraphs(start, end if end > 0 else None)
@@ -2257,45 +2574,65 @@ class KnowledgeSearchTool(BaseTool):
     }
     required = ["query"]
 
-    async def execute(self, query: str, source_type: str = "all", top_k: int = 5, **kwargs) -> str:
+    async def execute(
+        self, query: str, source_type: str = "all", top_k: int = 5, **kwargs
+    ) -> str:
         try:
             from app.modules.agent.vector_store import get_vector_store
 
             store = get_vector_store()
             st_types = None if source_type == "all" else [source_type]
-            results = store.search(query, top_k=top_k, source_type=st_types, min_score=0.3)
+            results = store.search(
+                query, top_k=top_k, source_type=st_types, min_score=0.3
+            )
 
             if not results:
                 # 尝试 GraphRAG 查询作为补充
                 try:
                     from app.modules.graph_rag.core import GraphRAGClient
+
                     graph = GraphRAGClient()
                     rag_result = await graph.query(query, mode="hybrid")
                     if rag_result and rag_result.get("result"):
-                        return json.dumps({
-                            "results": [{"content": rag_result["result"][:1000], "source": "graph_rag"}],
-                            "total": 1,
-                            "query": query,
-                            "mode": "graph_rag",
-                        }, ensure_ascii=False)
+                        return json.dumps(
+                            {
+                                "results": [
+                                    {
+                                        "content": rag_result["result"][:1000],
+                                        "source": "graph_rag",
+                                    }
+                                ],
+                                "total": 1,
+                                "query": query,
+                                "mode": "graph_rag",
+                            },
+                            ensure_ascii=False,
+                        )
                 except Exception:
                     pass
                 return json.dumps({"results": [], "total": 0, "query": query})
 
             formatted = []
             for r in results:
-                formatted.append({
-                    "id": r.id,
-                    "content": r.content[:500] if len(r.content) > 500 else r.content,
-                    "source_type": r.source_type,
-                    "score": round(r.score, 3),
-                })
+                formatted.append(
+                    {
+                        "id": r.id,
+                        "content": r.content[:500]
+                        if len(r.content) > 500
+                        else r.content,
+                        "source_type": r.source_type,
+                        "score": round(r.score, 3),
+                    }
+                )
 
-            return json.dumps({
-                "results": formatted,
-                "total": len(formatted),
-                "query": query,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "results": formatted,
+                    "total": len(formatted),
+                    "query": query,
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             return json.dumps({"error": str(e)})
 
@@ -2328,7 +2665,11 @@ class SpawnTool(BaseTool):
         ),
         "agent_type": ToolParameter(
             type="string",
-            description="子 Agent 类型：'general'（完整工具集）、'explore'（只读探索）、'plan'（计划模式）、'verification'（测试验证）、'guide'（使用指南）。默认 'general'",
+            description=(
+                "子 Agent 类型：'general'（完整工具集）、'explore'（只读探索）、"
+                "'plan'（计划模式）、'verification'（测试验证）、'guide'（使用指南）。"
+                "默认 'general'"
+            ),
             enum=["general", "explore", "plan", "verification", "guide"],
             default="general",
         ),
@@ -2339,39 +2680,68 @@ class SpawnTool(BaseTool):
     _AGENT_TYPE_TOOLS: dict = {
         "general": None,
         "explore": {
-            "read_file", "grep", "file_search", "list_dir",
-            "web_search", "web_fetch", "current_time",
+            "read_file",
+            "grep",
+            "file_search",
+            "list_dir",
+            "web_search",
+            "web_fetch",
+            "current_time",
         },
         "plan": {
-            "read_file", "grep", "file_search", "list_dir",
-            "web_search", "web_fetch", "current_time", "calculator",
-            "ask_user_question", "enter_plan_mode", "exit_plan_mode",
-            "image", "knowledge_search", "vector_memory_recall", "file_memory_read",
+            "read_file",
+            "grep",
+            "file_search",
+            "list_dir",
+            "web_search",
+            "web_fetch",
+            "current_time",
+            "calculator",
+            "ask_user_question",
+            "enter_plan_mode",
+            "exit_plan_mode",
+            "image",
+            "knowledge_search",
+            "vector_memory_recall",
+            "file_memory_read",
         },
         "verification": {
-            "read_file", "grep", "file_search", "list_dir",
-            "web_search", "web_fetch", "current_time",
+            "read_file",
+            "grep",
+            "file_search",
+            "list_dir",
+            "web_search",
+            "web_fetch",
+            "current_time",
             "exec",
         },
         "guide": {
-            "read_file", "grep", "file_search", "list_dir",
-            "web_search", "web_fetch", "current_time",
-            "knowledge_search", "vector_memory_recall", "file_memory_read",
+            "read_file",
+            "grep",
+            "file_search",
+            "list_dir",
+            "web_search",
+            "web_fetch",
+            "current_time",
+            "knowledge_search",
+            "vector_memory_recall",
+            "file_memory_read",
         },
     }
 
     async def execute(self, task: str, context: str = "", **kwargs) -> str:
         try:
-            from app.core.database import async_session_maker
             from sqlalchemy import select
+
+            from app.core.database import async_session_maker
             from app.models.models import AIModelConfig
 
             # 获取默认模型配置
             async with async_session_maker() as session:
                 result = await session.execute(
-                    select(AIModelConfig).where(
-                        AIModelConfig.is_active == True
-                    ).order_by(AIModelConfig.is_default.desc())
+                    select(AIModelConfig)
+                    .where(AIModelConfig.is_active)
+                    .order_by(AIModelConfig.is_default.desc())
                 )
                 config = result.scalars().first()
 
@@ -2379,9 +2749,9 @@ class SpawnTool(BaseTool):
                 return json.dumps({"success": False, "error": "没有可用的 AI 模型配置"})
 
             # 构建子 Agent
-            from app.modules.tools import ToolRegistry, register_builtin_tools
             from app.modules.agent import AgentLoop
             from app.modules.agent.prompts import get_tool_calling_prompt
+            from app.modules.tools import ToolRegistry, register_builtin_tools
 
             tool_registry = ToolRegistry()
             register_builtin_tools(tool_registry)
@@ -2392,7 +2762,8 @@ class SpawnTool(BaseTool):
             tool_filter = self._AGENT_TYPE_TOOLS.get(agent_type)
             if tool_filter is not None:
                 tool_definitions = [
-                    t for t in tool_definitions
+                    t
+                    for t in tool_definitions
                     if t.get("function", {}).get("name") in tool_filter
                 ]
 
@@ -2432,9 +2803,11 @@ class SpawnTool(BaseTool):
                 )
 
             from app.api.chat import SimpleLLMProvider
+
             provider = SimpleLLMProvider(config=config)
 
             from app.core.security_client import security_client
+
             sub_agent = AgentLoop(
                 provider=provider,
                 tools=tool_registry,
@@ -2459,16 +2832,21 @@ class SpawnTool(BaseTool):
                     timeout=120.0,
                 )
 
-                return json.dumps({
-                    "success": True,
-                    "result": result,
-                    "iterations": sub_agent.max_iterations,
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": True,
+                        "result": result,
+                        "iterations": sub_agent.max_iterations,
+                    },
+                    ensure_ascii=False,
+                )
             except asyncio.TimeoutError:
-                return json.dumps({
-                    "success": False,
-                    "error": "子 Agent 执行超时（120 秒）",
-                })
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "子 Agent 执行超时（120 秒）",
+                    }
+                )
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
 
@@ -2500,7 +2878,9 @@ class CronTool(BaseTool):
     }
     required = ["action"]
 
-    async def execute(self, action: str, job_id: str = "", cron_expr: str = "", **kwargs) -> str:
+    async def execute(
+        self, action: str, job_id: str = "", cron_expr: str = "", **kwargs
+    ) -> str:
         try:
             from app.core.cron_scheduler import get_cron_scheduler
 
@@ -2510,27 +2890,37 @@ class CronTool(BaseTool):
                 jobs = scheduler.list_jobs()
                 formatted = []
                 for j in jobs:
-                    formatted.append({
-                        "job_id": j.get("job_id", ""),
-                        "cron_expr": j.get("cron_expr", ""),
-                        "enabled": j.get("enabled", False),
-                        "next_run": j.get("next_run", ""),
-                        "last_run": j.get("last_run", ""),
-                        "run_count": j.get("run_count", 0),
-                    })
-                return json.dumps({"jobs": formatted, "total": len(formatted)}, ensure_ascii=False)
+                    formatted.append(
+                        {
+                            "job_id": j.get("job_id", ""),
+                            "cron_expr": j.get("cron_expr", ""),
+                            "enabled": j.get("enabled", False),
+                            "next_run": j.get("next_run", ""),
+                            "last_run": j.get("last_run", ""),
+                            "run_count": j.get("run_count", 0),
+                        }
+                    )
+                return json.dumps(
+                    {"jobs": formatted, "total": len(formatted)}, ensure_ascii=False
+                )
 
             elif action == "get":
                 if not job_id:
-                    return json.dumps({"success": False, "error": "get 操作需要提供 job_id"})
+                    return json.dumps(
+                        {"success": False, "error": "get 操作需要提供 job_id"}
+                    )
                 job = scheduler.get_job(job_id)
                 if not job:
-                    return json.dumps({"success": False, "error": f"任务不存在: {job_id}"})
+                    return json.dumps(
+                        {"success": False, "error": f"任务不存在: {job_id}"}
+                    )
                 return json.dumps(job, ensure_ascii=False, default=str)
 
             elif action == "validate":
                 if not cron_expr:
-                    return json.dumps({"success": False, "error": "validate 操作需要提供 cron_expr"})
+                    return json.dumps(
+                        {"success": False, "error": "validate 操作需要提供 cron_expr"}
+                    )
                 valid = scheduler.validate_cron_expr(cron_expr)
                 result = {"valid": valid, "cron_expr": cron_expr}
                 if valid:
@@ -2542,11 +2932,14 @@ class CronTool(BaseTool):
             elif action == "status":
                 jobs = scheduler.list_jobs()
                 enabled = sum(1 for j in jobs if j.get("enabled"))
-                return json.dumps({
-                    "total_jobs": len(jobs),
-                    "enabled_jobs": enabled,
-                    "disabled_jobs": len(jobs) - enabled,
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "total_jobs": len(jobs),
+                        "enabled_jobs": enabled,
+                        "disabled_jobs": len(jobs) - enabled,
+                    },
+                    ensure_ascii=False,
+                )
 
             else:
                 return json.dumps({"success": False, "error": f"未知操作: {action}"})
@@ -2584,8 +2977,14 @@ class CronCreateTool(BaseTool):
     }
     required = ["cron_expr", "prompt"]
 
-    async def execute(self, cron_expr: str, prompt: str, description: str = "",
-                      name: str = "", **kwargs) -> str:
+    async def execute(
+        self,
+        cron_expr: str,
+        prompt: str,
+        description: str = "",
+        name: str = "",
+        **kwargs,
+    ) -> str:
         try:
             from app.core.cron_scheduler import get_cron_scheduler
             from app.core.database import async_session_maker
@@ -2595,16 +2994,16 @@ class CronCreateTool(BaseTool):
 
             # 验证 cron 表达式
             if not scheduler.validate_cron_expr(cron_expr):
-                return json.dumps({
-                    "success": False,
-                    "error": f"无效的 cron 表达式: {cron_expr}"
-                })
+                return json.dumps(
+                    {"success": False, "error": f"无效的 cron 表达式: {cron_expr}"}
+                )
 
             # 生成任务名称
             job_name = name.strip() if name.strip() else f"cron_{uuid.uuid4().hex[:8]}"
 
             # 添加到内存调度器（使用真实 Agent 回调）
             from app.core.cron_scheduler import _make_cron_callback
+
             callback = _make_cron_callback(job_name, {"prompt": prompt})
 
             success = scheduler.add_job(job_name, cron_expr, callback, enabled=True)
@@ -2633,16 +3032,21 @@ class CronCreateTool(BaseTool):
             except Exception as e:
                 logger.warning(f"[CronCreateTool] DB 持久化失败（调度器已添加）: {e}")
 
-            return json.dumps({
-                "success": True,
-                "job_id": job_name,
-                "db_id": db_job_id,
-                "cron_expr": cron_expr,
-                "prompt": prompt,
-                "description": description or prompt,
-                "next_run": str(job_info["next_run"]) if job_info and job_info.get("next_run") else None,
-                "message": f"定时任务 '{job_name}' 创建成功"
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "job_id": job_name,
+                    "db_id": db_job_id,
+                    "cron_expr": cron_expr,
+                    "prompt": prompt,
+                    "description": description or prompt,
+                    "next_run": str(job_info["next_run"])
+                    if job_info and job_info.get("next_run")
+                    else None,
+                    "message": f"定时任务 '{job_name}' 创建成功",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
@@ -2652,9 +3056,7 @@ class CronDeleteTool(BaseTool):
     """删除/取消定时任务"""
 
     name = "cron_delete"
-    description = (
-        "删除/取消定时任务。从调度器和数据库中移除指定的定时任务。"
-    )
+    description = "删除/取消定时任务。从调度器和数据库中移除指定的定时任务。"
     parameters = {
         "job_id": ToolParameter(
             type="string",
@@ -2665,10 +3067,11 @@ class CronDeleteTool(BaseTool):
 
     async def execute(self, job_id: str, **kwargs) -> str:
         try:
+            from sqlalchemy import select
+
             from app.core.cron_scheduler import get_cron_scheduler
             from app.core.database import async_session_maker
             from app.models.models import CronJob
-            from sqlalchemy import select
 
             scheduler = get_cron_scheduler()
 
@@ -2691,18 +3094,18 @@ class CronDeleteTool(BaseTool):
                 logger.warning(f"[CronDeleteTool] DB 删除失败: {e}")
 
             if not removed and not db_deleted:
-                return json.dumps({
-                    "success": False,
-                    "error": f"任务不存在: {job_id}"
-                })
+                return json.dumps({"success": False, "error": f"任务不存在: {job_id}"})
 
-            return json.dumps({
-                "success": True,
-                "job_id": job_id,
-                "scheduler_removed": removed,
-                "db_deleted": db_deleted,
-                "message": f"定时任务 '{job_id}' 已删除"
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "job_id": job_id,
+                    "scheduler_removed": removed,
+                    "db_deleted": db_deleted,
+                    "message": f"定时任务 '{job_id}' 已删除",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
@@ -2712,9 +3115,7 @@ class CronListTool(BaseTool):
     """列出所有定时任务及其状态"""
 
     name = "cron_list"
-    description = (
-        "列出所有定时任务及其状态。显示任务 ID、cron 表达式、启用状态、下次执行时间等信息。"
-    )
+    description = "列出所有定时任务及其状态。显示任务 ID、cron 表达式、启用状态、下次执行时间等信息。"
     parameters = {
         "enabled_only": ToolParameter(
             type="boolean",
@@ -2737,20 +3138,29 @@ class CronListTool(BaseTool):
 
             formatted = []
             for j in jobs:
-                formatted.append({
-                    "job_id": j.get("job_id", ""),
-                    "cron_expr": j.get("cron_expr", ""),
-                    "enabled": j.get("enabled", False),
-                    "next_run": str(j.get("next_run", "")) if j.get("next_run") else "",
-                    "last_run": str(j.get("last_run", "")) if j.get("last_run") else "",
-                    "run_count": j.get("run_count", 0),
-                })
+                formatted.append(
+                    {
+                        "job_id": j.get("job_id", ""),
+                        "cron_expr": j.get("cron_expr", ""),
+                        "enabled": j.get("enabled", False),
+                        "next_run": str(j.get("next_run", ""))
+                        if j.get("next_run")
+                        else "",
+                        "last_run": str(j.get("last_run", ""))
+                        if j.get("last_run")
+                        else "",
+                        "run_count": j.get("run_count", 0),
+                    }
+                )
 
-            return json.dumps({
-                "jobs": formatted,
-                "total": len(formatted),
-                "filtered": enabled_only,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "jobs": formatted,
+                    "total": len(formatted),
+                    "filtered": enabled_only,
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             return json.dumps({"success": False, "error": str(e)})
@@ -2788,8 +3198,14 @@ class ChannelTool(BaseTool):
     }
     required = ["action"]
 
-    async def execute(self, action: str, channel_id: str = "", chat_id: str = "",
-                      content: str = "", **kwargs) -> str:
+    async def execute(
+        self,
+        action: str,
+        channel_id: str = "",
+        chat_id: str = "",
+        content: str = "",
+        **kwargs,
+    ) -> str:
         try:
             from app.modules.channels import get_channel_manager
 
@@ -2800,31 +3216,44 @@ class ChannelTool(BaseTool):
                 connected = set(manager.get_connected_channels())
                 channels = []
                 for cid in ids:
-                    channels.append({
-                        "channel_id": cid,
-                        "connected": cid in connected,
-                    })
-                return json.dumps({"channels": channels, "total": len(channels)}, ensure_ascii=False)
+                    channels.append(
+                        {
+                            "channel_id": cid,
+                            "connected": cid in connected,
+                        }
+                    )
+                return json.dumps(
+                    {"channels": channels, "total": len(channels)}, ensure_ascii=False
+                )
 
             elif action == "send":
                 if not channel_id or not chat_id or not content:
-                    return json.dumps({
-                        "success": False,
-                        "error": "send 操作需要提供 channel_id、chat_id 和 content",
-                    })
-                success, msg_id = await manager.send_message(channel_id, chat_id, content)
-                return json.dumps({
-                    "success": success,
-                    "message_id": msg_id,
-                    "channel_id": channel_id,
-                }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "send 操作需要提供 channel_id、chat_id 和 content",
+                        }
+                    )
+                success, msg_id = await manager.send_message(
+                    channel_id, chat_id, content
+                )
+                return json.dumps(
+                    {
+                        "success": success,
+                        "message_id": msg_id,
+                        "channel_id": channel_id,
+                    },
+                    ensure_ascii=False,
+                )
 
             elif action == "broadcast":
                 if not content:
-                    return json.dumps({
-                        "success": False,
-                        "error": "broadcast 操作需要提供 content",
-                    })
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "broadcast 操作需要提供 content",
+                        }
+                    )
                 results = await manager.broadcast(content)
                 formatted = {}
                 for cid, (success, msg_id) in results.items():
@@ -2865,7 +3294,15 @@ class BrowserTool(BaseTool):
         "action": ToolParameter(
             type="string",
             description="操作类型: content、links、extract、click、fill、screenshot、close",
-            enum=["content", "links", "extract", "click", "fill", "screenshot", "close"],
+            enum=[
+                "content",
+                "links",
+                "extract",
+                "click",
+                "fill",
+                "screenshot",
+                "close",
+            ],
         ),
         "url": ToolParameter(
             type="string",
@@ -2895,18 +3332,27 @@ class BrowserTool(BaseTool):
     }
     required = ["action"]
 
-    async def execute(self, action: str, url: str = "", selector: str = "",
-                      target_text: str = "", input_selector: str = "",
-                      output_path: str = "", **kwargs) -> str:
+    async def execute(
+        self,
+        action: str,
+        url: str = "",
+        selector: str = "",
+        target_text: str = "",
+        input_selector: str = "",
+        output_path: str = "",
+        **kwargs,
+    ) -> str:
         global _browser_page, _browser_instance
 
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            return json.dumps({
-                "success": False,
-                "error": "playwright 未安装。安装命令: pip install playwright && playwright install chromium",
-            })
+            return json.dumps(
+                {
+                    "success": False,
+                    "error": "playwright 未安装。安装命令: pip install playwright && playwright install chromium",
+                }
+            )
 
         try:
             # 关闭浏览器
@@ -2920,7 +3366,9 @@ class BrowserTool(BaseTool):
             # 需要页面的操作：确保浏览器已启动
             if action in ("content", "links", "extract", "click", "fill", "screenshot"):
                 if not url and action in ("content", "links", "extract"):
-                    return json.dumps({"success": False, "error": f"{action} 操作需要提供 url"})
+                    return json.dumps(
+                        {"success": False, "error": f"{action} 操作需要提供 url"}
+                    )
 
                 # 启动或复用浏览器
                 if _browser_instance is None:
@@ -2928,7 +3376,7 @@ class BrowserTool(BaseTool):
                     browser = await _browser_instance.chromium.launch(headless=True)
                     context = await browser.new_context(
                         viewport={"width": 1280, "height": 720},
-                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     )
                     _browser_page = await context.new_page()
                 else:
@@ -2952,15 +3400,18 @@ class BrowserTool(BaseTool):
                         return clone.innerText;
                     }""")
                     title = await page.title()
-                    text = re.sub(r'\n{3,}', '\n\n', text)  # 压缩空行
+                    text = re.sub(r"\n{3,}", "\n\n", text)  # 压缩空行
                     if len(text) > 5000:
                         text = text[:5000] + "\n... (内容已截断)"
-                    return json.dumps({
-                        "success": True,
-                        "url": page.url,
-                        "title": title,
-                        "content": text,
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "url": page.url,
+                            "title": title,
+                            "content": text,
+                        },
+                        ensure_ascii=False,
+                    )
 
                 elif action == "links":
                     links = await page.evaluate("""() => {
@@ -2971,37 +3422,54 @@ class BrowserTool(BaseTool):
                     }""")
                     if len(links) > 100:
                         links = links[:100]
-                    return json.dumps({
-                        "success": True,
-                        "url": page.url,
-                        "title": await page.title(),
-                        "links": links,
-                        "total": len(links),
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "url": page.url,
+                            "title": await page.title(),
+                            "links": links,
+                            "total": len(links),
+                        },
+                        ensure_ascii=False,
+                    )
 
                 elif action == "extract":
                     if not selector:
-                        return json.dumps({"success": False, "error": "extract 操作需要提供 selector"})
-                    elements = await page.evaluate("""(sel) => {
+                        return json.dumps(
+                            {"success": False, "error": "extract 操作需要提供 selector"}
+                        )
+                    elements = await page.evaluate(
+                        """(sel) => {
                         return Array.from(document.querySelectorAll(sel)).map(el => ({
                             text: el.innerText.trim().substring(0, 500),
                             tag: el.tagName.toLowerCase()
                         }));
-                    }""", selector)
+                    }""",
+                        selector,
+                    )
                     if len(elements) > 50:
                         elements = elements[:50]
-                    return json.dumps({
-                        "success": True,
-                        "selector": selector,
-                        "elements": elements,
-                        "total": len(elements),
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "selector": selector,
+                            "elements": elements,
+                            "total": len(elements),
+                        },
+                        ensure_ascii=False,
+                    )
 
                 elif action == "click":
                     if not target_text:
-                        return json.dumps({"success": False, "error": "click 操作需要提供 target_text"})
+                        return json.dumps(
+                            {
+                                "success": False,
+                                "error": "click 操作需要提供 target_text",
+                            }
+                        )
                     # 点击包含指定文本的元素
-                    clicked = await page.evaluate("""(text) => {
+                    clicked = await page.evaluate(
+                        """(text) => {
                         const elements = document.querySelectorAll('a,button,input[type=submit],input[type=button],[role=button]');
                         for (const el of elements) {
                             if (el.innerText && el.innerText.trim().includes(text)) {
@@ -3010,42 +3478,65 @@ class BrowserTool(BaseTool):
                             }
                         }
                         return null;
-                    }""", target_text)
+                    }""",
+                        target_text,
+                    )
                     if not clicked:
-                        return json.dumps({"success": False, "error": f"未找到包含 '{target_text}' 的可点击元素"})
+                        return json.dumps(
+                            {
+                                "success": False,
+                                "error": f"未找到包含 '{target_text}' 的可点击元素",
+                            }
+                        )
                     await asyncio.sleep(1)
-                    text = await page.evaluate("() => document.body ? document.body.innerText.substring(0, 3000) : ''")
-                    return json.dumps({
-                        "success": True,
-                        "clicked": clicked,
-                        "url": page.url,
-                        "content": text,
-                    }, ensure_ascii=False)
+                    text = await page.evaluate(
+                        "() => document.body ? document.body.innerText.substring(0, 3000) : ''"
+                    )
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "clicked": clicked,
+                            "url": page.url,
+                            "content": text,
+                        },
+                        ensure_ascii=False,
+                    )
 
                 elif action == "fill":
                     if not input_selector or not target_text:
-                        return json.dumps({"success": False, "error": "fill 操作需要提供 input_selector 和 target_text"})
+                        return json.dumps(
+                            {
+                                "success": False,
+                                "error": "fill 操作需要提供 input_selector 和 target_text",
+                            }
+                        )
                     await page.fill(input_selector, target_text)
-                    return json.dumps({
-                        "success": True,
-                        "selector": input_selector,
-                        "filled": target_text,
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "selector": input_selector,
+                            "filled": target_text,
+                        },
+                        ensure_ascii=False,
+                    )
 
                 elif action == "screenshot":
                     if not output_path:
                         from datetime import datetime
+
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         output_path = f"screenshots/browser_{timestamp}.png"
                     full_path = os.path.abspath(output_path)
                     os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
                     await page.screenshot(path=str(full_path), full_page=False)
                     file_size = os.path.getsize(full_path)
-                    return json.dumps({
-                        "success": True,
-                        "path": str(full_path),
-                        "file_size": file_size,
-                    })
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "path": str(full_path),
+                            "file_size": file_size,
+                        }
+                    )
 
             return json.dumps({"success": False, "error": f"未知操作: {action}"})
 

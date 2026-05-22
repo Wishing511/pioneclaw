@@ -1,18 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from typing import List, Optional
-from datetime import datetime
-import re
+from typing import Optional
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.api.auth import get_current_active_user
-from app.models.models import User, CronJob, CronExecutionLog
-from app.schemas.schemas import (
-    CronJobCreate, CronJobUpdate, CronJobResponse, MessageResponse,
-    CronExecutionLogResponse,
-)
 from app.core.cron_scheduler import CronScheduler
+from app.core.database import get_db
+from app.models.models import CronExecutionLog, CronJob, User
+from app.schemas.schemas import (
+    CronExecutionLogResponse,
+    CronJobCreate,
+    CronJobResponse,
+    CronJobUpdate,
+    MessageResponse,
+)
 
 router = APIRouter(prefix="/cron", tags=["定时任务"])
 
@@ -27,19 +29,19 @@ def get_next_run_hint(expr: str) -> str:
     return CronScheduler.describe_cron_expr(expr)
 
 
-@router.get("", response_model=List[CronJobResponse])
+@router.get("", response_model=list[CronJobResponse])
 async def list_cron_jobs(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取定时任务列表"""
     result = await db.execute(
         select(CronJob).order_by(CronJob.created_at.desc()).offset(skip).limit(limit)
     )
     jobs = result.scalars().all()
-    
+
     # 转换字段
     return [
         CronJobResponse(
@@ -54,7 +56,7 @@ async def list_cron_jobs(
             next_run=job.next_run,
             run_count=job.run_count,
             created_at=job.created_at,
-            updated_at=job.updated_at
+            updated_at=job.updated_at,
         )
         for job in jobs
     ]
@@ -64,13 +66,13 @@ async def list_cron_jobs(
 async def create_cron_job(
     job_data: CronJobCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """创建定时任务"""
     # 验证 cron 表达式
     if not validate_cron_expr(job_data.cron_expr):
         raise HTTPException(status_code=400, detail="无效的 Cron 表达式")
-    
+
     job = CronJob(
         name=job_data.name,
         display_name=job_data.name,  # 使用 name 作为 display_name
@@ -78,12 +80,12 @@ async def create_cron_job(
         schedule_value=job_data.cron_expr,
         description=job_data.description,
         is_enabled=job_data.is_active,
-        config={"agent_id": job_data.agent_id, "input_data": job_data.input_data}
+        config={"agent_id": job_data.agent_id, "input_data": job_data.input_data},
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
-    
+
     return CronJobResponse(
         id=job.id,
         name=job.name,
@@ -96,7 +98,7 @@ async def create_cron_job(
         next_run=job.next_run,
         run_count=job.run_count,
         created_at=job.created_at,
-        updated_at=job.updated_at
+        updated_at=job.updated_at,
     )
 
 
@@ -104,16 +106,14 @@ async def create_cron_job(
 async def get_cron_job(
     job_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取定时任务详情"""
-    result = await db.execute(
-        select(CronJob).where(CronJob.id == job_id)
-    )
+    result = await db.execute(select(CronJob).where(CronJob.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="定时任务不存在")
-    
+
     return CronJobResponse(
         id=job.id,
         name=job.name,
@@ -126,7 +126,7 @@ async def get_cron_job(
         next_run=job.next_run,
         run_count=job.run_count,
         created_at=job.created_at,
-        updated_at=job.updated_at
+        updated_at=job.updated_at,
     )
 
 
@@ -135,16 +135,14 @@ async def update_cron_job(
     job_id: int,
     job_data: CronJobUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """更新定时任务"""
-    result = await db.execute(
-        select(CronJob).where(CronJob.id == job_id)
-    )
+    result = await db.execute(select(CronJob).where(CronJob.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="定时任务不存在")
-    
+
     if job_data.name is not None:
         job.name = job_data.name
         job.display_name = job_data.name
@@ -163,10 +161,10 @@ async def update_cron_job(
         if job_data.input_data is not None:
             config["input_data"] = job_data.input_data
         job.config = config
-    
+
     await db.commit()
     await db.refresh(job)
-    
+
     return CronJobResponse(
         id=job.id,
         name=job.name,
@@ -179,7 +177,7 @@ async def update_cron_job(
         next_run=job.next_run,
         run_count=job.run_count,
         created_at=job.created_at,
-        updated_at=job.updated_at
+        updated_at=job.updated_at,
     )
 
 
@@ -187,16 +185,14 @@ async def update_cron_job(
 async def delete_cron_job(
     job_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """删除定时任务"""
-    result = await db.execute(
-        select(CronJob).where(CronJob.id == job_id)
-    )
+    result = await db.execute(select(CronJob).where(CronJob.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="定时任务不存在")
-    
+
     await db.delete(job)
     await db.commit()
     return MessageResponse(message="定时任务已删除")
@@ -206,21 +202,19 @@ async def delete_cron_job(
 async def toggle_cron_job(
     job_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """启用/禁用定时任务"""
-    result = await db.execute(
-        select(CronJob).where(CronJob.id == job_id)
-    )
+    result = await db.execute(select(CronJob).where(CronJob.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="定时任务不存在")
-    
+
     job.is_enabled = not job.is_enabled
-    
+
     await db.commit()
     await db.refresh(job)
-    
+
     return CronJobResponse(
         id=job.id,
         name=job.name,
@@ -233,7 +227,7 @@ async def toggle_cron_job(
         next_run=job.next_run,
         run_count=job.run_count,
         created_at=job.created_at,
-        updated_at=job.updated_at
+        updated_at=job.updated_at,
     )
 
 
@@ -241,19 +235,18 @@ async def toggle_cron_job(
 async def run_cron_job_now(
     job_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """立即执行定时任务"""
-    result = await db.execute(
-        select(CronJob).where(CronJob.id == job_id)
-    )
+    result = await db.execute(select(CronJob).where(CronJob.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="定时任务不存在")
 
     from app.core.cron_scheduler import get_cron_scheduler
+
     scheduler = get_cron_scheduler()
-    exec_result = await scheduler.run_job_now(job.name)
+    await scheduler.run_job_now(job.name)
 
     # 获取最新的执行日志
     log_result = await db.execute(
@@ -268,12 +261,12 @@ async def run_cron_job_now(
     return log
 
 
-@router.get("/{job_id}/executions", response_model=List[CronExecutionLogResponse])
+@router.get("/{job_id}/executions", response_model=list[CronExecutionLogResponse])
 async def list_cron_executions(
     job_id: int,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取定时任务执行历史"""
     result = await db.execute(
@@ -286,11 +279,13 @@ async def list_cron_executions(
     return logs
 
 
-@router.get("/{job_id}/executions/latest", response_model=Optional[CronExecutionLogResponse])
+@router.get(
+    "/{job_id}/executions/latest", response_model=Optional[CronExecutionLogResponse]
+)
 async def get_latest_cron_execution(
     job_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取定时任务最近一次执行结果"""
     result = await db.execute(
@@ -304,11 +299,10 @@ async def get_latest_cron_execution(
 
 
 @router.get("/scheduler/status")
-async def scheduler_status(
-    current_user: User = Depends(get_current_active_user)
-):
+async def scheduler_status(current_user: User = Depends(get_current_active_user)):
     """获取调度器状态"""
     from app.core.cron_scheduler import get_cron_scheduler
+
     scheduler = get_cron_scheduler()
     jobs = scheduler.list_jobs()
     return {
@@ -321,10 +315,11 @@ async def scheduler_status(
 @router.post("/scheduler/ensure-heartbeat")
 async def ensure_heartbeat(
     schedule: str = "0 9,12,18 * * *",
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """确保 Heartbeat 任务已注册到调度器"""
     from app.core.cron_scheduler import get_cron_scheduler
+
     scheduler = get_cron_scheduler()
     job_id = scheduler.ensure_heartbeat_job(schedule=schedule)
     job_info = scheduler.get_job(job_id)
@@ -337,8 +332,7 @@ async def ensure_heartbeat(
 
 @router.get("/validate")
 async def validate_cron(
-    expr: str,
-    current_user: User = Depends(get_current_active_user)
+    expr: str, current_user: User = Depends(get_current_active_user)
 ):
     """验证 cron 表达式并返回下次执行时间"""
     is_valid = CronScheduler.validate_cron_expr(expr)

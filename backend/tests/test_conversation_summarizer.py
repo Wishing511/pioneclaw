@@ -2,17 +2,17 @@
 ConversationSummarizer 测试 — LLM 对话摘要写入 MEMORY.md (Track 1)
 """
 
-import json
 import tempfile
-import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
-from app.modules.agent.memory import MemoryStore
+import pytest
+
 from app.modules.agent.conversation_summarizer import (
     ConversationSummarizer,
     SummarizerConfig,
 )
+from app.modules.agent.memory import MemoryStore
 
 
 @pytest.fixture
@@ -29,9 +29,11 @@ def mock_llm():
 
     def _set_stream(chunks):
         """设置 chat_stream 返回的 chunk 列表"""
+
         async def _gen(*args, **kwargs):
             for c in chunks:
                 yield c
+
         llm.chat_stream = _gen
 
     llm._set_stream = _set_stream
@@ -53,6 +55,7 @@ def summarizer(memory_store, mock_llm):
 # ============================================================
 # SummarizerConfig 测试
 # ============================================================
+
 
 class TestSummarizerConfig:
     def test_defaults(self):
@@ -76,6 +79,7 @@ class TestSummarizerConfig:
 # should_summarize 测试
 # ============================================================
 
+
 class TestShouldSummarize:
     def test_token_threshold_triggered(self, summarizer):
         """达到 token 阈值应触发"""
@@ -94,7 +98,9 @@ class TestShouldSummarize:
     def test_cooldown_blocks(self, summarizer):
         """冷却期内不触发"""
         summarizer._last_summarized_at = __import__("time").time()  # 刚摘要过
-        assert summarizer.should_summarize(token_count=10000, tool_call_count=10) is False
+        assert (
+            summarizer.should_summarize(token_count=10000, tool_call_count=10) is False
+        )
 
     def test_custom_config_thresholds(self, memory_store, mock_llm):
         """自定义配置的阈值"""
@@ -111,6 +117,7 @@ class TestShouldSummarize:
 # ============================================================
 # summarize_conversation 测试
 # ============================================================
+
 
 class TestSummarizeConversation:
     @pytest.fixture
@@ -144,18 +151,16 @@ class TestSummarizeConversation:
     async def test_summarize_no_store(self, mock_llm):
         """无 memory_store 返回 None"""
         s = ConversationSummarizer(llm_provider=mock_llm, memory_store=None)
-        result = await s.summarize_conversation([
-            {"role": "user", "content": "hello"}
-        ])
+        result = await s.summarize_conversation([{"role": "user", "content": "hello"}])
         assert result is None
 
     @pytest.mark.asyncio
     async def test_summarize_nothing_to_record(self, summarizer, mock_llm):
         """LLM 判断无需记录时返回 None"""
         mock_llm._set_stream([{"content": "无需记录"}])
-        result = await summarizer.summarize_conversation([
-            {"role": "user", "content": "hello"}
-        ])
+        result = await summarizer.summarize_conversation(
+            [{"role": "user", "content": "hello"}]
+        )
         assert result is None
         assert summarizer.memory_store.get_paragraph_count() == 0
 
@@ -169,7 +174,9 @@ class TestSummarizeConversation:
         assert summarizer.memory_store.get_paragraph_count() == 1
 
     @pytest.mark.asyncio
-    async def test_summarize_truncates_to_max_chars(self, summarizer, mock_llm, sample_messages):
+    async def test_summarize_truncates_to_max_chars(
+        self, summarizer, mock_llm, sample_messages
+    ):
         """摘要超过 max_memory_chars 时截断"""
         summarizer.config.max_memory_chars = 10
         mock_llm._set_stream([{"content": "这是一个非常非常非常长的摘要文本"}])
@@ -180,9 +187,10 @@ class TestSummarizeConversation:
         assert len(entry.content) <= 10
 
     @pytest.mark.asyncio
-    async def test_summarize_updates_cooldown(self, summarizer, mock_llm, sample_messages):
+    async def test_summarize_updates_cooldown(
+        self, summarizer, mock_llm, sample_messages
+    ):
         """摘要后更新冷却时间戳"""
-        import time
         mock_llm._set_stream([{"content": "摘要内容"}])
         await summarizer.summarize_conversation(sample_messages)
         assert summarizer._last_summarized_at > 0
@@ -194,12 +202,15 @@ class TestSummarizeConversation:
 # _format_messages 测试
 # ============================================================
 
+
 class TestFormatMessages:
     def test_simple_messages(self, summarizer):
-        result = summarizer._format_messages([
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there"},
-        ])
+        result = summarizer._format_messages(
+            [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there"},
+            ]
+        )
         assert "[user]" in result
         assert "[assistant]" in result
         assert "Hello" in result
@@ -207,29 +218,38 @@ class TestFormatMessages:
 
     def test_content_list_type(self, summarizer):
         """支持 content 为 list 格式（多模态消息）"""
-        result = summarizer._format_messages([
-            {"role": "user", "content": [
-                {"type": "text", "text": "What is this image?"},
-                {"type": "image_url", "image_url": {"url": "http://..."}},
-            ]},
-        ])
+        result = summarizer._format_messages(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "What is this image?"},
+                        {"type": "image_url", "image_url": {"url": "http://..."}},
+                    ],
+                },
+            ]
+        )
         assert "What is this image?" in result
         assert "image_url" not in result  # 非文本部分被过滤
 
     def test_empty_content_skipped(self, summarizer):
         """空内容消息被跳过"""
-        result = summarizer._format_messages([
-            {"role": "user", "content": ""},
-            {"role": "user", "content": "Real message"},
-        ])
+        result = summarizer._format_messages(
+            [
+                {"role": "user", "content": ""},
+                {"role": "user", "content": "Real message"},
+            ]
+        )
         assert "Real message" in result
 
     def test_truncation_on_max_chars(self, summarizer):
         """超过 max_chars 时截断"""
         long_msg = "A" * 9000
-        result = summarizer._format_messages([
-            {"role": "user", "content": long_msg},
-        ])
+        result = summarizer._format_messages(
+            [
+                {"role": "user", "content": long_msg},
+            ]
+        )
         assert "截断" in result or "truncat" in result.lower() or len(result) <= 8500
 
 
@@ -237,13 +257,14 @@ class TestFormatMessages:
 # summarize_overflow 测试
 # ============================================================
 
+
 class TestSummarizeOverflow:
     @pytest.mark.asyncio
     async def test_overflow_with_llm(self, summarizer, mock_llm):
         mock_llm._set_stream([{"content": "旧对话摘要"}])
-        result = await summarizer.summarize_overflow([
-            {"role": "user", "content": "old message"}
-        ])
+        result = await summarizer.summarize_overflow(
+            [{"role": "user", "content": "old message"}]
+        )
         assert result is not None
         entry = summarizer.memory_store.get_entry(1)
         assert entry.source == "auto-overflow"
@@ -251,9 +272,9 @@ class TestSummarizeOverflow:
     @pytest.mark.asyncio
     async def test_overflow_no_llm_fallback(self, summarizer):
         summarizer.llm_provider = None
-        result = await summarizer.summarize_overflow([
-            {"role": "user", "content": "old " * 200}
-        ])
+        result = await summarizer.summarize_overflow(
+            [{"role": "user", "content": "old " * 200}]
+        )
         assert result is not None
         assert summarizer.memory_store.get_paragraph_count() == 1
 

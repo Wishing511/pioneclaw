@@ -35,29 +35,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get PR diff (filtered)
+      - name: Get PR diff
         run: |
-          # 审查代码文件 + 配置文件（workflow、docker、脚本等）
-          # 跳过 lockfile、生成文件、图片、snapshot
-          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            -- '*.py' '*.ts' '*.tsx' '*.js' '*.jsx' '*.go' '*.java' '*.rs' '*.vue' '*.sql' \
-            -- '*.yml' '*.yaml' '*.json' '*.sh' '*.toml' '*.dockerfile' \
-            > pr.diff
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" > pr.diff
 
-          # 输出被排除的文件列表供审计
-          echo "--- Excluded files (not reviewed) ---"
-          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            -- '*.lock' '*.lockb' 'package-lock.json' 'yarn.lock' 'pnpm-lock.yaml' 'poetry.lock' 'Cargo.lock' \
-            -- '*.min.js' '*.min.css' '*.map' \
-            -- '*.svg' '*.png' '*.jpg' '*.jpeg' '*.gif' '*.webp' '*.ico' \
-            -- '*.snap' '__snapshots__/*' \
-            -- '*.generated.*' '*.gen.*' \
-            | grep -E '^diff --git' | sed 's/diff --git a\//  - /' | sed 's/ b\/.*/' || true
-          echo "-------------------------------------"
-
-          # 如果过滤后 diff 为空，输出提示并跳过后续步骤
+          # 如果 diff 为空，跳过审查
           if [ ! -s pr.diff ]; then
-            echo "No relevant code files changed. Skipping review."
+            echo "No code files changed. Skipping review."
             echo "SKIP_REVIEW=true" >> "$GITHUB_ENV"
             exit 0
           fi

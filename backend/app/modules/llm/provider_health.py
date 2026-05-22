@@ -13,9 +13,10 @@ Provider 健康检查 + 自动故障转移链
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
@@ -26,18 +27,20 @@ logger = logging.getLogger(__name__)
 # HealthStatus
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class HealthStatus:
     """Provider 健康检查结果"""
+
     provider_id: str
-    provider_type: str      # openai / anthropic / azure / custom
+    provider_type: str  # openai / anthropic / azure / custom
     model_name: str
     healthy: bool
     latency_ms: float = 0.0
-    error_msg: Optional[str] = None
-    checked_at: Optional[str] = None   # ISO 8601
+    error_msg: str | None = None
+    checked_at: str | None = None  # ISO 8601
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "provider_id": self.provider_id,
             "provider_type": self.provider_type,
@@ -52,6 +55,7 @@ class HealthStatus:
 # ---------------------------------------------------------------------------
 # ProviderHealthChecker
 # ---------------------------------------------------------------------------
+
 
 class ProviderHealthChecker:
     """Provider 健康检查器
@@ -83,7 +87,7 @@ class ProviderHealthChecker:
         """
         self._timeout = timeout
         self._cache_ttl = cache_ttl
-        self._cache: Dict[str, Tuple[float, HealthStatus]] = {}
+        self._cache: dict[str, tuple[float, HealthStatus]] = {}
 
     # ------------------------------------------------------------------
     # 单个检查
@@ -93,8 +97,8 @@ class ProviderHealthChecker:
         self,
         provider_id: str,
         provider_type: str = "openai",
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         model_name: str = "",
     ) -> HealthStatus:
         """检查单个 provider 的健康状态
@@ -144,8 +148,8 @@ class ProviderHealthChecker:
 
     async def check_all(
         self,
-        configs: List[Dict[str, Any]],
-    ) -> Dict[str, HealthStatus]:
+        configs: list[dict[str, Any]],
+    ) -> dict[str, HealthStatus]:
         """批量检查所有 provider
 
         Args:
@@ -156,18 +160,22 @@ class ProviderHealthChecker:
         """
         tasks = []
         for cfg in configs:
-            tasks.append(self.check_provider(
-                provider_id=cfg.get("provider_id", cfg.get("name", "")),
-                provider_type=cfg.get("provider_type", cfg.get("provider", "openai")),
-                base_url=cfg.get("base_url"),
-                api_key=cfg.get("api_key"),
-                model_name=cfg.get("model_name", cfg.get("model", "")),
-            ))
+            tasks.append(
+                self.check_provider(
+                    provider_id=cfg.get("provider_id", cfg.get("name", "")),
+                    provider_type=cfg.get(
+                        "provider_type", cfg.get("provider", "openai")
+                    ),
+                    base_url=cfg.get("base_url"),
+                    api_key=cfg.get("api_key"),
+                    model_name=cfg.get("model_name", cfg.get("model", "")),
+                )
+            )
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        statuses: Dict[str, HealthStatus] = {}
-        for cfg, result in zip(configs, results):
+        statuses: dict[str, HealthStatus] = {}
+        for cfg, result in zip(configs, results, strict=False):
             pid = cfg.get("provider_id", cfg.get("name", ""))
             if isinstance(result, Exception):
                 statuses[pid] = HealthStatus(
@@ -191,7 +199,9 @@ class ProviderHealthChecker:
         """清除健康检查缓存"""
         self._cache.clear()
 
-    def invalidate(self, provider_id: str, provider_type: str, base_url: Optional[str] = None) -> None:
+    def invalidate(
+        self, provider_id: str, provider_type: str, base_url: str | None = None
+    ) -> None:
         """使特定 provider 的缓存失效"""
         cache_key = f"{provider_type}:{base_url or ''}"
         self._cache.pop(cache_key, None)
@@ -200,7 +210,7 @@ class ProviderHealthChecker:
     # 内部方法
     # ------------------------------------------------------------------
 
-    def _build_probe_url(self, provider_type: str, base_url: Optional[str]) -> str:
+    def _build_probe_url(self, provider_type: str, base_url: str | None) -> str:
         """构建探测 URL"""
         base = (base_url or "").rstrip("/")
         if not base:
@@ -212,11 +222,14 @@ class ProviderHealthChecker:
         return f"{base}{endpoint}"
 
     async def _probe_openai_compatible(
-        self, client: httpx.AsyncClient, url: str,
-        status: HealthStatus, api_key: Optional[str],
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        status: HealthStatus,
+        api_key: str | None,
     ) -> HealthStatus:
         """探测 OpenAI-compatible endpoint"""
-        headers: Dict[str, str] = {}
+        headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
@@ -231,11 +244,13 @@ class ProviderHealthChecker:
         return status
 
     async def _probe_anthropic(
-        self, client: httpx.AsyncClient,
-        status: HealthStatus, api_key: Optional[str],
+        self,
+        client: httpx.AsyncClient,
+        status: HealthStatus,
+        api_key: str | None,
     ) -> HealthStatus:
         """探测 Anthropic endpoint（无 /models 端点，用基础连通性）"""
-        headers: Dict[str, str] = {}
+        headers: dict[str, str] = {}
         if api_key:
             headers["x-api-key"] = api_key
             headers["anthropic-version"] = "2023-06-01"
@@ -254,15 +269,17 @@ class ProviderHealthChecker:
 # ProviderFallbackChain
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FallbackEntry:
     """回退链中的一项"""
+
     provider_id: str
     provider_type: str
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
     model_name: str = ""
-    priority: int = 0   # 越小越优先
+    priority: int = 0  # 越小越优先
     disabled: bool = False
 
 
@@ -284,17 +301,17 @@ class ProviderFallbackChain:
 
     def __init__(
         self,
-        entries: List[FallbackEntry],
-        health_checker: Optional[ProviderHealthChecker] = None,
+        entries: list[FallbackEntry],
+        health_checker: ProviderHealthChecker | None = None,
         cooldown_seconds: float = 30.0,
     ) -> None:
         self._entries = sorted(entries, key=lambda e: e.priority)
         self._checker = health_checker or ProviderHealthChecker()
         self._cooldown = cooldown_seconds
-        self._failed_until: Dict[str, float] = {}  # provider_id -> 冷却结束时间戳
+        self._failed_until: dict[str, float] = {}  # provider_id -> 冷却结束时间戳
 
     @property
-    def entries(self) -> List[FallbackEntry]:
+    def entries(self) -> list[FallbackEntry]:
         """返回排序后的回退链列表（不含 disabled）"""
         return [e for e in self._entries if not e.disabled]
 
@@ -304,7 +321,7 @@ class ProviderFallbackChain:
 
     async def get_healthy_entry(
         self,
-        preferred: Optional[str] = None,
+        preferred: str | None = None,
     ) -> FallbackEntry:
         """获取第一个健康的 provider entry
 
@@ -320,7 +337,7 @@ class ProviderFallbackChain:
             other_entries = [e for e in ordered if e.provider_id != preferred]
             ordered = preferred_entries + other_entries
 
-        errors: List[str] = []
+        errors: list[str] = []
         now = time.monotonic()
 
         for entry in ordered:
@@ -351,11 +368,9 @@ class ProviderFallbackChain:
             errors.append(f"{entry.provider_id}: {status.error_msg or 'unhealthy'}")
             self._failed_until[entry.provider_id] = now + self._cooldown
 
-        raise RuntimeError(
-            f"All providers unavailable: {'; '.join(errors)}"
-        )
+        raise RuntimeError(f"All providers unavailable: {'; '.join(errors)}")
 
-    async def check_all_health(self) -> Dict[str, HealthStatus]:
+    async def check_all_health(self) -> dict[str, HealthStatus]:
         """检查所有 provider 健康状态"""
         configs = [
             {
@@ -373,8 +388,7 @@ class ProviderFallbackChain:
         """手动标记 provider 失败（冷却期内不会选中）"""
         self._failed_until[provider_id] = time.monotonic() + self._cooldown
         logger.warning(
-            f"[FallbackChain] {provider_id} marked failed, "
-            f"cooldown {self._cooldown}s"
+            f"[FallbackChain] {provider_id} marked failed, cooldown {self._cooldown}s"
         )
 
     def reset(self) -> None:
@@ -404,9 +418,10 @@ class ProviderFallbackChain:
 # 启动预检
 # ---------------------------------------------------------------------------
 
+
 async def run_startup_preflight(
-    db_session_factory: Optional[Callable] = None,
-) -> List[HealthStatus]:
+    db_session_factory: Callable | None = None,
+) -> list[HealthStatus]:
     """启动时预检所有已配置的 AI model provider
 
     从数据库读取 is_active=True 的 AIModelConfig，逐个探测连通性。
@@ -420,9 +435,12 @@ async def run_startup_preflight(
     try:
         if db_session_factory is None:
             from app.core.database import async_session_maker
+
             db_session_factory = async_session_maker
     except ImportError:
-        logger.warning("[Preflight] cannot import database; skipping provider preflight")
+        logger.warning(
+            "[Preflight] cannot import database; skipping provider preflight"
+        )
         return []
 
     checker = ProviderHealthChecker(timeout=10.0, cache_ttl=60.0)
@@ -430,10 +448,11 @@ async def run_startup_preflight(
     try:
         async with db_session_factory() as session:
             from sqlalchemy import select
+
             from app.models.models import AIModelConfig
 
             result = await session.execute(
-                select(AIModelConfig).where(AIModelConfig.is_active == True)
+                select(AIModelConfig).where(AIModelConfig.is_active)
             )
             configs = result.scalars().all()
     except Exception as exc:
@@ -462,8 +481,6 @@ async def run_startup_preflight(
             f"Unhealthy: {unhealthy}"
         )
     else:
-        logger.info(
-            f"[Preflight] All {len(statuses)} provider(s) healthy"
-        )
+        logger.info(f"[Preflight] All {len(statuses)} provider(s) healthy")
 
     return list(statuses.values())

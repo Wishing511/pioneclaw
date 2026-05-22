@@ -1,11 +1,10 @@
 """
 Git 上下文注入 — 检测仓库状态并生成 Agent 提示词摘要
 """
+
 import subprocess
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, List
 
 
 @dataclass
@@ -13,13 +12,13 @@ class GitContext:
     branch: str = ""
     last_commit: str = ""
     last_commit_msg: str = ""
-    unstaged: List[str] = field(default_factory=list)
-    staged: List[str] = field(default_factory=list)
-    recent_commits: List[str] = field(default_factory=list)
+    unstaged: list[str] = field(default_factory=list)
+    staged: list[str] = field(default_factory=list)
+    recent_commits: list[str] = field(default_factory=list)
     has_repo: bool = False
 
 
-def get_git_context(working_dir: Optional[str] = None) -> GitContext:
+def get_git_context(working_dir: str | None = None) -> GitContext:
     """获取当前目录 Git 上下文"""
     cwd = Path(working_dir) if working_dir else Path.cwd()
 
@@ -76,7 +75,7 @@ def get_git_context(working_dir: Optional[str] = None) -> GitContext:
     # Recent commits (last 5)
     recent = _run(["log", "-5", "--format=%h %s"])
     if recent:
-        ctx.recent_commits = [l for l in recent.split("\n") if l]
+        ctx.recent_commits = [line for line in recent.split("\n") if line]
 
     return ctx
 

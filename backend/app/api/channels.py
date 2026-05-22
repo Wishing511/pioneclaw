@@ -5,21 +5,17 @@
 """
 
 import logging
-from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
 from app.api.auth import get_current_active_user
 from app.models import User
 from app.modules.channels import (
-    ChannelManager,
     ChannelConfig,
     ChannelType,
     get_channel_manager,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +24,16 @@ router = APIRouter(prefix="/channels", tags=["渠道管理"])
 
 # ==================== 请求模型 ====================
 
+
 class ChannelCreateRequest(BaseModel):
     """创建渠道请求"""
+
     channel_type: str
     name: str
-    app_id: Optional[str] = None
-    app_secret: Optional[str] = None
-    bot_token: Optional[str] = None
-    webhook_url: Optional[str] = None
+    app_id: str | None = None
+    app_secret: str | None = None
+    bot_token: str | None = None
+    webhook_url: str | None = None
     enabled: bool = True
     auto_reconnect: bool = True
     extra: dict = {}
@@ -43,24 +41,27 @@ class ChannelCreateRequest(BaseModel):
 
 class ChannelUpdateRequest(BaseModel):
     """更新渠道请求"""
-    name: Optional[str] = None
-    app_id: Optional[str] = None
-    app_secret: Optional[str] = None
-    bot_token: Optional[str] = None
-    webhook_url: Optional[str] = None
-    enabled: Optional[bool] = None
-    auto_reconnect: Optional[bool] = None
-    extra: Optional[dict] = None
+
+    name: str | None = None
+    app_id: str | None = None
+    app_secret: str | None = None
+    bot_token: str | None = None
+    webhook_url: str | None = None
+    enabled: bool | None = None
+    auto_reconnect: bool | None = None
+    extra: dict | None = None
 
 
 class SendMessageRequest(BaseModel):
     """发送消息请求"""
+
     chat_id: str
     content: str
-    reply_to: Optional[str] = None
+    reply_to: str | None = None
 
 
 # ==================== API 端点 ====================
+
 
 @router.get("")
 async def list_channels(
@@ -81,20 +82,20 @@ async def create_channel(
 ):
     """创建渠道"""
     manager = get_channel_manager()
-    
+
     # 解析渠道类型
     try:
         channel_type = ChannelType(request.channel_type)
     except ValueError:
         raise HTTPException(
-            status_code=400,
-            detail=f"Unknown channel type: {request.channel_type}"
+            status_code=400, detail=f"Unknown channel type: {request.channel_type}"
         )
-    
+
     # 生成渠道 ID
     import uuid
+
     channel_id = f"{channel_type.value}_{uuid.uuid4().hex[:8]}"
-    
+
     # 创建配置
     config = ChannelConfig(
         channel_id=channel_id,
@@ -108,12 +109,12 @@ async def create_channel(
         auto_reconnect=request.auto_reconnect,
         extra=request.extra,
     )
-    
+
     # 注册渠道
     success, message = await manager.register(config)
     if not success:
         raise HTTPException(status_code=400, detail=message)
-    
+
     return {
         "success": True,
         "channel_id": channel_id,
@@ -129,10 +130,10 @@ async def get_channel(
     """获取渠道详情"""
     manager = get_channel_manager()
     channel = await manager.get(channel_id)
-    
+
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
+
     return channel.get_info()
 
 
@@ -145,10 +146,10 @@ async def update_channel(
     """更新渠道配置"""
     manager = get_channel_manager()
     channel = await manager.get(channel_id)
-    
+
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
+
     # 更新配置
     if request.name:
         channel.config.name = request.name
@@ -164,7 +165,7 @@ async def update_channel(
         channel.config.auto_reconnect = request.auto_reconnect
     if request.extra:
         channel.config.extra.update(request.extra)
-    
+
     return {"success": True, "message": "Channel updated"}
 
 
@@ -176,10 +177,10 @@ async def delete_channel(
     """删除渠道"""
     manager = get_channel_manager()
     success = await manager.unregister(channel_id)
-    
+
     if not success:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
+
     return {"success": True, "message": "Channel deleted"}
 
 
@@ -191,10 +192,10 @@ async def start_channel(
     """启动渠道"""
     manager = get_channel_manager()
     success, message = await manager.start_channel(channel_id)
-    
+
     if not success:
         raise HTTPException(status_code=400, detail=message)
-    
+
     return {"success": True, "message": message}
 
 
@@ -206,10 +207,10 @@ async def stop_channel(
     """停止渠道"""
     manager = get_channel_manager()
     success, message = await manager.stop_channel(channel_id)
-    
+
     if not success:
         raise HTTPException(status_code=400, detail=message)
-    
+
     return {"success": True, "message": message}
 
 
@@ -227,24 +228,24 @@ async def send_message(
         content=request.content,
         reply_to=request.reply_to,
     )
-    
+
     if not success:
         raise HTTPException(status_code=400, detail=result)
-    
+
     return {"success": True, "message_id": result}
 
 
 @router.post("/broadcast")
 async def broadcast_message(
     content: str,
-    channel_ids: Optional[List[str]] = None,
-    chat_id: Optional[str] = None,
+    channel_ids: list[str] | None = None,
+    chat_id: str | None = None,
     current_user: User = Depends(get_current_active_user),
 ):
     """广播消息到多个渠道"""
     manager = get_channel_manager()
     results = await manager.broadcast(content, channel_ids, chat_id)
-    
+
     return {
         "success": True,
         "results": results,

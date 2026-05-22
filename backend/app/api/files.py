@@ -5,11 +5,10 @@ GET /api/files — 根据路径返回文件内容
 支持 image/video/audio/document 等类型
 """
 
-import os
 import mimetypes
-from pathlib import Path
+import os
 
-from fastapi import APIRouter, Query, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from app.api.auth import get_current_active_user
@@ -20,14 +19,44 @@ router = APIRouter(prefix="/files", tags=["files"])
 # 允许的扩展名白名单
 _ALLOWED_EXTENSIONS = {
     # 图片
-    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".bmp",
+    ".webp",
+    ".svg",
+    ".ico",
     # 音频
-    ".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a", ".wma",
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".flac",
+    ".aac",
+    ".m4a",
+    ".wma",
     # 视频
-    ".mp4", ".webm", ".avi", ".mov", ".mkv", ".flv", ".wmv",
+    ".mp4",
+    ".webm",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".flv",
+    ".wmv",
     # 文档
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".txt", ".md", ".csv", ".json", ".xml", ".html",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".txt",
+    ".md",
+    ".csv",
+    ".json",
+    ".xml",
+    ".html",
 }
 
 

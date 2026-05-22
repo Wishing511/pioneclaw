@@ -2,22 +2,26 @@
 GraphRAG API 测试
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import pytest_asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
-from app.models import User
-from app.main import app
 from app.core.database import get_db
+from app.main import app
+from app.models import User
 from tests.conftest import auth_headers
 
 
 @pytest_asyncio.fixture
 async def graph_client(db_engine):
     """HTTP 测试客户端"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-    session_maker = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    session_maker = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
     async def override_get_db():
         async with session_maker() as session:
@@ -34,15 +38,19 @@ class TestGraphRAGAPI:
     """测试 GraphRAG API 端点"""
 
     @pytest.mark.asyncio
-    async def test_index_document_success(self, graph_client: AsyncClient, test_user: User):
+    async def test_index_document_success(
+        self, graph_client: AsyncClient, test_user: User
+    ):
         """测试文档索引成功"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.index_document = AsyncMock(return_value={
-                "success": True,
-                "message": "文档索引成功",
-                "doc_id": "doc-123",
-            })
+            mock_client.index_document = AsyncMock(
+                return_value={
+                    "success": True,
+                    "message": "文档索引成功",
+                    "doc_id": "doc-123",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.post(
@@ -66,15 +74,19 @@ class TestGraphRAGAPI:
         assert response.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_index_batch_success(self, graph_client: AsyncClient, test_user: User):
+    async def test_index_batch_success(
+        self, graph_client: AsyncClient, test_user: User
+    ):
         """测试批量索引成功"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.index_batch = AsyncMock(return_value={
-                "success": True,
-                "message": "成功索引 3 个文档",
-                "count": 3,
-            })
+            mock_client.index_batch = AsyncMock(
+                return_value={
+                    "success": True,
+                    "message": "成功索引 3 个文档",
+                    "count": 3,
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.post(
@@ -93,10 +105,12 @@ class TestGraphRAGAPI:
         """测试查询成功"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.query = AsyncMock(return_value={
-                "result": "query result",
-                "mode": "hybrid",
-            })
+            mock_client.query = AsyncMock(
+                return_value={
+                    "result": "query result",
+                    "mode": "hybrid",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.post(
@@ -115,10 +129,12 @@ class TestGraphRAGAPI:
         """测试查询默认模式"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.query = AsyncMock(return_value={
-                "result": "result",
-                "mode": "hybrid",
-            })
+            mock_client.query = AsyncMock(
+                return_value={
+                    "result": "result",
+                    "mode": "hybrid",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.post(
@@ -144,13 +160,15 @@ class TestGraphRAGAPI:
         """测试获取统计成功"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.stats = AsyncMock(return_value={
-                "working_dir": "/data/graph_rag",
-                "graph_exists": True,
-                "vector_exists": True,
-                "nodes": 10,
-                "edges": 15,
-            })
+            mock_client.stats = AsyncMock(
+                return_value={
+                    "working_dir": "/data/graph_rag",
+                    "graph_exists": True,
+                    "vector_exists": True,
+                    "nodes": 10,
+                    "edges": 15,
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.get(
@@ -175,10 +193,12 @@ class TestGraphRAGAPI:
         """测试清空图谱成功"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.clear = AsyncMock(return_value={
-                "success": True,
-                "message": "知识图谱已清空",
-            })
+            mock_client.clear = AsyncMock(
+                return_value={
+                    "success": True,
+                    "message": "知识图谱已清空",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.delete(
@@ -202,15 +222,19 @@ class TestGraphRAGAPIErrors:
     """测试 GraphRAG API 错误处理"""
 
     @pytest.mark.asyncio
-    async def test_index_document_failure(self, graph_client: AsyncClient, test_user: User):
+    async def test_index_document_failure(
+        self, graph_client: AsyncClient, test_user: User
+    ):
         """测试索引失败"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.index_document = AsyncMock(return_value={
-                "success": False,
-                "message": "索引失败",
-                "doc_id": "auto",
-            })
+            mock_client.index_document = AsyncMock(
+                return_value={
+                    "success": False,
+                    "message": "索引失败",
+                    "doc_id": "auto",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.post(
@@ -228,10 +252,12 @@ class TestGraphRAGAPIErrors:
         """测试查询失败"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.query = AsyncMock(return_value={
-                "result": "查询失败: error",
-                "mode": "hybrid",
-            })
+            mock_client.query = AsyncMock(
+                return_value={
+                    "result": "查询失败: error",
+                    "mode": "hybrid",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.post(
@@ -249,10 +275,12 @@ class TestGraphRAGAPIErrors:
         """测试清空失败"""
         with patch("app.api.graph_rag.get_graph_rag_client") as mock_get_client:
             mock_client = MagicMock()
-            mock_client.clear = AsyncMock(return_value={
-                "success": False,
-                "message": "清空失败",
-            })
+            mock_client.clear = AsyncMock(
+                return_value={
+                    "success": False,
+                    "message": "清空失败",
+                }
+            )
             mock_get_client.return_value = mock_client
 
             response = await graph_client.delete(

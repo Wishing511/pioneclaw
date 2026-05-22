@@ -1,13 +1,22 @@
 from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case
-from app.core import get_db
-from app.models import User, ApiUsage, Agent, Skill, Task, Runner, RunnerStatus, AgentStatus
-from app.models.layered_memory import LayeredMemory
-from app.models.approval import Approval, ApprovalStatus
-from app.schemas import DashboardStats
+
 from app.api.auth import get_current_active_user
+from app.core import get_db
+from app.models import (
+    Agent,
+    AgentStatus,
+    ApiUsage,
+    Skill,
+    Task,
+    User,
+)
+from app.models.approval import Approval, ApprovalStatus
+from app.models.layered_memory import LayeredMemory
+from app.schemas import DashboardStats
 
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 
@@ -15,7 +24,7 @@ router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取仪表盘统计数据（24小时内）"""
     now = datetime.now(tz=timezone.utc)
@@ -40,7 +49,7 @@ async def get_dashboard_stats(
         select(func.count(ApiUsage.id))
         .where(ApiUsage.user_id == current_user.id)
         .where(ApiUsage.created_at >= yesterday)
-        .where(ApiUsage.is_success == False)
+        .where(not ApiUsage.is_success)
     )
     failed_calls = failed_result.scalar() or 0
 
@@ -49,15 +58,14 @@ async def get_dashboard_stats(
         select(
             ApiUsage.model,
             func.count(ApiUsage.id).label("calls"),
-            func.coalesce(func.sum(ApiUsage.total_tokens), 0).label("tokens")
+            func.coalesce(func.sum(ApiUsage.total_tokens), 0).label("tokens"),
         )
         .where(ApiUsage.user_id == current_user.id)
         .where(ApiUsage.created_at >= yesterday)
         .group_by(ApiUsage.model)
     )
     model_dist = {
-        row.model: {"calls": row.calls, "tokens": row.tokens}
-        for row in result.all()
+        row.model: {"calls": row.calls, "tokens": row.tokens} for row in result.all()
     }
 
     # 24h hourly breakdown
@@ -73,8 +81,7 @@ async def get_dashboard_stats(
     )
     hourly_map = {row.hour: row.calls for row in hourly_result.all()}
     hourly_calls = [
-        {"hour": f"{h:02d}", "calls": hourly_map.get(f"{h:02d}", 0)}
-        for h in range(24)
+        {"hour": f"{h:02d}", "calls": hourly_map.get(f"{h:02d}", 0)} for h in range(24)
     ]
 
     return DashboardStats(
@@ -92,7 +99,7 @@ async def get_dashboard_stats(
 @router.get("/counts")
 async def get_counts(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
 ):
     """获取各模块数量统计 + 仪表盘概览数据"""
     now = datetime.now(tz=timezone.utc)
@@ -113,10 +120,9 @@ async def get_counts(
         select(func.count(Task.id)).where(Task.created_at >= today_start)
     )
     task_status_counts = await db.execute(
-        select(
-            Task.status,
-            func.count(Task.id).label("count")
-        ).where(Task.created_at >= today_start).group_by(Task.status)
+        select(Task.status, func.count(Task.id).label("count"))
+        .where(Task.created_at >= today_start)
+        .group_by(Task.status)
     )
     task_today_by_status = {row.status: row.count for row in task_status_counts.all()}
 
@@ -132,15 +138,15 @@ async def get_counts(
         select(func.count(ApiUsage.id))
         .where(ApiUsage.user_id == current_user.id)
         .where(ApiUsage.created_at >= today_start)
-        .where(ApiUsage.is_success == False)
+        .where(not ApiUsage.is_success)
     )
 
     # 总模块数量
-    skill_count = await db.execute(select(func.count(Skill.id)).where(Skill.is_active == True))
+    skill_count = await db.execute(select(func.count(Skill.id)).where(Skill.is_active))
     memory_count = await db.execute(
         select(func.count(LayeredMemory.id))
         .where(LayeredMemory.user_id == current_user.id)
-        .where(LayeredMemory.is_active == True)
+        .where(LayeredMemory.is_active)
     )
 
     # 最近任务（5条）
@@ -149,15 +155,17 @@ async def get_counts(
     )
     recent_tasks = []
     for t in recent_tasks_result.scalars().all():
-        recent_tasks.append({
-            "id": t.id,
-            "title": t.title,
-            "status": t.status,
-            "priority": t.priority,
-            "task_type": t.task_type,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-        })
+        recent_tasks.append(
+            {
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "task_type": t.task_type,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            }
+        )
 
     # 最近关键日志（5条，优先显示失败的）
     recent_logs_result = await db.execute(
@@ -168,21 +176,25 @@ async def get_counts(
     )
     recent_logs = []
     for log in recent_logs_result.scalars().all():
-        recent_logs.append({
-            "id": log.id,
-            "model": log.model,
-            "is_success": log.is_success,
-            "total_tokens": log.total_tokens,
-            "duration_ms": log.duration_ms,
-            "error_message": log.error_message,
-            "created_at": log.created_at.isoformat() if log.created_at else None,
-        })
+        recent_logs.append(
+            {
+                "id": log.id,
+                "model": log.model,
+                "is_success": log.is_success,
+                "total_tokens": log.total_tokens,
+                "duration_ms": log.duration_ms,
+                "error_message": log.error_message,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+            }
+        )
 
     # 待审批数量（仅管理员可见）
     pending_approvals = 0
     if current_user.is_super_admin or current_user.is_org_admin:
         result = await db.execute(
-            select(func.count(Approval.id)).where(Approval.status == ApprovalStatus.PENDING)
+            select(func.count(Approval.id)).where(
+                Approval.status == ApprovalStatus.PENDING
+            )
         )
         pending_approvals = result.scalar() or 0
 

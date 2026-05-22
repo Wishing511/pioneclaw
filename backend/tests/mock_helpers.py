@@ -7,7 +7,7 @@ Mock 助手函数 — 简化测试中 MockLLMProvider 的使用
 - assert_tool_called(): 断言某工具被调用
 - assert_agent_says(): 断言某次 LLM 响应包含预期文本
 """
-from typing import List, Optional
+
 from app.modules.llm import MockLLMProvider
 
 
@@ -25,7 +25,15 @@ def create_echo_mock(delay_ms: float = 0.0) -> MockLLMProvider:
     mock = MockLLMProvider()
     _latency_ms = delay_ms
 
-    async def echo_chat_stream(self, messages, tools=None, model=None, temperature=None, max_tokens=None, **kwargs):
+    async def echo_chat_stream(
+        self,
+        messages,
+        tools=None,
+        model=None,
+        temperature=None,
+        max_tokens=None,
+        **kwargs,
+    ):
         if _latency_ms > 0:
             await asyncio.sleep(_latency_ms / 1000.0)
         # 提取最后一条 user 消息
@@ -38,11 +46,12 @@ def create_echo_mock(delay_ms: float = 0.0) -> MockLLMProvider:
         yield {"content": last_user, "finish_reason": "stop"}
 
     import types
+
     mock.chat_stream = types.MethodType(echo_chat_stream, mock)
     return mock
 
 
-def create_scripted_mock(script: List[str], delay_ms: float = 0.0) -> MockLLMProvider:
+def create_scripted_mock(script: list[str], delay_ms: float = 0.0) -> MockLLMProvider:
     """
     创建一个脚本化 Mock — 按顺序返回预设文本
 
@@ -111,8 +120,7 @@ def assert_agent_says(
 
     record = provider.call_history[call_index]
     full_content = "".join(
-        chunk.get("content", "") or ""
-        for chunk in record.response_chunks
+        chunk.get("content", "") or "" for chunk in record.response_chunks
     )
 
     if contains:

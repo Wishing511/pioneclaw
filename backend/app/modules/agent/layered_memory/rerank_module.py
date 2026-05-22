@@ -10,14 +10,10 @@ RerankModule — 5维重排序
 """
 
 import math
-from datetime import datetime, timezone
-from typing import Optional, List
 from dataclasses import dataclass
-
-from loguru import logger
+from datetime import datetime, timezone
 
 from app.modules.agent.layered_memory.retrieval_engine import RetrievalResult
-
 
 # 默认权重
 DEFAULT_WEIGHTS = {
@@ -32,6 +28,7 @@ DEFAULT_WEIGHTS = {
 @dataclass
 class RerankConfig:
     """重排序配置"""
+
     weights: dict = None
     recency_half_life_days: float = 30.0  # 半衰期（天）
 
@@ -49,10 +46,10 @@ class RerankModule:
 
     def rerank(
         self,
-        results: List[RetrievalResult],
-        query_context_type: Optional[str] = None,
-        query_layer: Optional[int] = None,
-    ) -> List[RetrievalResult]:
+        results: list[RetrievalResult],
+        query_context_type: str | None = None,
+        query_layer: int | None = None,
+    ) -> list[RetrievalResult]:
         """
         对检索结果进行 5 维重排序
 
@@ -80,8 +77,8 @@ class RerankModule:
     def explain_ranking(
         self,
         result: RetrievalResult,
-        query_context_type: Optional[str] = None,
-        query_layer: Optional[int] = None,
+        query_context_type: str | None = None,
+        query_layer: int | None = None,
     ) -> dict:
         """解释排序原因（调试用）"""
         scores = self._calculate_dimension_scores(
@@ -103,8 +100,8 @@ class RerankModule:
     def _calculate_dimension_scores(
         self,
         result: RetrievalResult,
-        query_context_type: Optional[str],
-        query_layer: Optional[int],
+        query_context_type: str | None,
+        query_layer: int | None,
     ) -> dict:
         """计算 5 维分数"""
         # semantic: 直接使用已有的 score（语义搜索分数）
@@ -135,7 +132,10 @@ class RerankModule:
         total_weight = sum(self.weights.values())
         if total_weight == 0:
             return 0.0
-        return sum(scores.get(dim, 0) * w for dim, w in self.weights.items()) / total_weight
+        return (
+            sum(scores.get(dim, 0) * w for dim, w in self.weights.items())
+            / total_weight
+        )
 
     # ==================== 分数计算函数 ====================
 
@@ -145,7 +145,7 @@ class RerankModule:
         return min(1.0, math.log(1 + access_count) / 7.0)
 
     @staticmethod
-    def _calc_recency(updated_at_str: Optional[str]) -> float:
+    def _calc_recency(updated_at_str: str | None) -> float:
         """时间衰减分数: exp(-days / half_life)"""
         if not updated_at_str:
             return 0.0
@@ -165,7 +165,7 @@ class RerankModule:
             return 0.0
 
     @staticmethod
-    def _calc_level_score(memory_layer: int, query_layer: Optional[int]) -> float:
+    def _calc_level_score(memory_layer: int, query_layer: int | None) -> float:
         """层级偏好分数"""
         if query_layer is not None:
             # 指定了层级：精确匹配=1.0, 相邻=0.5, 其他=0.0
@@ -183,7 +183,7 @@ class RerankModule:
             return 0.6
 
     @staticmethod
-    def _calc_type_match(memory_type: str, query_type: Optional[str]) -> float:
+    def _calc_type_match(memory_type: str, query_type: str | None) -> float:
         """类型匹配分数"""
         if not query_type or query_type == "all":
             return 0.5  # 不限定类型时给中等分

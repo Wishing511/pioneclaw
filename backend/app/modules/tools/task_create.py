@@ -5,7 +5,6 @@ TaskCreateTool — Agent 创建后台任务
 import json
 import logging
 import uuid
-from datetime import datetime
 
 from app.modules.tools.base import BaseTool, ToolParameter
 from app.modules.tools.task_store import create_task as _store_create_task
@@ -34,7 +33,7 @@ class TaskCreateTool(BaseTool):
         ),
         "args": ToolParameter(
             type="string",
-            description="传递给目标工具的 JSON 参数字符串，如 '{\"command\": \"dir\"}'",
+            description='传递给目标工具的 JSON 参数字符串，如 \'{"command": "dir"}\'',
             default="{}",
         ),
         "parent_task_id": ToolParameter(
@@ -45,48 +44,71 @@ class TaskCreateTool(BaseTool):
     }
     required = ["label"]
 
-    async def execute(self, label: str, tool_name: str = "spawn",
-                      args: str = "{}", parent_task_id: str = "", **kwargs) -> str:
+    async def execute(
+        self,
+        label: str,
+        tool_name: str = "spawn",
+        args: str = "{}",
+        parent_task_id: str = "",
+        **kwargs,
+    ) -> str:
         try:
             # 验证 label
             if not label or not label.strip():
-                return json.dumps({
-                    "success": False,
-                    "error": "任务名称不能为空",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "任务名称不能为空",
+                    },
+                    ensure_ascii=False,
+                )
 
             # 解析 args JSON
             try:
                 tool_args = json.loads(args)
                 if not isinstance(tool_args, dict):
-                    return json.dumps({
-                        "success": False,
-                        "error": "args 必须是 JSON 对象格式",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "args 必须是 JSON 对象格式",
+                        },
+                        ensure_ascii=False,
+                    )
             except json.JSONDecodeError as e:
-                return json.dumps({
-                    "success": False,
-                    "error": f"args JSON 解析失败: {e}",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"args JSON 解析失败: {e}",
+                    },
+                    ensure_ascii=False,
+                )
 
             # 生成 task_id
             task_id = str(uuid.uuid4())[:8]
 
             # 存储任务
             _store_create_task(
-                task_id, label.strip(), tool_name,
-                args=tool_args, parent_task_id=parent_task_id.strip() if parent_task_id else "",
+                task_id,
+                label.strip(),
+                tool_name,
+                args=tool_args,
+                parent_task_id=parent_task_id.strip() if parent_task_id else "",
             )
 
-            return json.dumps({
-                "success": True,
-                "task_id": task_id,
-                "label": label.strip(),
-                "tool_name": tool_name,
-                "status": "pending",
-                "parent_task_id": parent_task_id.strip() if parent_task_id else None,
-                "message": f"任务 '{label}' 已创建。使用 task_get(task_id='{task_id}') 查询状态。",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "task_id": task_id,
+                    "label": label.strip(),
+                    "tool_name": tool_name,
+                    "status": "pending",
+                    "parent_task_id": parent_task_id.strip()
+                    if parent_task_id
+                    else None,
+                    "message": f"任务 '{label}' 已创建。使用 task_get(task_id='{task_id}') 查询状态。",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TaskCreateTool execution error: {e}")

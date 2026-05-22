@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class TokenUsage:
     """Token 用量记录"""
+
     input_tokens: int
     output_tokens: int
     source: Literal["api", "estimated"]  # api=LLM 返回的真实值, estimated=字符估算
@@ -33,8 +34,8 @@ class TokenBudget:
     """Token 预算 — 统一管理上下文窗口和压缩阈值"""
 
     context_window: int
-    max_output_tokens: int = 20_000   # 预留输出空间
-    safety_buffer: int = 13_000       # 安全缓冲
+    max_output_tokens: int = 20_000  # 预留输出空间
+    safety_buffer: int = 13_000  # 安全缓冲
 
     def __post_init__(self):
         # 小上下文窗口保护

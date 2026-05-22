@@ -12,10 +12,12 @@
 
 此端点将在未来版本中移除。
 """
-from fastapi import APIRouter, HTTPException, status, Request
-from fastapi.responses import JSONResponse
 
-router = APIRouter(prefix="/knowledge-bases", tags=["Knowledge Bases (已废弃)"], deprecated=True)
+from fastapi import APIRouter, HTTPException, status
+
+router = APIRouter(
+    prefix="/knowledge-bases", tags=["Knowledge Bases (已废弃)"], deprecated=True
+)
 
 
 @router.api_route(
@@ -36,8 +38,8 @@ async def deprecated_root():
                 "semantic_search": "POST /api/wiki/search/semantic",
                 "chunk_management": "POST /api/wiki/{id}/chunks",
                 "graph_indexing": "POST /api/wiki/{id}/graph",
-            }
-        }
+            },
+        },
     )
 
 
@@ -69,6 +71,6 @@ async def deprecated_endpoint(path: str = ""):
                 "semantic_search": "POST /api/wiki/search/semantic",
                 "chunk_management": "POST /api/wiki/{id}/chunks",
                 "graph_indexing": "POST /api/wiki/{id}/graph",
-            }
-        }
+            },
+        },
     )

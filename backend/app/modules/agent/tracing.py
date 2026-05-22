@@ -15,33 +15,35 @@ Agent Tracing 执行追踪系统
 """
 
 import asyncio
-import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class SpanKind(Enum):
     """追踪跨度类型"""
-    TRACE = "trace"          # 根追踪
-    AGENT = "agent"          # Agent 执行
-    LLM = "llm"              # LLM 调用
-    TOOL = "tool"            # 工具调用
-    HANDOFF = "handoff"      # Handoff 委托
+
+    TRACE = "trace"  # 根追踪
+    AGENT = "agent"  # Agent 执行
+    LLM = "llm"  # LLM 调用
+    TOOL = "tool"  # 工具调用
+    HANDOFF = "handoff"  # Handoff 委托
     GUARDRAIL = "guardrail"  # Guardrail 验证
-    HOOK = "hook"            # Tool Hook
+    HOOK = "hook"  # Tool Hook
     RETRIEVAL = "retrieval"  # 知识检索
     EMBEDDING = "embedding"  # 向量嵌入
 
 
 class SpanStatus(Enum):
     """跨度状态"""
+
     RUNNING = "running"
     SUCCESS = "success"
     ERROR = "error"
@@ -51,6 +53,7 @@ class SpanStatus(Enum):
 @dataclass
 class TokenUsage:
     """Token 使用统计"""
+
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -69,32 +72,33 @@ class Span:
 
     记录单个操作的开始、结束、输入输出等信息
     """
+
     id: str
     trace_id: str
-    parent_id: Optional[str]
+    parent_id: str | None
     kind: SpanKind
     name: str
 
     # 时间
     start_time: float
-    end_time: Optional[float] = None
+    end_time: float | None = None
     duration_ms: int = 0
 
     # 状态
     status: SpanStatus = SpanStatus.RUNNING
-    error: Optional[str] = None
-    error_stack: Optional[str] = None
+    error: str | None = None
+    error_stack: str | None = None
 
     # 数据
-    input_data: Dict[str, Any] = field(default_factory=dict)
-    output_data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    input_data: dict[str, Any] = field(default_factory=dict)
+    output_data: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Token 统计
-    tokens: Optional[TokenUsage] = None
+    tokens: TokenUsage | None = None
 
     # 子跨度
-    children: List["Span"] = field(default_factory=list)
+    children: list["Span"] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.id:
@@ -103,7 +107,7 @@ class Span:
     def finish(
         self,
         status: SpanStatus = SpanStatus.SUCCESS,
-        output_data: Dict[str, Any] = None,
+        output_data: dict[str, Any] = None,
         error: str = None,
         error_stack: str = None,
     ) -> None:
@@ -123,7 +127,7 @@ class Span:
         """添加子跨度"""
         self.children.append(child)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "id": self.id,
@@ -143,11 +147,13 @@ class Span:
                 "prompt": self.tokens.prompt_tokens,
                 "completion": self.tokens.completion_tokens,
                 "total": self.tokens.total_tokens,
-            } if self.tokens else None,
+            }
+            if self.tokens
+            else None,
             "children": [c.to_dict() for c in self.children],
         }
 
-    def _truncate_data(self, data: Dict, max_len: int = 500) -> Dict:
+    def _truncate_data(self, data: dict, max_len: int = 500) -> dict:
         """截断数据避免过大"""
         result = {}
         for k, v in data.items():
@@ -166,13 +172,14 @@ class Trace:
 
     一个 Trace 包含多个嵌套的 Span
     """
+
     id: str
     name: str
-    root_span: Optional[Span] = None
+    root_span: Span | None = None
 
     # 时间
     start_time: float = 0.0
-    end_time: Optional[float] = None
+    end_time: float | None = None
     duration_ms: int = 0
 
     # 统计
@@ -185,8 +192,8 @@ class Trace:
     agent_id: str = ""
     agent_name: str = ""
     session_id: str = ""
-    user_id: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    user_id: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.id:
@@ -216,7 +223,7 @@ class Trace:
         for child in span.children:
             self._compute_stats(child)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "id": self.id,
@@ -236,7 +243,7 @@ class Trace:
             "root_span": self.root_span.to_dict() if self.root_span else None,
         }
 
-    def flatten_spans(self) -> List[Span]:
+    def flatten_spans(self) -> list[Span]:
         """展平所有跨度为列表"""
         result = []
 
@@ -258,8 +265,8 @@ class AgentTracer:
 
     def __init__(
         self,
-        storage: Optional[Any] = None,
-        on_trace_complete: Optional[Callable] = None,
+        storage: Any | None = None,
+        on_trace_complete: Callable | None = None,
     ):
         """
         Args:
@@ -270,19 +277,19 @@ class AgentTracer:
         self.on_trace_complete = on_trace_complete
 
         # 当前追踪状态
-        self._current_trace: Optional[Trace] = None
-        self._span_stack: List[Span] = []
+        self._current_trace: Trace | None = None
+        self._span_stack: list[Span] = []
 
         # 历史追踪
-        self._traces: Dict[str, Trace] = {}
+        self._traces: dict[str, Trace] = {}
 
     @property
-    def current_trace(self) -> Optional[Trace]:
+    def current_trace(self) -> Trace | None:
         """获取当前追踪"""
         return self._current_trace
 
     @property
-    def current_span(self) -> Optional[Span]:
+    def current_span(self) -> Span | None:
         """获取当前跨度"""
         return self._span_stack[-1] if self._span_stack else None
 
@@ -292,8 +299,8 @@ class AgentTracer:
         agent_id: str = "",
         agent_name: str = "",
         session_id: str = "",
-        user_id: Optional[int] = None,
-        metadata: Dict[str, Any] = None,
+        user_id: int | None = None,
+        metadata: dict[str, Any] = None,
     ) -> Trace:
         """开始新追踪
 
@@ -328,8 +335,8 @@ class AgentTracer:
         self,
         kind: SpanKind,
         name: str,
-        input_data: Dict[str, Any] = None,
-        metadata: Dict[str, Any] = None,
+        input_data: dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ) -> Span:
         """开始新跨度
 
@@ -375,11 +382,11 @@ class AgentTracer:
     def end_span(
         self,
         status: SpanStatus = SpanStatus.SUCCESS,
-        output_data: Dict[str, Any] = None,
+        output_data: dict[str, Any] = None,
         error: str = None,
         error_stack: str = None,
         tokens: TokenUsage = None,
-    ) -> Optional[Span]:
+    ) -> Span | None:
         """结束当前跨度
 
         Args:
@@ -407,10 +414,12 @@ class AgentTracer:
         if tokens:
             span.tokens = tokens
 
-        logger.debug(f"Ended span {span.id}: {span.status.value} ({span.duration_ms}ms)")
+        logger.debug(
+            f"Ended span {span.id}: {span.status.value} ({span.duration_ms}ms)"
+        )
         return span
 
-    def end_trace(self) -> Optional[Trace]:
+    def end_trace(self) -> Trace | None:
         """结束当前追踪
 
         Returns:
@@ -461,8 +470,8 @@ class AgentTracer:
         agent_id: str = "",
         agent_name: str = "",
         session_id: str = "",
-        user_id: Optional[int] = None,
-        metadata: Dict[str, Any] = None,
+        user_id: int | None = None,
+        metadata: dict[str, Any] = None,
     ):
         """追踪上下文管理器
 
@@ -485,6 +494,7 @@ class AgentTracer:
             # 记录错误
             if self.current_span:
                 import traceback
+
                 self.end_span(
                     status=SpanStatus.ERROR,
                     error=str(e),
@@ -499,8 +509,8 @@ class AgentTracer:
         self,
         kind: SpanKind,
         name: str,
-        input_data: Dict[str, Any] = None,
-        metadata: Dict[str, Any] = None,
+        input_data: dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
     ):
         """跨度上下文管理器
 
@@ -514,6 +524,7 @@ class AgentTracer:
             yield span
         except Exception as e:
             import traceback
+
             span.finish(
                 status=SpanStatus.ERROR,
                 error=str(e),
@@ -528,17 +539,17 @@ class AgentTracer:
 
     # ==================== 查询方法 ====================
 
-    def get_trace(self, trace_id: str) -> Optional[Trace]:
+    def get_trace(self, trace_id: str) -> Trace | None:
         """获取追踪"""
         return self._traces.get(trace_id)
 
     def list_traces(
         self,
-        agent_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        user_id: Optional[int] = None,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        user_id: int | None = None,
         limit: int = 50,
-    ) -> List[Trace]:
+    ) -> list[Trace]:
         """列出追踪"""
         result = []
 
@@ -557,7 +568,7 @@ class AgentTracer:
         result.sort(key=lambda t: t.start_time, reverse=True)
         return result[:limit]
 
-    def get_timeline(self, trace_id: str) -> List[Dict[str, Any]]:
+    def get_timeline(self, trace_id: str) -> list[dict[str, Any]]:
         """获取时间线数据（Gantt 图用）
 
         Returns:
@@ -570,16 +581,18 @@ class AgentTracer:
         timeline = []
 
         def collect(span: Span, depth: int = 0):
-            timeline.append({
-                "id": span.id,
-                "name": span.name,
-                "kind": span.kind.value,
-                "start": span.start_time,
-                "end": span.end_time,
-                "duration_ms": span.duration_ms,
-                "status": span.status.value,
-                "depth": depth,
-            })
+            timeline.append(
+                {
+                    "id": span.id,
+                    "name": span.name,
+                    "kind": span.kind.value,
+                    "start": span.start_time,
+                    "end": span.end_time,
+                    "duration_ms": span.duration_ms,
+                    "status": span.status.value,
+                    "depth": depth,
+                }
+            )
 
             for child in span.children:
                 collect(child, depth + 1)
@@ -611,7 +624,7 @@ class AgentTracer:
 
 # ==================== 全局实例 ====================
 
-_global_tracer: Optional[AgentTracer] = None
+_global_tracer: AgentTracer | None = None
 
 
 def get_tracer() -> AgentTracer:
@@ -630,23 +643,30 @@ def reset_tracer() -> None:
 
 # ==================== 便捷函数 ====================
 
+
 def trace_agent(name: str, **kwargs):
     """装饰器：追踪 Agent 执行"""
+
     def decorator(func):
         async def wrapper(*args, **func_kwargs):
             tracer = get_tracer()
             async with tracer.trace_context(name, **kwargs):
                 return await func(*args, **func_kwargs)
+
         return wrapper
+
     return decorator
 
 
 def trace_tool(name: str):
     """装饰器：追踪工具执行"""
+
     def decorator(func):
         async def wrapper(*args, **kwargs):
             tracer = get_tracer()
             async with tracer.span_context(SpanKind.TOOL, name):
                 return await func(*args, **kwargs)
+
         return wrapper
+
     return decorator

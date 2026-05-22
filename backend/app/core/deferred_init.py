@@ -14,7 +14,8 @@ import asyncio
 import logging
 import random
 import time
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ _SENTINEL = object()
 class DeferredInitError(Exception):
     """延迟初始化失败"""
 
-    def __init__(self, name: str, attempts: int, last_error: Optional[Exception] = None):
+    def __init__(self, name: str, attempts: int, last_error: Exception | None = None):
         self.name = name
         self.attempts = attempts
         self.last_error = last_error
@@ -70,7 +71,7 @@ class DeferredInit:
         self._value: Any = _SENTINEL
         self._initialized = False
         self._lock = asyncio.Lock()
-        self._error: Optional[str] = None
+        self._error: str | None = None
 
     # ------------------------------------------------------------------
     # 属性
@@ -82,7 +83,7 @@ class DeferredInit:
         return self._initialized and self._value is not _SENTINEL
 
     @property
-    def error(self) -> Optional[str]:
+    def error(self) -> str | None:
         """上次初始化的错误信息"""
         return self._error
 
@@ -111,7 +112,7 @@ class DeferredInit:
             if self._initialized and self._value is not _SENTINEL:
                 return self._value
 
-            last_error: Optional[Exception] = None
+            last_error: Exception | None = None
             for attempt in range(1, self._max_retries + 2):
                 try:
                     result = await asyncio.wait_for(
@@ -173,7 +174,7 @@ class DeferredInit:
                 f"use get() instead of get_sync()"
             )
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 2):
             try:
                 self._value = result if attempt == 1 else self._factory()
@@ -230,7 +231,9 @@ class DeferredInit:
         return result
 
     @staticmethod
-    def _compute_backoff_ms(attempt: int, base_ms: int = 2000, max_ms: int = 32000) -> int:
+    def _compute_backoff_ms(
+        attempt: int, base_ms: int = 2000, max_ms: int = 32000
+    ) -> int:
         """指数退避 + jitter（与 recovery_recipes 公式一致）"""
         exponential = min(base_ms * (4 ** (attempt - 1)), max_ms)
         jitter = int(exponential * 0.25 * (random.random() * 2 - 1))

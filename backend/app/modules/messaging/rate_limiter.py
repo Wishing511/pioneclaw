@@ -11,7 +11,6 @@
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 from loguru import logger
 
@@ -19,6 +18,7 @@ from loguru import logger
 @dataclass
 class TokenBucket:
     """令牌桶"""
+
     capacity: float  # 桶容量
     tokens: float = field(default=0.0)  # 当前令牌数
     last_refill: float = field(default_factory=time.time)  # 上次填充时间
@@ -33,25 +33,25 @@ class TokenBucket:
 
 class RateLimiter:
     """
-    令牌桶限流器
+        令牌桶限流器
 
-    特性：
-- 多 key 独立限流
-    - 平滑填充
-    - 突发流量支持
-    - 异步安全
+        特性：
+    - 多 key 独立限流
+        - 平滑填充
+        - 突发流量支持
+        - 异步安全
     """
 
     def __init__(
         self,
         default_capacity: int = 60,  # 默认桶容量（每分钟请求数）
-        default_refill_rate: Optional[float] = None,  # 默认填充速率（令牌/秒）
+        default_refill_rate: float | None = None,  # 默认填充速率（令牌/秒）
     ):
         self.default_capacity = default_capacity
         self.default_refill_rate = default_refill_rate or (default_capacity / 60.0)
 
         # 令牌桶缓存 {key: TokenBucket}
-        self._buckets: Dict[str, TokenBucket] = {}
+        self._buckets: dict[str, TokenBucket] = {}
 
         # 锁
         self._lock = asyncio.Lock()
@@ -60,8 +60,8 @@ class RateLimiter:
         self,
         key: str,
         tokens: int = 1,
-        capacity: Optional[int] = None,
-        refill_rate: Optional[float] = None,
+        capacity: int | None = None,
+        refill_rate: float | None = None,
     ) -> bool:
         """
         获取令牌
@@ -92,8 +92,8 @@ class RateLimiter:
         self,
         key: str,
         tokens: int = 1,
-        capacity: Optional[int] = None,
-        refill_rate: Optional[float] = None,
+        capacity: int | None = None,
+        refill_rate: float | None = None,
         max_wait: float = 60.0,
     ) -> bool:
         """
@@ -169,7 +169,7 @@ class RateLimiter:
             self._buckets.clear()
             logger.debug("Rate limiter reset all buckets")
 
-    async def get_stats(self) -> Dict[str, Dict[str, float]]:
+    async def get_stats(self) -> dict[str, dict[str, float]]:
         """获取所有限流器的统计信息"""
         async with self._lock:
             stats = {}
@@ -185,8 +185,8 @@ class RateLimiter:
     def _get_or_create_bucket(
         self,
         key: str,
-        capacity: Optional[int],
-        refill_rate: Optional[float],
+        capacity: int | None,
+        refill_rate: float | None,
     ) -> TokenBucket:
         """获取或创建令牌桶"""
         if key not in self._buckets:
@@ -198,7 +198,9 @@ class RateLimiter:
                 tokens=cap,  # 初始填满
                 refill_rate=rate,
             )
-            logger.debug(f"Created new token bucket for key: {key}, capacity: {cap}, rate: {rate}")
+            logger.debug(
+                f"Created new token bucket for key: {key}, capacity: {cap}, rate: {rate}"
+            )
 
         return self._buckets[key]
 

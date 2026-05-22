@@ -10,8 +10,8 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User, Runner, RunnerStatus
-from app.core.crypto import encrypt, decrypt
+from app.core.crypto import decrypt, encrypt
+from app.models import Runner, RunnerStatus, User
 from tests.conftest import auth_headers
 
 
@@ -23,6 +23,7 @@ def _naive_utcnow() -> datetime:
 # ============================
 # 辅助函数
 # ============================
+
 
 async def create_runner(db_session: AsyncSession, name: str, **kwargs) -> Runner:
     """在测试数据库中创建一个 Runner"""
@@ -42,6 +43,7 @@ async def create_runner(db_session: AsyncSession, name: str, **kwargs) -> Runner
 # POST /{runner_id}/rotate-token
 # ============================
 
+
 class TestRotateToken:
     """测试 Runner Token 轮换"""
 
@@ -50,7 +52,9 @@ class TestRotateToken:
         self, client: AsyncClient, db_session: AsyncSession, test_admin: User
     ):
         """管理员成功轮换 Runner Token，返回 new_token、rotated_at、old_token_expires_at"""
-        runner = await create_runner(db_session, "rotate-success", status=RunnerStatus.APPROVED)
+        runner = await create_runner(
+            db_session, "rotate-success", status=RunnerStatus.APPROVED
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/rotate-token",
@@ -87,7 +91,9 @@ class TestRotateToken:
         self, client: AsyncClient, db_session: AsyncSession, test_user: User
     ):
         """普通用户尝试轮换 Token 应返回 403"""
-        runner = await create_runner(db_session, "rotate-not-admin", status=RunnerStatus.APPROVED)
+        runner = await create_runner(
+            db_session, "rotate-not-admin", status=RunnerStatus.APPROVED
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/rotate-token",
@@ -113,7 +119,9 @@ class TestRotateToken:
         self, client: AsyncClient, db_session: AsyncSession, test_admin: User
     ):
         """轮换未批准的 Runner Token 应返回 400"""
-        runner = await create_runner(db_session, "rotate-pending", status=RunnerStatus.PENDING)
+        runner = await create_runner(
+            db_session, "rotate-pending", status=RunnerStatus.PENDING
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/rotate-token",
@@ -127,7 +135,9 @@ class TestRotateToken:
         self, client: AsyncClient, db_session: AsyncSession, test_admin: User
     ):
         """轮换已拒绝的 Runner Token 应返回 400"""
-        runner = await create_runner(db_session, "rotate-rejected", status=RunnerStatus.REJECTED)
+        runner = await create_runner(
+            db_session, "rotate-rejected", status=RunnerStatus.REJECTED
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/rotate-token",
@@ -141,7 +151,9 @@ class TestRotateToken:
         self, client: AsyncClient, db_session: AsyncSession, test_admin: User
     ):
         """轮换后，数据库中存储的加密 api_key 可以解密得到 new_token"""
-        runner = await create_runner(db_session, "rotate-decrypt", status=RunnerStatus.APPROVED)
+        runner = await create_runner(
+            db_session, "rotate-decrypt", status=RunnerStatus.APPROVED
+        )
 
         response = await client.post(
             f"/api/runners/{runner.id}/rotate-token",
@@ -163,7 +175,8 @@ class TestRotateToken:
         # SQLite DateTime (naive) strips timezone on round-trip; use naive datetimes
         past_naive = _naive_utcnow() - timedelta(hours=1)
         runner = await create_runner(
-            db_session, "rotate-expired-state",
+            db_session,
+            "rotate-expired-state",
             status=RunnerStatus.APPROVED,
             api_key=encrypt("some-token"),
             token_rotated_at=_naive_utcnow(),
@@ -180,7 +193,9 @@ class TestRotateToken:
         self, client: AsyncClient, db_session: AsyncSession, test_admin: User
     ):
         """轮换 Token 后，Runner 记录的 token_rotated_at 和 token_expires_at 正确更新"""
-        runner = await create_runner(db_session, "rotate-update-fields", status=RunnerStatus.APPROVED)
+        runner = await create_runner(
+            db_session, "rotate-update-fields", status=RunnerStatus.APPROVED
+        )
 
         # 确认初始值为 None
         assert runner.token_rotated_at is None

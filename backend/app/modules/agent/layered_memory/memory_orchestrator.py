@@ -6,17 +6,20 @@ MemoryOrchestrator — 分层记忆门面
 """
 
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
 
 from loguru import logger
-from sqlalchemy import select, func, and_, or_, delete
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.layered_memory import LayeredMemory, MemoryLayer
+from app.modules.agent.layered_memory.intent_analyzer import (
+    IntentAnalyzer,
+)
+from app.modules.agent.layered_memory.rerank_module import RerankConfig, RerankModule
+from app.modules.agent.layered_memory.retrieval_engine import (
+    RetrievalEngine,
+)
 from app.modules.agent.layered_memory.tier_manager import TierManager
-from app.modules.agent.layered_memory.retrieval_engine import RetrievalEngine, RetrievalResult
-from app.modules.agent.layered_memory.rerank_module import RerankModule, RerankConfig
-from app.modules.agent.layered_memory.intent_analyzer import IntentAnalyzer, IntentResult
 
 
 class MemoryOrchestrator:
@@ -52,13 +55,13 @@ class MemoryOrchestrator:
         name: str,
         user_id: int,
         context_type: str = "memory",
-        uri: Optional[str] = None,
-        parent_uri: Optional[str] = None,
-        tags: Optional[list] = None,
-        source: Optional[str] = None,
+        uri: str | None = None,
+        parent_uri: str | None = None,
+        tags: list | None = None,
+        source: str | None = None,
         importance: int = 3,
-        session_id: Optional[str] = None,
-        agent_id: Optional[int] = None,
+        session_id: str | None = None,
+        agent_id: int | None = None,
         generate_vector: bool = True,
     ) -> LayeredMemory:
         """存储记忆（含 L0/L1 自动生成 + 可选向量索引）"""
@@ -83,7 +86,12 @@ class MemoryOrchestrator:
                 # L2 向量
                 vector_id = self.vector_store.add(
                     content=l2.content,
-                    metadata={"uri": l2.uri, "name": name, "layer": 2, "user_id": user_id},
+                    metadata={
+                        "uri": l2.uri,
+                        "name": name,
+                        "layer": 2,
+                        "user_id": user_id,
+                    },
                     source_type="memory",
                     source_id=str(l2.id),
                 )
@@ -97,7 +105,12 @@ class MemoryOrchestrator:
                 if l0 and l0.abstract:
                     l0_vector_id = self.vector_store.add(
                         content=l0.abstract,
-                        metadata={"uri": l0_uri, "name": name, "layer": 0, "user_id": user_id},
+                        metadata={
+                            "uri": l0_uri,
+                            "name": name,
+                            "layer": 0,
+                            "user_id": user_id,
+                        },
                         source_type="memory",
                         source_id=str(l0.id),
                     )
@@ -111,7 +124,12 @@ class MemoryOrchestrator:
                 if l1 and l1.overview:
                     l1_vector_id = self.vector_store.add(
                         content=l1.overview,
-                        metadata={"uri": l1_uri, "name": name, "layer": 1, "user_id": user_id},
+                        metadata={
+                            "uri": l1_uri,
+                            "name": name,
+                            "layer": 1,
+                            "user_id": user_id,
+                        },
                         source_type="memory",
                         source_id=str(l1.id),
                     )
@@ -129,12 +147,12 @@ class MemoryOrchestrator:
         self,
         query: str,
         context_type: str = "all",
-        layers: Optional[List[int]] = None,
+        layers: list[int] | None = None,
         top_k: int = 10,
-        user_id: Optional[int] = None,
-        agent_id: Optional[int] = None,
-        session_id: Optional[str] = None,
-        context: Optional[str] = None,
+        user_id: int | None = None,
+        agent_id: int | None = None,
+        session_id: str | None = None,
+        context: str | None = None,
     ) -> dict:
         """
         语义检索（完整流水线：意图分析 → 检索 → 重排序）
@@ -147,7 +165,9 @@ class MemoryOrchestrator:
 
         # 用优化后的查询
         search_query = intent.optimized_query or query
-        search_type = intent.context_type if intent.context_type != "all" else context_type
+        search_type = (
+            intent.context_type if intent.context_type != "all" else context_type
+        )
 
         # 2. 检索
         results = await self.retrieval_engine.retrieve(
@@ -183,24 +203,24 @@ class MemoryOrchestrator:
 
     # ==================== 获取/更新/删除 ====================
 
-    async def get(self, uri: str, layer: Optional[int] = None) -> Optional[LayeredMemory]:
+    async def get(self, uri: str, layer: int | None = None) -> LayeredMemory | None:
         """获取指定记忆"""
         return await self.tier_manager.get(uri, layer)
 
-    async def get_with_context(self, uri: str) -> Optional[LayeredMemory]:
+    async def get_with_context(self, uri: str) -> LayeredMemory | None:
         """获取 L2 并填充 L0/L1"""
         return await self.tier_manager.get_with_context(uri)
 
     async def update(
         self,
         uri: str,
-        content: Optional[str] = None,
-        name: Optional[str] = None,
-        tags: Optional[list] = None,
-        importance: Optional[int] = None,
-        is_active: Optional[bool] = None,
+        content: str | None = None,
+        name: str | None = None,
+        tags: list | None = None,
+        importance: int | None = None,
+        is_active: bool | None = None,
         regenerate_tiers: bool = True,
-    ) -> Optional[LayeredMemory]:
+    ) -> LayeredMemory | None:
         """更新记忆"""
         # 获取 L2
         stmt = select(LayeredMemory).where(
@@ -249,7 +269,7 @@ class MemoryOrchestrator:
 
     # ==================== 提升/清理 ====================
 
-    async def promote(self, uri: str) -> Optional[LayeredMemory]:
+    async def promote(self, uri: str) -> LayeredMemory | None:
         """L1→L2 提升"""
         return await self.tier_manager.promote(uri, from_layer=1, to_layer=2)
 
@@ -261,16 +281,16 @@ class MemoryOrchestrator:
 
     async def list_memories(
         self,
-        user_id: Optional[int] = None,
-        layer: Optional[int] = None,
-        context_type: Optional[str] = None,
-        session_id: Optional[str] = None,
-        keyword: Optional[str] = None,
+        user_id: int | None = None,
+        layer: int | None = None,
+        context_type: str | None = None,
+        session_id: str | None = None,
+        keyword: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict:
         """列表查询（分页）"""
-        conditions = [LayeredMemory.is_active == True]
+        conditions = [LayeredMemory.is_active]
         # 只查 L2，避免重复
         conditions.append(LayeredMemory.layer == MemoryLayer.LONG_TERM)
 
@@ -285,11 +305,14 @@ class MemoryOrchestrator:
             conditions.append(LayeredMemory.session_id == session_id)
         if keyword:
             conditions.append(
-                LayeredMemory.name.contains(keyword) | LayeredMemory.content.contains(keyword)
+                LayeredMemory.name.contains(keyword)
+                | LayeredMemory.content.contains(keyword)
             )
 
         # 总数
-        count_stmt = select(func.count()).select_from(LayeredMemory).where(and_(*conditions))
+        count_stmt = (
+            select(func.count()).select_from(LayeredMemory).where(and_(*conditions))
+        )
         total_result = await self.db.execute(count_stmt)
         total = total_result.scalar()
 
@@ -306,14 +329,18 @@ class MemoryOrchestrator:
 
         return {"items": items, "total": total}
 
-    async def stats(self, user_id: Optional[int] = None) -> dict:
+    async def stats(self, user_id: int | None = None) -> dict:
         """统计信息"""
-        base_conditions = [LayeredMemory.is_active == True]
+        base_conditions = [LayeredMemory.is_active]
         if user_id:
             base_conditions.append(LayeredMemory.user_id == user_id)
 
         # 总数
-        total_stmt = select(func.count()).select_from(LayeredMemory).where(and_(*base_conditions))
+        total_stmt = (
+            select(func.count())
+            .select_from(LayeredMemory)
+            .where(and_(*base_conditions))
+        )
         total_result = await self.db.execute(total_stmt)
         total = total_result.scalar()
 
@@ -326,7 +353,9 @@ class MemoryOrchestrator:
         by_type = {}
         for ct in ["memory", "resource", "skill"]:
             conditions = base_conditions + [LayeredMemory.context_type == ct]
-            stmt = select(func.count()).select_from(LayeredMemory).where(and_(*conditions))
+            stmt = (
+                select(func.count()).select_from(LayeredMemory).where(and_(*conditions))
+            )
             result = await self.db.execute(stmt)
             by_type[ct] = result.scalar()
 

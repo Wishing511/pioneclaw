@@ -16,8 +16,9 @@ import copy
 import logging
 import re
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +29,26 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CallRecord:
     """单次 chat_stream 或 chat 调用的完整记录"""
-    method: str                           # "chat_stream" 或 "chat"
-    messages: List[Dict[str, Any]]        # 调用时传入的消息列表
-    tools: Optional[List[Dict]] = None    # 工具定义
-    model: Optional[str] = None           # 模型名称
-    temperature: Optional[float] = None   # 温度参数
-    max_tokens: Optional[int] = None      # 最大 token 数
-    timestamp: float = 0.0                # 调用时间戳
-    response_chunks: List[Dict] = field(default_factory=list)  # 响应的所有 chunk
-    error: Optional[str] = None           # 错误信息（如有）
+
+    method: str  # "chat_stream" 或 "chat"
+    messages: list[dict[str, Any]]  # 调用时传入的消息列表
+    tools: list[dict] | None = None  # 工具定义
+    model: str | None = None  # 模型名称
+    temperature: float | None = None  # 温度参数
+    max_tokens: int | None = None  # 最大 token 数
+    timestamp: float = 0.0  # 调用时间戳
+    response_chunks: list[dict] = field(default_factory=list)  # 响应的所有 chunk
+    error: str | None = None  # 错误信息（如有）
 
 
 @dataclass
 class ResponseRule:
     """基于消息内容正则匹配的响应规则"""
-    pattern: str                          # 原始正则表达式字符串
-    compiled: re.Pattern                  # 编译后的正则
-    responses: List[List[Dict]]           # 匹配时使用的响应序列
-    consumed: int = 0                     # 已消费的响应数
+
+    pattern: str  # 原始正则表达式字符串
+    compiled: re.Pattern  # 编译后的正则
+    responses: list[list[dict]]  # 匹配时使用的响应序列
+    consumed: int = 0  # 已消费的响应数
 
 
 # ==================== Mock LLM Provider ====================
@@ -79,24 +82,24 @@ class MockLLMProvider:
         self.max_tokens: int = 4096
 
         # 脚本化响应队列：每个元素是一个 chunk 列表
-        self._scripted_responses: List[List[Dict]] = []
+        self._scripted_responses: list[list[dict]] = []
 
         # 规则匹配
-        self._rules: List[ResponseRule] = []
+        self._rules: list[ResponseRule] = []
 
         # 延迟
         self._latency_ms: float = 0.0
 
         # 错误注入：call_index (1-based) → Exception
-        self._error_injections: Dict[int, Exception] = {}
+        self._error_injections: dict[int, Exception] = {}
 
         # 调用追踪
         self.call_count: int = 0
-        self.call_history: List[CallRecord] = []
+        self.call_history: list[CallRecord] = []
 
     # ==================== 响应队列 ====================
 
-    def add_response(self, chunks: List[Dict]) -> None:
+    def add_response(self, chunks: list[dict]) -> None:
         """
         向队列末尾添加一个脚本化响应
 
@@ -111,7 +114,7 @@ class MockLLMProvider:
             chunks = [{"content": "", "finish_reason": "stop"}]
         self._scripted_responses.append(list(chunks))
 
-    def add_responses(self, responses: List[List[Dict]]) -> None:
+    def add_responses(self, responses: list[list[dict]]) -> None:
         """批量添加多个脚本化响应"""
         for response in responses:
             self.add_response(response)
@@ -124,7 +127,7 @@ class MockLLMProvider:
 
     # ==================== 规则匹配 ====================
 
-    def add_rule(self, pattern: str, responses: List[List[Dict]]) -> None:
+    def add_rule(self, pattern: str, responses: list[list[dict]]) -> None:
         """
         添加基于消息内容的正则匹配规则
 
@@ -135,11 +138,13 @@ class MockLLMProvider:
             pattern: Python 正则表达式
             responses: 匹配时依次返回的响应列表
         """
-        self._rules.append(ResponseRule(
-            pattern=pattern,
-            compiled=re.compile(pattern, re.DOTALL),
-            responses=[list(r) for r in responses],
-        ))
+        self._rules.append(
+            ResponseRule(
+                pattern=pattern,
+                compiled=re.compile(pattern, re.DOTALL),
+                responses=[list(r) for r in responses],
+            )
+        )
 
     # ==================== 延迟模拟 ====================
 
@@ -166,11 +171,11 @@ class MockLLMProvider:
         self.call_count = 0
         self.call_history.clear()
 
-    def get_last_call(self) -> Optional[CallRecord]:
+    def get_last_call(self) -> CallRecord | None:
         """返回最近一次调用记录"""
         return self.call_history[-1] if self.call_history else None
 
-    def get_calls_to_model(self, model: str) -> List[CallRecord]:
+    def get_calls_to_model(self, model: str) -> list[CallRecord]:
         """返回使用特定模型的所有调用记录"""
         return [c for c in self.call_history if c.model == model]
 
@@ -178,13 +183,13 @@ class MockLLMProvider:
 
     async def chat_stream(
         self,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Dict]] = None,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        messages: list[dict[str, Any]],
+        tools: list[dict] | None = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs,
-    ) -> AsyncIterator[Dict[str, Any]]:
+    ) -> AsyncIterator[dict[str, Any]]:
         """
         模拟流式 chat 调用
 
@@ -206,8 +211,8 @@ class MockLLMProvider:
             await asyncio.sleep(self._latency_ms / 1000.0)
 
         timestamp = time.time()
-        chunks: List[Dict] = []
-        matched_response: Optional[List[Dict]] = None
+        chunks: list[dict] = []
+        matched_response: list[dict] | None = None
 
         # 3. 规则匹配（检查所有消息内容）
         for rule in self._rules:
@@ -237,37 +242,39 @@ class MockLLMProvider:
 
         # 6. 记录
         self.call_count += 1
-        self.call_history.append(CallRecord(
-            method="chat_stream",
-            messages=copy.deepcopy(messages),
-            tools=list(tools) if tools else None,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timestamp=timestamp,
-            response_chunks=chunks,
-        ))
+        self.call_history.append(
+            CallRecord(
+                method="chat_stream",
+                messages=copy.deepcopy(messages),
+                tools=list(tools) if tools else None,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timestamp=timestamp,
+                response_chunks=chunks,
+            )
+        )
 
     # ==================== 核心: chat (非流式) ====================
 
     async def chat(
         self,
-        messages: List[Dict[str, Any]],
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        tools: Optional[List[Dict]] = None,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        tools: list[dict] | None = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         模拟非流式 chat 调用
 
         收集 chat_stream 的所有 chunk，拼接 content 返回 dict。
         """
-        content_parts: List[str] = []
-        tool_calls: List[Dict] = []
-        finish_reason: Optional[str] = None
-        chunks: List[Dict] = []
+        content_parts: list[str] = []
+        tool_calls: list[dict] = []
+        finish_reason: str | None = None
+        chunks: list[dict] = []
 
         async for chunk in self.chat_stream(
             messages=messages,
@@ -296,7 +303,7 @@ class MockLLMProvider:
 
     # ==================== Token 计数 ====================
 
-    def count_tokens(self, messages: List[Dict[str, Any]]) -> int:
+    def count_tokens(self, messages: list[dict[str, Any]]) -> int:
         """
         粗略估计 token 数: ~4 字符/token
 
@@ -315,7 +322,7 @@ class MockLLMProvider:
 
     # ==================== 辅助方法 ====================
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """获取 mock provider 当前状态"""
         return {
             "call_count": self.call_count,

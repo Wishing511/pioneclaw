@@ -16,12 +16,13 @@ Handoff 统一委托机制
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.modules.agent.loop import AgentLoop
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class ContextPolicy(Enum):
     - NONE: 不共享（隔离）
     - LAST_N: 最近 N 条（折中）
     """
+
     FULL = "full"
     SUMMARY = "summary"
     NONE = "none"
@@ -47,6 +49,7 @@ class HandoffConfig:
 
     借鉴 PraisonAI HandoffConfig
     """
+
     context_policy: ContextPolicy = ContextPolicy.SUMMARY
     max_context_tokens: int = 4000
     max_context_messages: int = 10
@@ -58,27 +61,30 @@ class HandoffConfig:
     timeout_seconds: float = 300.0
 
     # 工具过滤
-    tool_filters: List[Callable] = field(default_factory=list)
+    tool_filters: list[Callable] = field(default_factory=list)
 
 
 @dataclass
 class HandoffResult:
     """委托结果"""
+
     target_agent_id: str
     target_agent_name: str
     result: Any
-    context_used: List[Dict] = field(default_factory=list)
-    error: Optional[str] = None
+    context_used: list[dict] = field(default_factory=list)
+    error: str | None = None
     execution_time: float = 0.0
 
 
 class CycleDetectedError(Exception):
     """循环委托检测到"""
+
     pass
 
 
 class HandoffDepthExceededError(Exception):
     """委托深度超限"""
+
     pass
 
 
@@ -95,10 +101,10 @@ class Handoff:
     def __init__(
         self,
         target_agent: Any,  # Agent 或 AgentLoop 实例
-        tool_name_override: Optional[str] = None,
-        tool_description_override: Optional[str] = None,
-        on_handoff: Optional[Callable] = None,
-        config: Optional[HandoffConfig] = None,
+        tool_name_override: str | None = None,
+        tool_description_override: str | None = None,
+        on_handoff: Callable | None = None,
+        config: HandoffConfig | None = None,
     ):
         """
         Args:
@@ -109,22 +115,33 @@ class Handoff:
             config: Handoff 配置
         """
         self.target_agent = target_agent
-        self._target_id = getattr(target_agent, 'id', None) or getattr(target_agent, '_agent_id', 'unknown')
-        self._target_name = getattr(target_agent, 'name', None) or getattr(target_agent, '_agent_name', 'unknown')
+        self._target_id = getattr(target_agent, "id", None) or getattr(
+            target_agent, "_agent_id", "unknown"
+        )
+        self._target_name = getattr(target_agent, "name", None) or getattr(
+            target_agent, "_agent_name", "unknown"
+        )
 
-        self.tool_name = tool_name_override or f"delegate_to_{self._target_name}".replace(" ", "_").replace("-", "_").lower()
-        self.tool_description = tool_description_override or f"委托任务给 {self._target_name}"
+        self.tool_name = (
+            tool_name_override
+            or f"delegate_to_{self._target_name}".replace(" ", "_")
+            .replace("-", "_")
+            .lower()
+        )
+        self.tool_description = (
+            tool_description_override or f"委托任务给 {self._target_name}"
+        )
         self.on_handoff = on_handoff
         self.config = config or HandoffConfig()
 
         # 执行追踪（用于循环检测）
-        self._execution_chain: List[str] = []
+        self._execution_chain: list[str] = []
 
     async def execute(
         self,
         source_agent: Any,
         prompt: str,
-        context: Optional[List[Dict]] = None,
+        context: list[dict] | None = None,
         depth: int = 0,
     ) -> HandoffResult:
         """执行委托
@@ -139,6 +156,7 @@ class Handoff:
             HandoffResult: 委托结果
         """
         import time
+
         start_time = time.time()
 
         # 1. 深度检查
@@ -148,7 +166,9 @@ class Handoff:
             )
 
         # 2. 循环检测
-        source_id = getattr(source_agent, 'id', None) or getattr(source_agent, '_agent_id', 'unknown')
+        source_id = getattr(source_agent, "id", None) or getattr(
+            source_agent, "_agent_id", "unknown"
+        )
         if self.config.detect_cycles:
             self._check_cycle(source_id)
 
@@ -186,15 +206,15 @@ class Handoff:
                 execution_time=time.time() - start_time,
             )
 
-    async def _execute_target(self, prompt: str, context: List[Dict]) -> Any:
+    async def _execute_target(self, prompt: str, context: list[dict]) -> Any:
         """执行目标 Agent"""
         import inspect
 
         target = self.target_agent
 
         # 优先检查 run 方法（最常见）
-        if hasattr(target, 'run'):
-            method = getattr(target, 'run')
+        if hasattr(target, "run"):
+            method = target.run
             if callable(method):
                 result = method(prompt, context=context)
                 if inspect.isawaitable(result):
@@ -202,8 +222,8 @@ class Handoff:
                 return result
 
         # 其次检查 process_direct（AgentLoop 风格）
-        if hasattr(target, 'process_direct'):
-            method = getattr(target, 'process_direct')
+        if hasattr(target, "process_direct"):
+            method = target.process_direct
             if callable(method):
                 result = method(message=prompt)
                 if inspect.isawaitable(result):
@@ -211,15 +231,17 @@ class Handoff:
                 return result
 
         # 最后检查 execute
-        if hasattr(target, 'execute'):
-            method = getattr(target, 'execute')
+        if hasattr(target, "execute"):
+            method = target.execute
             if callable(method):
                 result = method(prompt)
                 if inspect.isawaitable(result):
                     return await result
                 return result
 
-        raise ValueError(f"Target agent {self._target_name} has no callable method (run, process_direct, or execute)")
+        raise ValueError(
+            f"Target agent {self._target_name} has no callable method (run, process_direct, or execute)"
+        )
 
     def _check_cycle(self, source_id: str) -> None:
         """检测循环委托"""
@@ -228,13 +250,17 @@ class Handoff:
 
         # 检测直接循环：源 Agent == 目标 Agent
         if source_id == self._target_id:
-            raise CycleDetectedError(f"Direct cycle detected: {source_id} -> {self._target_id}")
+            raise CycleDetectedError(
+                f"Direct cycle detected: {source_id} -> {self._target_id}"
+            )
 
         # 检测间接循环：源 Agent 已在执行链中
         if source_id in self._execution_chain:
-            raise CycleDetectedError(f"Indirect cycle detected: {source_id} already in chain {self._execution_chain}")
+            raise CycleDetectedError(
+                f"Indirect cycle detected: {source_id} already in chain {self._execution_chain}"
+            )
 
-    def _apply_context_policy(self, messages: List[Dict]) -> List[Dict]:
+    def _apply_context_policy(self, messages: list[dict]) -> list[dict]:
         """应用上下文策略过滤"""
         if not messages:
             return []
@@ -245,21 +271,21 @@ class Handoff:
         elif self.config.context_policy == ContextPolicy.LAST_N:
             n = self.config.max_context_messages
             if self.config.preserve_system:
-                system = [m for m in messages if m.get('role') == 'system']
-                others = [m for m in messages if m.get('role') != 'system']
+                system = [m for m in messages if m.get("role") == "system"]
+                others = [m for m in messages if m.get("role") != "system"]
                 return system + others[-n:]
             return messages[-n:]
 
         elif self.config.context_policy == ContextPolicy.SUMMARY:
             # 保留 system + 最近几条消息
-            system = [m for m in messages if m.get('role') == 'system']
-            others = [m for m in messages if m.get('role') != 'system']
+            system = [m for m in messages if m.get("role") == "system"]
+            others = [m for m in messages if m.get("role") != "system"]
             return system + others[-3:]  # 默认保留最近3条
 
         else:  # FULL
             return list(messages)
 
-    def to_tool(self) -> Dict[str, Any]:
+    def to_tool(self) -> dict[str, Any]:
         """转换为 LLM 可调用的工具定义
 
         返回 OpenAI function calling 格式的工具定义
@@ -274,12 +300,12 @@ class Handoff:
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": f"要委托给 {self._target_name} 的任务描述"
+                            "description": f"要委托给 {self._target_name} 的任务描述",
                         }
                     },
-                    "required": ["prompt"]
-                }
-            }
+                    "required": ["prompt"],
+                },
+            },
         }
 
     def __repr__(self) -> str:
@@ -288,6 +314,7 @@ class Handoff:
 
 # ==================== 预置上下文过滤器 ====================
 
+
 class handoff_filters:
     """Handoff 上下文过滤器
 
@@ -295,42 +322,43 @@ class handoff_filters:
     """
 
     @staticmethod
-    def remove_all_tools(messages: List[Dict]) -> List[Dict]:
+    def remove_all_tools(messages: list[dict]) -> list[dict]:
         """移除所有工具调用消息"""
         return [
-            m for m in messages
-            if m.get('role') not in ('tool',) and not m.get('tool_call_id')
+            m
+            for m in messages
+            if m.get("role") not in ("tool",) and not m.get("tool_call_id")
         ]
 
     @staticmethod
     def keep_last_n_messages(n: int) -> Callable:
         """保留最近 N 条消息"""
-        def filter_fn(messages: List[Dict]) -> List[Dict]:
+
+        def filter_fn(messages: list[dict]) -> list[dict]:
             return messages[-n:]
+
         return filter_fn
 
     @staticmethod
-    def keep_only_user_assistant(messages: List[Dict]) -> List[Dict]:
+    def keep_only_user_assistant(messages: list[dict]) -> list[dict]:
         """只保留 user 和 assistant 消息"""
-        return [
-            m for m in messages
-            if m.get('role') in ('user', 'assistant')
-        ]
+        return [m for m in messages if m.get("role") in ("user", "assistant")]
 
     @staticmethod
-    def remove_system(messages: List[Dict]) -> List[Dict]:
+    def remove_system(messages: list[dict]) -> list[dict]:
         """移除 system 消息"""
-        return [m for m in messages if m.get('role') != 'system']
+        return [m for m in messages if m.get("role") != "system"]
 
 
 # ==================== 并行委托 ====================
 
+
 async def parallel_handoffs(
     source_agent: Any,
-    targets: List[tuple],  # List[(agent, prompt)] 或 List[(agent, prompt, config)]
+    targets: list[tuple],  # List[(agent, prompt)] 或 List[(agent, prompt, config)]
     max_concurrent: int = 5,
-    default_config: Optional[HandoffConfig] = None,
-) -> List[HandoffResult]:
+    default_config: HandoffConfig | None = None,
+) -> list[HandoffResult]:
     """并行委托给多个 Agent
 
     借鉴 PraisonAI parallel_handoffs
@@ -374,6 +402,7 @@ async def parallel_handoffs(
 
 # ==================== Handoff 执行追踪 ====================
 
+
 class HandoffTracker:
     """Handoff 执行追踪器
 
@@ -381,14 +410,14 @@ class HandoffTracker:
     """
 
     def __init__(self):
-        self._chain: List[str] = []
-        self._results: List[HandoffResult] = []
+        self._chain: list[str] = []
+        self._results: list[HandoffResult] = []
 
     def push(self, agent_id: str) -> None:
         """添加 Agent 到执行链"""
         self._chain.append(agent_id)
 
-    def pop(self) -> Optional[str]:
+    def pop(self) -> str | None:
         """移除最后一个 Agent"""
         if self._chain:
             return self._chain.pop()
@@ -402,10 +431,10 @@ class HandoffTracker:
         """检查是否存在循环"""
         return target_id in self._chain
 
-    def get_chain(self) -> List[str]:
+    def get_chain(self) -> list[str]:
         return list(self._chain)
 
-    def get_results(self) -> List[HandoffResult]:
+    def get_results(self) -> list[HandoffResult]:
         return list(self._results)
 
     def clear(self) -> None:
@@ -414,7 +443,7 @@ class HandoffTracker:
 
 
 # 全局追踪器（可选使用）
-_global_tracker: Optional[HandoffTracker] = None
+_global_tracker: HandoffTracker | None = None
 
 
 def get_handoff_tracker() -> HandoffTracker:

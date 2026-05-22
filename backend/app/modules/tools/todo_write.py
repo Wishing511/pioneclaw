@@ -28,8 +28,8 @@ class TodoWriteTool(BaseTool):
         "activeForm（进行中的描述文本，可选）。\n"
         "状态值：pending / in_progress / completed / cancelled。\n"
         "传入空数组可清空列表。\n"
-        "示例: [{\"id\":\"1\",\"subject\":\"修复登录bug\",\"status\":\"in_progress\","
-        "\"activeForm\":\"修复登录bug中\"}]"
+        '示例: [{"id":"1","subject":"修复登录bug","status":"in_progress",'
+        '"activeForm":"修复登录bug中"}]'
     )
     parameters = {
         "todos": ToolParameter(
@@ -53,64 +53,87 @@ class TodoWriteTool(BaseTool):
             try:
                 parsed = json.loads(todos)
             except json.JSONDecodeError as e:
-                return json.dumps({
-                    "success": False,
-                    "error": f"todos 参数不是有效的 JSON: {e}",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"todos 参数不是有效的 JSON: {e}",
+                    },
+                    ensure_ascii=False,
+                )
 
             if not isinstance(parsed, list):
-                return json.dumps({
-                    "success": False,
-                    "error": "todos 必须是 JSON 数组",
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "todos 必须是 JSON 数组",
+                    },
+                    ensure_ascii=False,
+                )
 
             # 空数组 = 清空
             if len(parsed) == 0:
                 _agent_todos[session_id] = []
-                return json.dumps({
-                    "success": True,
-                    "message": "TODO 列表已清空",
-                    "todos": [],
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": True,
+                        "message": "TODO 列表已清空",
+                        "todos": [],
+                    },
+                    ensure_ascii=False,
+                )
 
             # 验证每个 todo 项
             validated = []
             for i, item in enumerate(parsed):
                 if not isinstance(item, dict):
-                    return json.dumps({
-                        "success": False,
-                        "error": f"TODO #{i+1} 不是有效的对象",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"TODO #{i + 1} 不是有效的对象",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 todo_id = item.get("id", "")
                 subject = item.get("subject", "")
                 todo_status = item.get("status", "pending")
 
                 if not todo_id:
-                    return json.dumps({
-                        "success": False,
-                        "error": f"TODO #{i+1} 缺少 'id' 字段",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"TODO #{i + 1} 缺少 'id' 字段",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 if not subject:
-                    return json.dumps({
-                        "success": False,
-                        "error": f"TODO #{i+1} 缺少 'subject' 字段",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"TODO #{i + 1} 缺少 'subject' 字段",
+                        },
+                        ensure_ascii=False,
+                    )
 
                 if todo_status not in _VALID_TODO_STATUSES:
-                    return json.dumps({
-                        "success": False,
-                        "error": f"TODO #{i+1} 的 status 无效: '{todo_status}'。"
-                                 f"有效值: {', '.join(sorted(_VALID_TODO_STATUSES))}",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": f"TODO #{i + 1} 的 status 无效: '{todo_status}'。"
+                            f"有效值: {', '.join(sorted(_VALID_TODO_STATUSES))}",
+                        },
+                        ensure_ascii=False,
+                    )
 
-                validated.append({
-                    "id": str(todo_id),
-                    "subject": str(subject),
-                    "status": todo_status,
-                    "activeForm": item.get("activeForm", ""),
-                })
+                validated.append(
+                    {
+                        "id": str(todo_id),
+                        "subject": str(subject),
+                        "status": todo_status,
+                        "activeForm": item.get("activeForm", ""),
+                    }
+                )
 
             # 存储
             _agent_todos[session_id] = validated
@@ -121,13 +144,16 @@ class TodoWriteTool(BaseTool):
                 s = t["status"]
                 by_status[s] = by_status.get(s, 0) + 1
 
-            return json.dumps({
-                "success": True,
-                "todos": validated,
-                "total": len(validated),
-                "by_status": by_status,
-                "message": f"TODO 列表已更新：{len(validated)} 项",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "todos": validated,
+                    "total": len(validated),
+                    "by_status": by_status,
+                    "message": f"TODO 列表已更新：{len(validated)} 项",
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"TodoWriteTool execution error: {e}")

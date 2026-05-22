@@ -7,13 +7,12 @@
 """
 
 import pytest
-import asyncio
 
 from app.modules.agent.workflow import (
-    WorkflowEngine,
-    WorkflowMode,
     AgentSlot,
     SlotPhase,
+    WorkflowEngine,
+    WorkflowMode,
 )
 
 
@@ -124,7 +123,9 @@ class TestConditionEvaluation:
         engine = WorkflowEngine(loop)
 
         slot_map = {
-            "a": AgentSlot(slot_id="a", label="A", prompt_template="T", output="Hello world"),
+            "a": AgentSlot(
+                slot_id="a", label="A", prompt_template="T", output="Hello world"
+            ),
         }
         condition = {"type": "output_contains", "node": "a", "text": "world"}
         assert engine._evaluate_condition(condition, slot_map) is True
@@ -155,10 +156,12 @@ class TestPipeline:
     @pytest.mark.asyncio
     async def test_pipeline_execution(self):
         """测试流水线执行"""
-        loop = MockAgentLoop(responses=[
-            "第一步结果",
-            "第二步结果",
-        ])
+        loop = MockAgentLoop(
+            responses=[
+                "第一步结果",
+                "第二步结果",
+            ]
+        )
         engine = WorkflowEngine(loop)
 
         result = await engine.run_pipeline(
@@ -189,17 +192,24 @@ class TestGraph:
     @pytest.mark.asyncio
     async def test_graph_linear(self):
         """测试线性依赖图"""
-        loop = MockAgentLoop(responses=[
-            "数据收集结果",
-            "分析结果",
-        ])
+        loop = MockAgentLoop(
+            responses=[
+                "数据收集结果",
+                "分析结果",
+            ]
+        )
         engine = WorkflowEngine(loop)
 
         result = await engine.run_graph(
             goal="数据流水线",
             slots=[
                 {"id": "collect", "role": "收集器", "task": "收集数据"},
-                {"id": "analyze", "role": "分析器", "task": "分析数据", "depends_on": ["collect"]},
+                {
+                    "id": "analyze",
+                    "role": "分析器",
+                    "task": "分析数据",
+                    "depends_on": ["collect"],
+                },
             ],
         )
 
@@ -213,7 +223,9 @@ class TestGraph:
         call_order = []
 
         class OrderTrackingLoop:
-            async def process_direct(self, message, system_prompt=None, model_override=None):
+            async def process_direct(
+                self, message, system_prompt=None, model_override=None
+            ):
                 call_order.append(message[:20])
                 return f"Result for {message[:20]}"
 
@@ -256,7 +268,12 @@ class TestGraph:
         result = await engine.run_graph(
             goal="缺失依赖",
             slots=[
-                {"id": "a", "role": "A", "task": "任务A", "depends_on": ["nonexistent"]},
+                {
+                    "id": "a",
+                    "role": "A",
+                    "task": "任务A",
+                    "depends_on": ["nonexistent"],
+                },
             ],
         )
 
@@ -278,16 +295,18 @@ class TestCouncil:
     @pytest.mark.asyncio
     async def test_council_with_cross_review(self):
         """测试 3轮交叉评审"""
-        loop = MockAgentLoop(responses=[
-            # 第1轮：2个成员初始立场
-            "技术视角分析",
-            "业务视角分析",
-            # 第2轮：2个成员交叉评审
-            "技术视角评审",
-            "业务视角评审",
-            # 第3轮：综合
-            "综合分析结果",
-        ])
+        loop = MockAgentLoop(
+            responses=[
+                # 第1轮：2个成员初始立场
+                "技术视角分析",
+                "业务视角分析",
+                # 第2轮：2个成员交叉评审
+                "技术视角评审",
+                "业务视角评审",
+                # 第3轮：综合
+                "综合分析结果",
+            ]
+        )
         engine = WorkflowEngine(loop)
 
         result = await engine.run_council(
@@ -308,10 +327,12 @@ class TestCouncil:
     @pytest.mark.asyncio
     async def test_council_no_cross_review(self):
         """测试独立模式（无交叉评审）"""
-        loop = MockAgentLoop(responses=[
-            "技术视角分析",
-            "业务视角分析",
-        ])
+        loop = MockAgentLoop(
+            responses=[
+                "技术视角分析",
+                "业务视角分析",
+            ]
+        )
         engine = WorkflowEngine(loop)
 
         result = await engine.run_council(
