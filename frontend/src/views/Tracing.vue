@@ -647,6 +647,8 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+@use "sass:list";
+
 .tracing-page {
   padding: 0;
 }
@@ -974,7 +976,7 @@ $kinds: (
 @each $kind, $color in $kinds {
   .trace-kind-dot.kind-#{$kind},
   .kind-dot.kind-#{$kind} {
-    background: nth($color, 1);
+    background: list.nth($color, 1);
   }
 
   .kind-badge.kind-#{$kind} {

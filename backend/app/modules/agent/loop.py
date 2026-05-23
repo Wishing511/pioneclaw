@@ -78,6 +78,12 @@ from app.core.recovery_recipes import (
 )
 from app.core.sandbox import SensitiveFileAccessRequired
 from app.core.sandbox_policy import resolve_tool_policy
+from app.modules.agent.token_budget import (
+    TokenBudget,
+    estimate_tokens,
+    get_context_window_for_model,
+)
+from app.modules.llm.retry import LLMCallRetrier, RetryConfig
 from app.modules.tools.scheduler import partition_tool_calls, run_concurrent_batch
 
 # 新工具系统（ai-agent-toolkit 架构移植）
@@ -138,6 +144,11 @@ class AgentExecutionResult:
     error: str | None = None
 
 
+class _PromptTooLongError(Exception):
+    """内部异常：prompt 过长，需要触发应急压缩后重试"""
+    pass
+
+
 class AgentLoop:
     """Agent 主循环类 - 处理消息、调用 LLM、执行工具、生成响应
 
@@ -164,6 +175,7 @@ class AgentLoop:
         provider,  # LLM 提供商（调用 chat_stream）
         tools: Any | None = None,  # 工具注册表
         model: str | None = None,
+        context_window: int | None = None,  # issue #63: 优先使用平台 AI 配置
         max_iterations: int = 25,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -198,6 +210,7 @@ class AgentLoop:
             provider: LLM 提供商，需要有 chat_stream 方法
             tools: 工具注册表
             model: 模型名称
+            context_window: 上下文窗口大小（优先于模型预设映射，见 issue #63）
             max_iterations: 最大迭代次数
             max_retries: 最大重试次数
             retry_delay: 重试延迟（秒）
@@ -337,11 +350,37 @@ class AgentLoop:
         self._key_rotator = None
         self._key_rotation_count = 0
 
+        # Context 压缩计数器（P2 修复：critical 压缩 attempt 递增）
+        self._critical_compact_count = 0
+
         if self._api_keys:
             from app.modules.providers import get_key_rotator
 
             provider_id = getattr(provider, "provider_id", "default")
             self._key_rotator = get_key_rotator(provider_id, self._api_keys)
+
+        # Token 预算（Phase 2: 上下文管理）
+        # issue #63: 优先使用平台 AI 配置中的 context_window，
+        # 未配置时回退到模型预设映射
+        resolved_context_window = context_window or get_context_window_for_model(self.model)
+        self._token_budget = TokenBudget(
+            context_window=resolved_context_window,
+            max_output_tokens=self.max_tokens,
+        )
+        logger.info(
+            f"TokenBudget initialized: context_window={resolved_context_window}, "
+            f"compact_threshold={self._token_budget.compact_threshold}"
+        )
+
+        # LLM 调用重试器（Phase 2: 统一重试体系）
+        self._llm_retrier = LLMCallRetrier(
+            RetryConfig(
+                max_retries=5,
+                base_delay_ms=2000,
+                max_delay_ms=32000,
+                retryable_http_codes={429, 502, 503, 504, 529},
+            )
+        )
 
         logger.debug(
             f"AgentLoop initialized: max_iterations={max_iterations}, "
@@ -527,6 +566,7 @@ class AgentLoop:
         try:
             while iteration < runtime_max_iterations:
                 iteration += 1
+                round_ptl_attempts = 0  # 本轮 prompt_too_long 压缩计数（P2 修复：每轮独立）
 
                 # 检查是否被取消
                 if cancel_token and cancel_token.is_cancelled:
@@ -565,6 +605,7 @@ class AgentLoop:
                 tool_calls_buffer: list[dict] = []
                 tool_calls_aggregate: dict[int, dict] = {}  # 按聚合增量式 tool_calls
                 finish_reason = None
+                prompt_too_long_triggered = False
 
                 # 获取工具定义
                 tool_definitions = []
@@ -596,6 +637,46 @@ class AgentLoop:
                     )
                 else:
                     logger.warning("No tools registry available!")
+
+                # Token 预算检查（Phase 2: 上下文管理）
+                if self._token_budget:
+                    input_tokens = estimate_tokens(messages, tool_definitions)
+                    budget_status = self._token_budget.get_status(input_tokens)
+                    budget_info = self._token_budget.to_dict(input_tokens)
+                    logger.info(
+                        f"TokenBudget check: status={budget_status}, "
+                        f"tokens={input_tokens}/{self._token_budget.context_window} "
+                        f"({budget_info['usage_percent']}%)"
+                    )
+
+                    if budget_status == "block":
+                        logger.error(
+                            f"Token budget exceeded hard block threshold: "
+                            f"{input_tokens} >= {self._token_budget.hard_block_threshold}"
+                        )
+                        yield "\n\n[系统提示] 上下文过长，已超出安全阈值。请开始新会话或简化请求。"
+                        return
+                    elif budget_status == "critical":
+                        logger.warning(
+                            f"Token budget critical: {input_tokens} tokens "
+                            f"(compact_threshold={self._token_budget.compact_threshold})"
+                        )
+                        # 触发应急压缩（attempt 递增，避免无限无效压缩）
+                        if self._compression_service:
+                            self._critical_compact_count += 1
+                            if self._critical_compact_count <= 3:
+                                messages = await self._compression_service.emergency_compact(
+                                    messages, attempt=self._critical_compact_count
+                                )
+                            else:
+                                logger.error(
+                                    "Critical compact exhausted after 3 attempts"
+                                )
+                                yield "\n\n[系统提示] 上下文过长，已超出安全阈值。请开始新会话或简化请求。"
+                                return
+                    elif budget_status in ("warning", "caution"):
+                        # 记录日志即可，_prune_context 已处理常规压缩
+                        pass
 
                 # 流式调用 LLM
                 if yield_intermediate:
@@ -645,8 +726,28 @@ class AgentLoop:
                             yield f"<!--THINKING:{chunk['reasoning_content']}-->"
 
                     if chunk.get("error"):
+                        # prompt_too_long：触发应急压缩后重试（每轮最多 3 次）
+                        if (
+                            self._compression_service
+                            and self._is_prompt_too_long(chunk["error"])
+                            and round_ptl_attempts < 3
+                        ):
+                            prompt_too_long_triggered = True
+                            break
                         yield chunk["error"]
                         return
+
+                # prompt_too_long 应急压缩后重试
+                if prompt_too_long_triggered:
+                    round_ptl_attempts += 1
+                    logger.warning(
+                        f"Prompt too long, emergency compact "
+                        f"attempt {round_ptl_attempts}/3 (round {iteration})"
+                    )
+                    messages = await self._compression_service.emergency_compact(
+                        messages, attempt=round_ptl_attempts
+                    )
+                    continue
 
                 # 将聚合后的 tool_calls 转换为列表
                 tool_calls_buffer = list(tool_calls_aggregate.values())
@@ -1083,7 +1184,11 @@ class AgentLoop:
         use_sse: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         """
-        调用 LLM 流式接口
+        调用 LLM 流式接口（含重试）
+
+        保持流式特性：chunk 随生成实时 yield 给前端。
+        重试仅在连接建立失败时触发（502/503/504/429/认证错误），
+        不影响已建立的 SSE 流式传输。
 
         Args:
             messages: 消息列表
@@ -1102,7 +1207,7 @@ class AgentLoop:
         temperature = temperature if temperature is not None else self.temperature
         max_tokens = max_tokens or self.max_tokens
 
-        # 调试日志：记录工具定义
+        # 调试日志
         logger.info(
             f"_call_llm_stream: tools_count={len(tools) if tools else 0}, use_sse={use_sse}"
         )
@@ -1111,87 +1216,51 @@ class AgentLoop:
                 f"Tool names: {[t.get('function', {}).get('name') for t in tools]}"
             )
 
-        # 选择调用方法：SSE 流式 或 普通非流式
+        # 选择调用方法
         if use_sse and hasattr(provider, "chat_stream_sse"):
             chat_method = provider.chat_stream_sse
             logger.info("Using SSE streaming method")
         elif hasattr(provider, "chat_stream"):
             chat_method = provider.chat_stream
         else:
-            chat_method = None
+            yield {"error": "Provider does not support streaming"}
+            return
 
-        if chat_method:
-            max_retries = 3
-            for attempt in range(max_retries + 1):
-                try:
-                    async for chunk in chat_method(
-                        messages=messages,
-                        tools=tools,
-                        model=model,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    ):
-                        converted = self._convert_stream_chunk(chunk)
-                        # 检测 prompt_too_long
-                        if converted.get("error") and self._is_prompt_too_long(
-                            converted["error"]
-                        ):
-                            if attempt < max_retries and self._compression_service:
-                                logger.warning(
-                                    f"Prompt too long detected, emergency compact "
-                                    f"attempt {attempt + 1}/{max_retries}"
-                                )
-                                compacted = (
-                                    await self._compression_service.emergency_compact(
-                                        messages, attempt=attempt + 1
-                                    )
-                                )
-                                messages[:] = compacted  # 更新调用方的消息列表
-                                break  # 跳出 async for，外层循环继续重试
-                            else:
-                                yield converted
-                                return
-                        yield converted
-                    else:
-                        return  # 成功完成，正常退出
-                    # 因 prompt_too_long 触发 break，继续外层重试
-                    continue
-                except Exception as e:
-                    import traceback
+        max_retries = self._llm_retrier.config.max_retries
 
-                    logger.error(
-                        f"_call_llm_stream error (attempt {attempt + 1}/{max_retries}): {e}\n{traceback.format_exc()}"
-                    )
+        for attempt in range(max_retries + 1):
+            try:
+                result = chat_method(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if hasattr(result, "__aiter__"):
+                    # async generator（标准 provider）
+                    async for chunk in result:
+                        yield self._convert_stream_chunk(chunk)
+                else:
+                    # coroutine（provider 直接 raise 异常或返回结果）
+                    result_value = await result
+                    if result_value is not None:
+                        yield self._convert_stream_chunk(result_value)
+                return  # 成功完成
 
-                    # Key 轮换：如果是认证/限流错误，尝试轮换 Key
-                    if self._key_rotator and self._key_rotator.should_rotate_key(e):
-                        new_key = self._key_rotator.next_key()
-                        if new_key and attempt < max_retries:
-                            provider.api_key = new_key
-                            self._key_rotation_count += 1
-                            delay = 1.0 * attempt  # 渐进延迟
-                            logger.info(
-                                f"Rotating API key (attempt {attempt + 1}), "
-                                f"retrying in {delay}s..."
-                            )
-                            await asyncio.sleep(delay)
-                            continue
-
-                    # 瞬态错误（502/503/504/连接超时）：重试
-                    if self._is_transient_error(e) and attempt < max_retries:
-                        delay = min(2.0 * (2**attempt), 16.0)
-                        logger.info(
-                            f"Transient error, retrying in {delay}s "
-                            f"(attempt {attempt + 1}/{max_retries})"
-                        )
-                        await asyncio.sleep(delay)
-                        continue
-
-                    # 无法恢复，返回错误
+            except Exception as e:
+                # 判断是否可重试
+                if not self._handle_retryable_error(e, provider) or attempt >= max_retries:
                     yield {"error": str(e)}
                     return
-        else:
-            yield {"error": "Provider does not support streaming"}
+
+                # 计算延迟（使用 LLMCallRetrier 的指数退避 + jitter）
+                delay_ms = self._llm_retrier.config.compute_delay_ms(attempt + 1)
+                logger.warning(
+                    f"LLM call attempt {attempt + 1}/{max_retries + 1} failed, "
+                    f"retrying in {delay_ms}ms: {e}"
+                )
+                await asyncio.sleep(delay_ms / 1000.0)
 
     def _convert_stream_chunk(self, chunk: Any) -> dict[str, Any]:
         """
@@ -1283,6 +1352,46 @@ class AgentLoop:
             "maximum token",
         )
         return any(hint in text for hint in hints)
+
+    def _handle_retryable_error(self, exc: Exception, provider: Any) -> bool:
+        """处理 LLM 调用错误：判断可重试性 + 执行 Key 轮换等副作用
+
+        注意：本方法**非纯查询**，会修改 provider.api_key 等状态。
+        可重试错误：429/502/503/504/529、瞬态网络错误、认证/限流错误（触发 Key 轮换）
+        """
+        # Key 轮换：认证/限流错误
+        if self._key_rotator and self._key_rotator.should_rotate_key(exc):
+            current_key = getattr(provider, "api_key", None) or ""
+            new_key = self._key_rotator.mark_key_failed(current_key)
+            if new_key:
+                provider.api_key = new_key
+                self._key_rotation_count += 1
+                logger.info(
+                    f"Rotated API key due to {type(exc).__name__}, retrying..."
+                )
+                return True
+            # 无可用 key，但认证错误本身是可重试的（最后一次会失败）
+            return False
+
+        # 瞬态错误（502/503/504/连接超时）
+        if self._is_transient_error(exc):
+            return True
+
+        # HTTP 状态码检查
+        status_code = getattr(exc, "status_code", None)
+        if status_code is not None:
+            return int(status_code) in {429, 502, 503, 504, 529}
+
+        # 网络错误关键词
+        error_str = str(exc).lower()
+        retryable_keywords = [
+            "timeout",
+            "connection reset",
+            "connection refused",
+            "too many requests",
+            "service unavailable",
+        ]
+        return any(kw in error_str for kw in retryable_keywords)
 
     async def _try_parallel_execute(
         self,

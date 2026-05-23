@@ -174,6 +174,7 @@ async def get_subagent_manager(
         provider=provider,
         tools=tool_registry,
         model=config.model_name,
+        context_window=config.context_window,
         max_iterations=10,
         temperature=config.temperature,
         max_tokens=config.max_tokens,

@@ -15,7 +15,7 @@ TokenBudget — 统一 token 预算计算
 
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -111,3 +111,104 @@ class TokenBudget:
             "warning_threshold": self.warning_threshold,
             "hard_block_threshold": self.hard_block_threshold,
         }
+
+
+# ---------------------------------------------------------------------------
+# 模型 context_window 映射
+# ---------------------------------------------------------------------------
+
+_MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    # Anthropic
+    "claude-3-opus": 200_000,
+    "claude-3-sonnet": 200_000,
+    "claude-3-haiku": 200_000,
+    "claude-3-5-sonnet": 200_000,
+    "claude-3-7-sonnet": 200_000,
+    # OpenAI
+    "gpt-4o": 128_000,
+    "gpt-4o-mini": 128_000,
+    "gpt-4-turbo": 128_000,
+    "gpt-4": 8_192,
+    "gpt-3.5-turbo": 16_384,
+    # DeepSeek
+    "deepseek-chat": 64_000,
+    "deepseek-coder": 64_000,
+    "deepseek-reasoner": 64_000,
+    # Qwen
+    "qwen-turbo": 128_000,
+    "qwen-plus": 128_000,
+    "qwen-max": 32_000,
+    # 默认
+    "default": 128_000,
+}
+
+
+def get_context_window_for_model(model: str | None) -> int:
+    """根据模型名称获取上下文窗口大小
+
+    匹配策略：按前缀长度降序匹配，避免短前缀误匹配长模型名
+    （例如 \"gpt-4\" 不应匹配 \"gpt-4o-mini\"）
+    """
+    if not model:
+        return _MODEL_CONTEXT_WINDOWS["default"]
+    model_lower = model.lower()
+    # 按前缀长度降序，确保更精确的匹配优先
+    sorted_prefixes = sorted(
+        _MODEL_CONTEXT_WINDOWS.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    for prefix, window in sorted_prefixes:
+        if prefix in model_lower:
+            return window
+    return _MODEL_CONTEXT_WINDOWS["default"]
+
+
+# ---------------------------------------------------------------------------
+# Token 估算
+# ---------------------------------------------------------------------------
+
+def estimate_tokens(messages: list[dict[str, Any]], tools: list[dict] | None = None) -> int:
+    """粗略估算消息列表的 token 数
+
+    策略：
+    1. 优先使用消息中的已有估算值
+    2. 字符数 / 4 作为粗略估算
+    3. 工具定义单独估算
+
+    精度说明：
+    - 英文文本：len/4 近似于真实 token 数（大部分 tokenizer 约 4 chars/token）
+    - 中文文本：严重低估。真实 token 数约为字符数的 1.5~2 倍（UTF-8 编码下中文
+      通常占 3 字节，tokenizer 按字节或子词切分），此处仅按字符数/4 估算，
+      实际会远小于真实值，导致压缩触发偏晚
+    - 代码：含大量符号和空白，各模型 tokenizer 差异大，估算误差可达 30%~50%
+    - 用途：仅用于触发阈值判断（compact/warning），不用于计费或精确预算控制
+      真实 token 用量应以 API 返回的 usage 为准
+    """
+    total = 0
+
+    # 估算消息内容
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            total += len(content) // 4
+        elif isinstance(content, list):
+            # 多模态内容
+            for item in content:
+                if isinstance(item, dict) and "text" in item:
+                    total += len(item["text"]) // 4
+
+        # tool_calls 和 tool_results
+        if msg.get("tool_calls"):
+            for tc in msg["tool_calls"]:
+                total += len(str(tc)) // 4
+        if msg.get("tool_call_id"):
+            total += len(str(msg.get("content", ""))) // 4
+
+    # 估算工具定义
+    if tools:
+        for tool in tools:
+            total += len(str(tool)) // 6  # JSON schema 更密集
+
+    return max(1, total)
+

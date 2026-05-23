@@ -325,6 +325,7 @@ async def execute_agent(
             provider=provider,
             tools=tool_registry,
             model=model_config.model_name,
+            context_window=model_config.context_window,
             max_iterations=agent.max_turns or 25,
             temperature=model_config.temperature,
             max_tokens=model_config.max_tokens,

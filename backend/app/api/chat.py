@@ -503,6 +503,7 @@ async def react_chat(
         tools=tool_registry,
         system_prompt=system_prompt,
         model=config.model_name,
+        context_window=config.context_window,
         max_iterations=request.max_iterations,
         file_tracker=file_tracker,
         temperature=config.temperature,

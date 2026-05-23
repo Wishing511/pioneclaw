@@ -21,6 +21,41 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONTEXT_WINDOW = 128000
 
 
+async def _resolve_session_context_window(
+    db: AsyncSession, session: Session
+) -> int:
+    """解析会话对应的 context_window
+
+    优先级：
+    1. 有 Agent → Agent.model 匹配 AI 配置的 model_name
+    2. 无 Agent 或匹配失败 → 取所有活跃配置中 context_window 最大的
+    3. 以上均失败 → 硬编码默认值 128k
+    """
+    if session.agent_id:
+        agent_res = await db.execute(select(Agent).where(Agent.id == session.agent_id))
+        agent = agent_res.scalar_one_or_none()
+        if agent and agent.model:
+            model_res = await db.execute(
+                select(AIModelConfig.context_window)
+                .where(AIModelConfig.model_name == agent.model)
+                .where(AIModelConfig.is_active)
+                .limit(1)
+            )
+            cw = model_res.scalar()
+            if cw:
+                return cw
+
+    # 无 Agent 或匹配失败：取活跃配置中最大的 context_window
+    max_res = await db.execute(
+        select(AIModelConfig.context_window)
+        .where(AIModelConfig.is_active)
+        .order_by(AIModelConfig.context_window.desc())
+        .limit(1)
+    )
+    cw = max_res.scalar()
+    return cw if cw else DEFAULT_CONTEXT_WINDOW
+
+
 def _estimate_tokens(msgs: list[SessionMessage]) -> int:
     """估算消息列表的 token 用量（字符数 // 4 的启发式算法）。"""
     total = 0
@@ -81,20 +116,7 @@ async def get_session(
     )
     messages = msgs_result.scalars().all()
 
-    # 尝试从会话关联的 Agent 获取模型上下文窗口
-    context_window = DEFAULT_CONTEXT_WINDOW
-    if session.agent_id:
-        agent_res = await db.execute(select(Agent).where(Agent.id == session.agent_id))
-        agent = agent_res.scalar_one_or_none()
-        if agent and agent.model:
-            model_res = await db.execute(
-                select(AIModelConfig.context_window)
-                .where(AIModelConfig.model_name == agent.model)
-                .where(AIModelConfig.is_active)
-            )
-            cw = model_res.scalar_one_or_none()
-            if cw:
-                context_window = cw
+    context_window = await _resolve_session_context_window(db, session)
 
     # 估算当前会话 token 用量（供前端切换会话时立即显示）
     input_tokens = _estimate_tokens(messages)
