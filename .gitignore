@@ -39,6 +39,16 @@ Thumbs.db
 node_modules/
 dist/
 
+# Runtime artifacts
+*.pid
+
+# Workspace user data
+backend/workspace/
+
+# Local drafts
+docs/local-tool-review-*.md
+docs/tool-system-refactor-plan.md
+
 # Docker
 .env.local
 .env.production

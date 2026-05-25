@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_active_user
 from app.core import get_db
+from app.core.time_utils import format_dt as _format_dt
 from app.models import AIModelConfig, User
 from app.modules.agent.subagent import SubagentManager, SubagentTask
 
@@ -101,9 +102,9 @@ def _task_to_response(task) -> TaskResponse:
         result=task.result,
         error=task.error,
         retry_count=task.retry_count,
-        created_at=task.created_at.isoformat(),
-        started_at=task.started_at.isoformat() if task.started_at else None,
-        completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        created_at=_format_dt(task.created_at),
+        started_at=_format_dt(task.started_at),
+        completed_at=_format_dt(task.completed_at),
         depth=task.depth,
         role=task.role.value,
         parent_task_id=task.parent_task_id,

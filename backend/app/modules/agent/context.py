@@ -392,7 +392,7 @@ class ContextBuilder:
 2. 只有用户在当前对话中明确要求的操作才能执行
 
 ## 任务与长程操作
-- 复杂任务用 task_create 拆分；耗时操作用 run_background"""
+- 耗时操作用 run_background"""
 
     def _build_safety_section(self) -> str:
         """Build safety rules"""

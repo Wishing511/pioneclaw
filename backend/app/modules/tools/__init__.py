@@ -20,6 +20,8 @@ from app.modules.tools.builtin import (
     CalculatorTool,
     CurrentTimeTool,
     ReadFileTool,
+    ThinkingTool,
+    ViewTool,
     WriteFileTool,
     register_builtin_tools,
 )
@@ -39,13 +41,6 @@ from app.modules.tools.scheduler import (
     run_concurrent_batch,
     run_serial_batch,
 )
-from app.modules.tools.task_create import TaskCreateTool
-from app.modules.tools.task_get import TaskGetTool
-from app.modules.tools.task_list import TaskListTool
-from app.modules.tools.task_output import TaskOutputTool
-from app.modules.tools.task_stop import TaskStopTool
-from app.modules.tools.task_update import TaskUpdateTool
-from app.modules.tools.todo_write import TodoWriteTool
 from app.modules.tools.types import (
     HookContext,
     HookResult,
@@ -107,13 +102,7 @@ __all__ = [
     "WebSearchTool",
     "ReadFileTool",
     "WriteFileTool",
+    "ThinkingTool",
+    "ViewTool",
     "register_builtin_tools",
-    # Task tools
-    "TaskCreateTool",
-    "TaskGetTool",
-    "TaskListTool",
-    "TaskUpdateTool",
-    "TaskStopTool",
-    "TaskOutputTool",
-    "TodoWriteTool",
 ]

@@ -251,7 +251,6 @@ class TestPlanModeIntegration:
             "image",
             "knowledge_search",
             "vector_memory_recall",
-            "file_memory_read",
         }
         # pool preset 包含所有回退列表的工具
         assert hardcoded.issubset(plan_allow)

@@ -180,7 +180,7 @@ TOOL_CALLING_SYSTEM_PROMPT = """你是一个智能助手，可以使用以下工
 3. **精确编辑**: 优先使用 edit_file，先 read_file 查看行号，再按行号编辑
 
 ## 记忆系统
-工具: vector_memory_store / vector_memory_recall / vector_memory_get / file_memory_write / file_memory_search
+工具: vector_memory_store / vector_memory_recall / vector_memory_get
 - vector_memory_store: 存储记忆（需要content和name参数）
 - vector_memory_recall: 搜索记忆（需要query参数）
 - vector_memory_get: 获取特定记忆（需要uri参数）

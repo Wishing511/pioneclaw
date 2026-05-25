@@ -1,8 +1,10 @@
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api import router
 from app.core.auth_middleware import AuthMiddleware
@@ -109,6 +111,31 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 # 注册路由
 app.include_router(router, prefix=settings.API_PREFIX)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """自定义 422 响应：过滤掉敏感 input 数据，只返回简洁的验证错误信息
+
+    服务端仍记录完整原始错误供调试，但响应中不暴露 input 字段。
+    """
+    import logging
+
+    _logger = logging.getLogger("app.exception")
+    _logger.warning(
+        f"Validation error on {request.method} {request.url.path}: {exc.errors()}"
+    )
+    simplified_errors = []
+    for err in exc.errors():
+        simplified_errors.append({
+            "loc": err.get("loc"),
+            "msg": err.get("msg"),
+            "type": err.get("type"),
+        })
+    return JSONResponse(
+        status_code=422,
+        content={"detail": simplified_errors},
+    )
 
 
 @app.get("/")

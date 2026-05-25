@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_active_user
 from app.core import get_db
+from app.core.time_utils import format_dt as _format_dt
 from app.models import Agent, AIModelConfig, Session, SessionMessage, User
 from app.modules.agent.token_budget import TokenBudget
 
@@ -87,8 +88,8 @@ async def list_sessions(
             "agent_id": s.agent_id,
             "runner_id": s.runner_id,
             "message_count": s.message_count,
-            "created_at": s.created_at.isoformat(),
-            "updated_at": s.updated_at.isoformat(),
+            "created_at": _format_dt(s.created_at),
+            "updated_at": _format_dt(s.updated_at),
         }
         for s in sessions
     ]
@@ -168,8 +169,8 @@ async def get_session(
         "id": session.id,
         "title": session.title,
         "workspace_path": session.workspace_path,
-        "created_at": session.created_at.isoformat(),
-        "updated_at": session.updated_at.isoformat(),
+        "created_at": _format_dt(session.created_at),
+        "updated_at": _format_dt(session.updated_at),
         "context_report": context_report,
         "context_usage": context_usage,  # 向后兼容
         "messages": [
@@ -179,7 +180,7 @@ async def get_session(
                 "content": m.content,
                 "reasoning_content": m.reasoning_content,
                 "tool_calls": m.tool_calls,
-                "created_at": m.created_at.isoformat(),
+                "created_at": _format_dt(m.created_at),
             }
             for m in messages
         ],
@@ -208,7 +209,7 @@ async def create_session(
     return {
         "id": session.id,
         "title": session.title,
-        "created_at": session.created_at.isoformat(),
+        "created_at": _format_dt(session.created_at),
     }
 
 
@@ -302,4 +303,4 @@ async def save_message(
         session.title = body.content[:50] + ("..." if len(body.content) > 50 else "")
 
     await db.commit()
-    return {"id": msg.id, "role": msg.role, "created_at": msg.created_at.isoformat()}
+    return {"id": msg.id, "role": msg.role, "created_at": _format_dt(msg.created_at)}

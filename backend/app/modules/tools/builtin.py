@@ -30,21 +30,13 @@ from app.core.sandbox import (
     SensitiveFileAccessRequired,
 )
 from app.modules.tools.base import BaseTool, ToolParameter
-from app.modules.tools.config import ConfigTool
 from app.modules.tools.mcp import ListMcpResourcesTool, McpAuthTool, MCPTool, ReadMcpResourceTool
 from app.modules.tools.plan_mode import EnterPlanModeTool, ExitPlanModeTool
 from app.modules.tools.registry import get_tool_registry
 from app.modules.tools.send_message import (
-    SendMessageTool,
     register_agent,
     unregister_agent,
 )
-from app.modules.tools.skill import SkillTool
-from app.modules.tools.task_create import TaskCreateTool
-from app.modules.tools.task_get import TaskGetTool
-from app.modules.tools.task_list import TaskListTool
-from app.modules.tools.task_output import TaskOutputTool
-from app.modules.tools.task_stop import TaskStopTool
 from app.modules.tools.task_store import (
     _background_tasks,
 )
@@ -57,9 +49,6 @@ from app.modules.tools.task_store import (
 from app.modules.tools.task_store import (
     list_tasks as _store_list_tasks,
 )
-from app.modules.tools.task_update import TaskUpdateTool
-from app.modules.tools.team import TeamCreateTool, TeamDeleteTool
-from app.modules.tools.todo_write import TodoWriteTool
 from app.modules.tools.web import WebFetchTool, WebSearchTool
 
 if TYPE_CHECKING:
@@ -154,16 +143,152 @@ class CalculatorTool(BaseTool):
             return f"计算错误: {e}"
 
 
+class ThinkingTool(BaseTool):
+    """显式思考工具 - 让 AI 输出推理过程"""
+
+    name = "thinking"
+    description = (
+        "Use this tool to think through complex problems step by step. "
+        "Before making significant changes (refactoring, architecture decisions, "
+        "complex debugging), use this tool to plan your approach. "
+        "The thought process will be visible to the user but won't affect the system."
+    )
+    parameters = {
+        "thought": ToolParameter(
+            type="string",
+            description="Your step-by-step reasoning process. Be explicit about assumptions, trade-offs, and plan.",
+        ),
+    }
+    required = ["thought"]
+    is_parallel_safe = True
+
+    async def execute(self, thought: str, **kwargs) -> str:
+        preview = thought[:100].replace("\n", " ")
+        if len(thought) > 100:
+            preview += "..."
+        return f"[Thinking] {len(thought)} characters | Preview: {preview}"
+
+
+class ViewTool(BaseTool):
+    """智能查看工具 - 自动判断文件或目录，支持渐进式阅读"""
+
+    name = "view"
+    is_parallel_safe = True
+    description = (
+        "View the contents of a file or directory. "
+        "If the path is a file, returns its content (with optional offset/limit). "
+        "If the path is a directory, lists its contents. "
+        "This is the primary tool for exploring the codebase."
+    )
+    parameters = {
+        "path": ToolParameter(
+            type="string",
+            description="File or directory path",
+        ),
+        "offset": ToolParameter(
+            type="integer",
+            description="Line offset for files (1-based), default 1",
+            default=1,
+        ),
+        "limit": ToolParameter(
+            type="integer",
+            description="Max lines to read for files, default 50",
+            default=50,
+        ),
+    }
+    required = ["path"]
+
+    async def execute(self, path: str, offset: int = 1, limit: int = 50, **kwargs) -> str:
+        from pathlib import Path
+
+        from app.core.config import settings
+        from app.core.sandbox import validate_path_for_read
+
+        safe_path = validate_path_for_read(
+            path,
+            Path(settings.WORKSPACE_DIR),
+            allow_sensitive=kwargs.get("_allow_sensitive", False),
+            allow_outside=kwargs.get("_allow_outside", False),
+        )
+
+        if safe_path.is_dir():
+            return await self._view_directory(safe_path, limit)
+        else:
+            return await self._view_file(safe_path, offset, limit)
+
+    async def _view_file(self, safe_path, offset: int, limit: int) -> str:
+        rf = ReadFileTool()
+        return await rf.execute(
+            path=str(safe_path),
+            offset=offset,
+            limit=limit,
+            raw=False,
+        )
+
+    async def _view_directory(self, path, limit: int) -> str:
+        entries = []
+        try:
+            with os.scandir(str(path)) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir():
+                            entries.append(("[DIR] ", entry.name, ""))
+                        else:
+                            size = entry.stat().st_size
+                            if size > 1024 * 1024:
+                                size_str = f" ({size / (1024 * 1024):.1f}MB)"
+                            elif size > 1024:
+                                size_str = f" ({size / 1024:.0f}KB)"
+                            else:
+                                size_str = f" ({size}B)"
+                            entries.append(("[FILE]", entry.name, size_str))
+                    except OSError:
+                        entries.append(("[???] ", entry.name, ""))
+        except OSError as e:
+            return f"无法读取目录: {e}"
+
+        if not entries:
+            return f"目录为空: {path}"
+
+        entries.sort(key=lambda e: (e[0] != "[DIR] ", e[1].lower()))
+        total = len(entries)
+        if limit < total:
+            entries = entries[:limit]
+
+        lines = [f"{path} ({total} 个条目):"]
+        for prefix, name, size in entries:
+            lines.append(f"{prefix}{name}{size}")
+
+        if limit < total:
+            lines.append(f"... (仅显示前 {limit} 个)")
+
+        return "\n".join(lines)
+
+
 class ReadFileTool(BaseTool):
     """读取文件工具"""
 
     name = "read_file"
-    description = "读取文件内容，支持文本文件（.txt, .md, .csv, .json 等）、Word（.docx）、Excel（.xlsx, .xls）、PowerPoint（.pptx）和 PDF（.pdf）"
+    description = (
+        "读取文件内容，支持文本文件（.txt, .md, .csv, .json 等）、Word（.docx）、"
+        "Excel（.xlsx, .xls）、PowerPoint（.pptx）和 PDF（.pdf）。"
+        "支持 offset/limit 分页阅读。"
+    )
     is_parallel_safe = True
     parameters = {
         "path": ToolParameter(
             type="string",
             description="文件路径",
+        ),
+        "offset": ToolParameter(
+            type="integer",
+            description="起始行号（1-based），默认 1",
+            default=1,
+        ),
+        "limit": ToolParameter(
+            type="integer",
+            description="最大读取行数，默认 200",
+            default=200,
         ),
         "sheet_name": ToolParameter(
             type="string",
@@ -175,10 +300,15 @@ class ReadFileTool(BaseTool):
             description="最大读取行数（适用于 Excel/CSV），默认 200",
             default=200,
         ),
+        "raw": ToolParameter(
+            type="boolean",
+            description="是否返回原始纯文本（不加标题行号前缀）。默认 true 保持向后兼容。",
+            default=True,
+        ),
     }
     required = ["path"]
 
-    async def execute(self, path: str, sheet_name: str = "", max_rows: int = 200, **kwargs) -> str:
+    async def execute(self, path: str, *, offset: int = 1, limit: int = 200, sheet_name: str = "", max_rows: int = 200, raw: bool = True, **kwargs) -> str:
         try:
             # 沙箱校验
             from pathlib import Path
@@ -187,8 +317,6 @@ class ReadFileTool(BaseTool):
             from app.core.sandbox import validate_path_for_read
             safe_path = validate_path_for_read(
                 path, Path(settings.WORKSPACE_DIR),
-                allow_sensitive=kwargs.get("_allow_sensitive", False),
-                allow_outside=kwargs.get("_allow_outside", False),
             )
 
             ext = os.path.splitext(str(safe_path))[1].lower()
@@ -214,7 +342,7 @@ class ReadFileTool(BaseTool):
             if ext == '.csv':
                 return await self._read_csv(sp, max_rows)
 
-            # 其它文本文件
+            # 其它文本文件（支持 offset/limit 分页）
             try:
                 with open(sp, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -223,9 +351,21 @@ class ReadFileTool(BaseTool):
                 with open(sp, 'r', encoding='gbk') as f:
                     content = f.read()
 
-            if len(content) > 5000:
-                content = content[:5000] + "\n... (内容已截断)"
-            return content
+            lines = content.splitlines()
+            total = len(lines)
+            start = max(0, offset - 1)
+            end = min(total, start + limit)
+            selected = lines[start:end]
+
+            if not raw:
+                header = f"[{os.path.basename(sp)}] Lines {start + 1}-{end} of {total}:"
+                selected.insert(0, header)
+            if end < total:
+                selected.append("... (内容已截断，使用 offset/limit 查看更多)")
+            result = "\n".join(selected)
+            if len(result) > 8000:
+                result = result[:8000] + "\n... (内容已截断)"
+            return result
 
         except FileNotFoundError:
             return f"错误: 文件不存在 - {path}"
@@ -1755,8 +1895,8 @@ class RunBackgroundTool(BaseTool):
             description="要在后台运行的工具名称（如 exec、web_search、screenshot 等）",
         ),
         "args": ToolParameter(
-            type="string",
-            description="传递给目标工具的 JSON 格式参数字典，如 '{\"command\": \"dir\"}'",
+            type="object",
+            description="传递给目标工具的参数字典，如 {\"command\": \"dir\"}。支持 dict 或 JSON 字符串。",
         ),
         "label": ToolParameter(
             type="string",
@@ -1766,15 +1906,18 @@ class RunBackgroundTool(BaseTool):
     }
     required = ["tool_name", "args"]
 
-    async def execute(self, tool_name: str, args: str, label: str = "", **kwargs) -> str:
+    async def execute(self, tool_name: str, args: str | dict, label: str = "", **kwargs) -> str:
         try:
-            # 解析 args JSON
-            try:
-                tool_args = json.loads(args)
-                if not isinstance(tool_args, dict):
-                    return json.dumps({"success": False, "error": "args 必须是 JSON 对象"})
-            except json.JSONDecodeError as e:
-                return json.dumps({"success": False, "error": f"args JSON 解析失败: {e}"})
+            # 解析 args：兼容 dict 和 JSON 字符串两种格式
+            if isinstance(args, dict):
+                tool_args = args
+            else:
+                try:
+                    tool_args = json.loads(args)
+                    if not isinstance(tool_args, dict):
+                        return json.dumps({"success": False, "error": "args 必须是 JSON 对象"})
+                except json.JSONDecodeError as e:
+                    return json.dumps({"success": False, "error": f"args JSON 解析失败: {e}"})
 
             # 从全局注册表获取工具
             global_registry = get_tool_registry()
@@ -3117,20 +3260,9 @@ def register_builtin_tools(registry: Optional["ToolRegistry"] = None):
     registry.register_class(ListMcpResourcesTool)
     registry.register_class(ReadMcpResourceTool)
     registry.register_class(McpAuthTool)
-    registry.register_class(ChannelTool)
     registry.register_class(BrowserTool)
-    registry.register_class(SkillTool)
-    registry.register_class(SendMessageTool)
-    registry.register_class(ConfigTool)
-    registry.register_class(TeamCreateTool)
-    registry.register_class(TeamDeleteTool)
-    registry.register_class(TaskCreateTool)
-    registry.register_class(TaskGetTool)
-    registry.register_class(TaskListTool)
-    registry.register_class(TaskUpdateTool)
-    registry.register_class(TaskStopTool)
-    registry.register_class(TaskOutputTool)
-    registry.register_class(TodoWriteTool)
+    registry.register_class(ThinkingTool)
+    registry.register_class(ViewTool)
     # 注册 web 工具
     registry.register(WebSearchTool())
     registry.register(WebFetchTool())

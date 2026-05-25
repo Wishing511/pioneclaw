@@ -15,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.api.auth import get_current_active_user
 from app.core import get_db
 from app.core.database import async_session_maker
+from app.core.time_utils import format_dt as _format_dt
 from app.models import AIModelConfig, ApiUsage, ChatTask, User
 from app.modules.llm import SimpleLLMProvider
 
@@ -370,7 +371,7 @@ class CreateChatTaskRequest(BaseModel):
     """创建聊天任务请求"""
 
     message: str = Field(..., max_length=10000)
-    context: list[ChatMessage] | None = Field(default=None, max_length=20)
+    context: list[ChatMessage] | None = Field(default=None, max_length=30)
     model_config_id: int | None = None
     max_iterations: int = 10
     enable_tools: bool = True
@@ -1548,9 +1549,9 @@ async def get_chat_task(
         latency_ms=task.latency_ms,
         iterations=task.iterations,
         error_message=task.error_message,
-        created_at=task.created_at.isoformat() if task.created_at else None,
-        started_at=task.started_at.isoformat() if task.started_at else None,
-        completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        created_at=_format_dt(task.created_at),
+        started_at=_format_dt(task.started_at),
+        completed_at=_format_dt(task.completed_at),
     )
 
 

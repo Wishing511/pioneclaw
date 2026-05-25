@@ -55,7 +55,6 @@ _PLAN_ALLOW = [
     # 知识/记忆（只读）
     "knowledge_search",
     "vector_memory_recall",
-    "file_memory_read",
     # 图片（只读）
     "image",
 ]
