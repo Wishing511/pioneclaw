@@ -47,7 +47,7 @@ python-dotenv==1.2.2
 PyYAML==6.0.3
 tomli==2.4.1                  # TOML parsing
 croniter>=2.0.0               # Cron expression scheduling
-loguru>=0.7.0                 # Structured logging
+loguru>=0.7.3                 # Structured logging
 
 # ── CLI Tools ──────────────────────────────────────────────────
 typer==0.25.1
