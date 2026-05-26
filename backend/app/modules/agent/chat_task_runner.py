@@ -91,10 +91,7 @@ class ChatTaskRunner:
                 "iterations": getattr(self.agent_loop, "_iteration", 0),
             }
 
-            # 发送 done 事件到 buffer
-            await self.buffer.append({"type": "done", **result})
-
-            # 标记完成并获取归档数据
+            # 标记完成并获取归档数据（done 事件由 consume_from 统一 yield）
             output_chunks = await self.buffer.mark_completed(result)
             result["output_chunks"] = output_chunks
 
