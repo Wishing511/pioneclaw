@@ -305,6 +305,12 @@ class MemoryStore:
 
 
 def generate_filename(mem_type: MemoryType, name: str) -> str:
-    """Generate a filename following the {type}-{slug}.md convention."""
+    """Generate a filename following the {type}-{slug}.md convention.
+
+    Idempotent: if the slug already starts with the type prefix, use it as-is.
+    """
     slug = MemoryStore.generate_slug(name)
-    return f"{mem_type.value}-{slug}.md"
+    prefix = f"{mem_type.value}-"
+    if slug.startswith(prefix):
+        return f"{slug}.md"
+    return f"{prefix}{slug}.md"

@@ -2026,46 +2026,28 @@ class CheckTaskTool(BaseTool):
 # ============================================================
 
 class MemorySaveTool(BaseTool):
-    """保存记忆到文件系统（.md 文件 + MEMORY.md 索引）"""
+    """触发保存记忆 —— 只需提供内容，其余全由系统内部 LLM 自动完成"""
 
     name = "memory_save"
     description = (
-        "将内容保存为一条持久化记忆。记忆以 Markdown 文件形式存储，"
-        "自动分类并更新索引。类型可选: user（用户偏好）、feedback（用户反馈）、"
-        "project（项目知识）、reference（参考资料）。"
+        "触发保存一条持久化记忆。你只需提供原始内容，系统会自动完成："
+        "1) 判断记忆类型（user / feedback / project / reference）；"
+        "2) 提炼文件名、生成 YAML 元数据（name、description）；"
+        "3) 决定写入新文件还是合并到已有记忆；"
+        "4) 智能更新内容，避免重复。"
+        "不要自行总结或命名，直接传原始内容即可。"
     )
     parameters = {
         "content": ToolParameter(
             type="string",
-            description="记忆内容，支持 Markdown 格式",
-        ),
-        "type": ToolParameter(
-            type="string",
-            description="记忆类型: user, feedback, project, reference",
-            default="user",
-        ),
-        "name": ToolParameter(
-            type="string",
-            description="记忆名称（可选，留空自动生成）",
-            default="",
-        ),
-        "description": ToolParameter(
-            type="string",
-            description="记忆描述（可选，留空自动生成）",
-            default="",
-        ),
-        "upsert": ToolParameter(
-            type="boolean",
-            description="如果同名或同主题记忆已存在，是否更新而非新建。默认 true",
-            default=True,
+            description="原始记忆内容，直接提供即可，不需要自行总结或命名",
         ),
     }
     required = ["content"]
 
-    async def execute(self, content: str, type: str = "user",
-                      name: str = "", description: str = "",
-                      upsert: bool = True, **kwargs) -> str:
+    async def execute(self, content: str, **kwargs) -> str:
         try:
+            import asyncio
             from pathlib import Path
 
             from app.modules.memory import (
@@ -2081,13 +2063,15 @@ class MemorySaveTool(BaseTool):
                 memory_root = Path(__file__).resolve().parent.parent.parent.parent / "memory"
                 mm = create_memory_manager(str(memory_root))
 
+            # name / description / type / filename / 合并策略 全部交由记忆模块内部 LLM 驱动，
+            # Tool 层只负责触发，不干预任何生成决策
             meta = MemoryMetadata(
-                name=name or content[:50],
-                description=description or content[:100],
-                type=MemoryType(type),
+                name="",
+                description="",
+                type=MemoryType.USER,
             )
 
-            response = mm.save(content, type, meta, upsert=upsert)
+            response = await asyncio.to_thread(mm.save, content, "", meta, upsert=True)
             if isinstance(response, MemoryFailure):
                 err = response.error
                 return json.dumps({"success": False, "error": err.message if err else "unknown"})
@@ -2110,12 +2094,18 @@ class MemoryRetrieveTool(BaseTool):
     name = "memory_retrieve"
     description = (
         "根据查询内容从记忆库中检索相关记忆。使用语义相关性排序，"
-        "返回最相关的记忆内容。适用于在对话中获取上下文相关的历史信息。"
+        "返回最相关的记忆内容。如果已知目标文件名（从记忆索引中获取），"
+        "可通过 filename 参数直接读取指定记忆文件。"
     )
     parameters = {
         "query": ToolParameter(
             type="string",
             description="检索查询，描述需要查找的信息",
+        ),
+        "filename": ToolParameter(
+            type="string",
+            description="可选，直接指定要读取的记忆文件名（如 user-xxx.md）。指定后跳过语义搜索，直接返回该文件内容",
+            default="",
         ),
         "max_results": ToolParameter(
             type="integer",
@@ -2125,11 +2115,12 @@ class MemoryRetrieveTool(BaseTool):
     }
     required = ["query"]
 
-    async def execute(self, query: str, max_results: int = 5, **kwargs) -> str:
+    async def execute(self, query: str, filename: str = "", max_results: int = 5, **kwargs) -> str:
         try:
             from pathlib import Path
 
             from app.modules.memory import (
+                FileNotFoundInMemoryError,
                 RecallOptions,
                 create_memory_manager,
                 get_current_memory_manager,
@@ -2139,6 +2130,26 @@ class MemoryRetrieveTool(BaseTool):
             if mm is None:
                 memory_root = Path(__file__).resolve().parent.parent.parent.parent / "memory"
                 mm = create_memory_manager(str(memory_root))
+
+            # 直接读取指定文件
+            if filename:
+                try:
+                    entry = mm.store.read_file(filename)
+                    return json.dumps({
+                        "results": [{
+                            "filename": entry.filename,
+                            "name": entry.name,
+                            "description": entry.description,
+                            "type": entry.type.value,
+                            "content": entry.content[:1000],
+                            "relevance": 1.0,
+                            "freshness": entry.freshness,
+                        }],
+                        "total": 1,
+                        "query": query,
+                    }, ensure_ascii=False)
+                except FileNotFoundInMemoryError:
+                    pass  # 文件不存在时回退到语义搜索
 
             attachments = mm.recall(query, RecallOptions(max_results=max_results))
             if not attachments:

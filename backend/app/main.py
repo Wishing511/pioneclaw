@@ -67,6 +67,15 @@ async def lifespan(app: FastAPI):
             f"[Startup] Provider 预检完成: {healthy}/{len(preflight_results)} healthy"
         )
 
+    # 预初始化 MemoryManage 单例（避免在 async 端点中同步查询 DB）
+    import asyncio
+    from pathlib import Path
+
+    from app.modules.memory import create_memory_manager
+
+    memory_root = str(Path(__file__).resolve().parent / "memory")
+    await asyncio.to_thread(create_memory_manager, memory_root)
+
     # 启动 ChatTaskBuffer TTL 清理循环
     from app.modules.agent.chat_task_buffer import get_buffer_registry
 

@@ -265,24 +265,25 @@ class ContextBuilder:
         # 优先使用新的 fish_memory 模块
         if self.memory_manager is not None:
             try:
-                entries = self.memory_manager.store.get_all_files()
-                if not entries:
+                # 读取 MEMORY.md 索引全文，注入为记忆目录
+                index_path = self.memory_manager.index.index_path
+                with open(index_path, "r", encoding="utf-8") as f:
+                    index_content = f.read()
+
+                if not index_content.strip():
                     return ""
 
-                # 按更新时间倒序，取最近 10 条
-                entries.sort(key=lambda e: e.updated_at, reverse=True)
-                recent = entries[:10]
-
-                lines = ["# 记忆上下文", "", "以下是最近的记忆条目，可参考但不必主动提及：", ""]
-                for e in recent:
-                    stale_note = " [可能已过时]" if e.is_stale else ""
-                    lines.append(f"- [{e.type.value}] {e.name}: {e.description}{stale_note}")
-
-                lines.append("")
-                lines.append("**注意**: 记忆是某个时间点的快照，可能已过时。在基于记忆采取行动前，先验证其是否仍然正确。")
-                return "\n".join(lines)
-            except Exception:
-                pass  # 降级到下面
+                return (
+                    "# 记忆索引\n\n"
+                    "以下是系统中存储的用户记忆目录。当用户询问有相关内容时，"
+                    "请使用 memory_retrieve 工具（传入文件名或相关查询）获取具体记忆内容。\n\n"
+                    f"{index_content}"
+                )
+            except FileNotFoundError:
+                pass  # 冷启动时索引尚不存在，降级到传统路径
+            except Exception as e:
+                logger.warning("读取记忆索引失败: %s", e)
+                pass  # 权限等非预期错误，打日志后降级
 
         # 降级：传统 memory_store
         if not self.memory_store:
@@ -526,6 +527,11 @@ class ContextBuilder:
                         attachments = self.memory_manager.recall(current_message)
                         if attachments:
                             memory_section = self.memory_manager.format_for_injection(attachments)
+                            if memory_section:
+                                parts.append(memory_section)
+                        else:
+                            # recall 无结果时回退到注入 MEMORY.md 索引
+                            memory_section = self._build_memory_section()
                             if memory_section:
                                 parts.append(memory_section)
                     except Exception as e:

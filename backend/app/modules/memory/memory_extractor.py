@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
 from .errors import ExtractionTimeoutError
 from .memory_index import MemoryIndex
-from .memory_store import MemoryStore, generate_filename
+from .memory_store import MemoryStore
 from .models import (
     ConversationContext,
     ExtractionResult,
-    ManifestEntry,
     MemoryEntry,
-    MemoryType,
     Message,
 )
 
@@ -77,6 +74,7 @@ class MemoryExtractor:
         memory_index: MemoryIndex,
         extract_agent_fn: Callable[[str, str], str],
         turns_between: int = DEFAULT_TURNS_BETWEEN_EXTRACTION,
+        save_callback: Optional[Callable[[str], Any]] = None,
     ):
         self.store = memory_store
         self.index = memory_index
@@ -85,6 +83,7 @@ class MemoryExtractor:
         self.turns_between = turns_between
         self._pending_context: List[Message] = []
         self._last_cursor: Optional[str] = None
+        self.save_callback = save_callback
 
     def extract(self, context: ConversationContext) -> ExtractionResult:
         """Main extraction entry point. Performs checks, then runs the agent."""
@@ -166,8 +165,7 @@ class MemoryExtractor:
 
     def _run_extraction(self, messages: List[Message]) -> ExtractionResult:
         """Build the extraction prompt and run the sandboxed agent."""
-        existing_manifest = self.store.scan_files()
-        prompt = self._build_extraction_prompt(messages, existing_manifest)
+        prompt = self._build_extraction_prompt(messages)
         system_prompt = self._build_system_prompt()
 
         try:
@@ -178,14 +176,15 @@ class MemoryExtractor:
             logger.warning("LLM extraction call failed, returning empty result", exc_info=True)
             return ExtractionResult(extracted=0, skipped=True, reason="LLM 调用失败，降级跳过")
 
-        entries = self._parse_extraction_result(response, existing_manifest)
+        contents = self._parse_extraction_result(response)
         saved: List[MemoryEntry] = []
-        for e in entries:
-            if not self._is_duplicate(e, existing_manifest):
-                saved.append(self._save_entry(e))
-
-        if saved:
-            self.index.rebuild_index(self.store.scan_files())
+        for content in contents:
+            if self.save_callback:
+                result = self.save_callback(content)
+                if hasattr(result, 'success') and result.success:
+                    saved.append(result.data)
+            else:
+                logger.warning("save_callback not configured, skipping save for extracted content")
 
         return ExtractionResult(
             extracted=len(saved),
@@ -194,37 +193,31 @@ class MemoryExtractor:
 
     def _build_system_prompt(self) -> str:
         lines = [
-            "你是一个记忆提取助手。你的任务是从对话中提取有价值的记忆并保存。",
+            "你是一个记忆提取助手。你的任务是从对话中识别出有价值的记忆内容。",
             "",
-            "## 何时保存记忆",
+            "## 何时提取",
             '- 用户明确表达偏好或习惯(例如: "我喜欢...", "我总是...")',
             '- 用户给出明确反馈(例如: "你做错了...", "下次记得...")',
             "- 讨论中出现了可复用的项目知识(架构决策, API约定, 技术栈选择)",
             "- 用户分享了对后续对话有用的参考信息",
             "",
-            "## 何时不保存",
+            "## 何时不提取",
             "- 代码片段和实现细节(属于 git 历史)",
             "- 调试过程和临时修复方案",
             "- 已存在于 CLAUDE.md 中的内容",
             "- 单次任务的具体细节",
             "- 闲聊和不含信息的交互",
             "",
-            "## 保存格式",
-            "每条记忆以 YAML frontmatter + Markdown 正文的格式输出。",
-            f"使用 {MEMORY_BLOCK_SEPARATOR} 分隔每条记忆。",
-            "",
-            "## 记忆类型",
-            "- user: 用户偏好、习惯、个人设置",
-            "- feedback: 用户对 Agent 行为的评价和纠正",
-            "- project: 项目知识、架构决策、约定",
-            "- reference: 参考信息、外部知识、工具推荐",
+            "## 输出格式",
+            "只输出记忆的原始内容，不需要分类、不需要摘要、不需要 frontmatter。",
+            f"使用 {MEMORY_BLOCK_SEPARATOR} 分隔每条提取出的记忆。",
+            "如果没有需要提取的记忆，回复 NONE。",
         ]
         return "\n".join(lines)
 
     def _build_extraction_prompt(
         self,
         messages: List[Message],
-        manifest: List[ManifestEntry],
     ) -> str:
         lines = ["## 对话内容\n\n"]
         for msg in messages:
@@ -232,21 +225,17 @@ class MemoryExtractor:
             content = msg.content[:500]
             lines.append(f"**{role}**: {content}\n\n")
 
+        existing_manifest = self.store.scan_files()
         lines.append("## 已有记忆清单 (避免重复)\n\n")
-        if manifest:
-            for m in manifest:
+        if existing_manifest:
+            for m in existing_manifest:
                 lines.append(f"- {m.filename}: {m.description}\n")
         else:
             lines.append("(尚无已有记忆)\n")
 
         lines.append(
-            "\n请分析对话，提取有价值的记忆。对每条记忆，使用以下格式输出:\n\n"
-            f"{MEMORY_BLOCK_SEPARATOR}\n"
-            "name: 记忆名称\n"
-            "description: 一句话描述\n"
-            "type: user|feedback|project|reference\n"
-            "---\n"
-            "记忆正文内容...\n\n"
+            "\n请分析对话，提取有价值的记忆。对每条记忆，只输出原始内容。\n\n"
+            f"使用 {MEMORY_BLOCK_SEPARATOR} 分隔每条记忆。\n\n"
             "如果没有需要提取的记忆，回复 NONE。\n"
         )
         return "".join(lines)
@@ -254,93 +243,21 @@ class MemoryExtractor:
     def _parse_extraction_result(
         self,
         response: str,
-        manifest: List[ManifestEntry],
-    ) -> List[MemoryEntry]:
-        """Parse the agent's response into MemoryEntry objects.
+    ) -> List[str]:
+        """Parse the agent's response into raw content strings.
 
-        Blocks are separated by MEMORY_BLOCK_SEPARATOR (not ---), so the
-        agent can safely use Markdown horizontal rules within memory bodies.
+        Blocks are separated by MEMORY_BLOCK_SEPARATOR.
         """
         if not response or response.strip().upper() == "NONE":
             return []
 
-        entries: List[MemoryEntry] = []
+        contents: List[str] = []
         blocks = response.split(MEMORY_BLOCK_SEPARATOR)
 
         for block in blocks:
             block = block.strip()
             if not block:
                 continue
+            contents.append(block)
 
-            name = ""
-            description = ""
-            mem_type = MemoryType.USER
-            body = ""
-
-            # Split frontmatter from body at first --- line
-            if "\n---\n" in block:
-                fm_text, body = block.split("\n---\n", 1)
-                body = body.strip()
-            elif "\n---" in block:
-                fm_text, body = block.split("\n---", 1)
-                body = body.strip()
-            else:
-                fm_text = block
-
-            for line in fm_text.splitlines():
-                line = line.strip()
-                if line.startswith("name:"):
-                    name = line.split(":", 1)[1].strip()
-                elif line.startswith("description:"):
-                    description = line.split(":", 1)[1].strip()
-                elif line.startswith("type:"):
-                    raw = line.split(":", 1)[1].strip()
-                    try:
-                        mem_type = MemoryType(raw)
-                    except ValueError:
-                        mem_type = MemoryType.USER
-
-            if name and description and body:
-                now = datetime.now(timezone.utc)
-                filename = generate_filename(mem_type, name)
-                entry = MemoryEntry(
-                    id=filename,
-                    filename=filename,
-                    name=name,
-                    description=description,
-                    type=mem_type,
-                    content=body[:5000],
-                    created_at=now,
-                    updated_at=now,
-                    freshness="今天",
-                    is_stale=False,
-                )
-                entries.append(entry)
-
-        return entries
-
-    def _is_duplicate(
-        self,
-        candidate: MemoryEntry,
-        manifest: List[ManifestEntry],
-    ) -> bool:
-        """Check if a candidate memory duplicates an existing entry."""
-        slug = MemoryStore.generate_slug(candidate.name)
-        for m in manifest:
-            if slug == MemoryStore.generate_slug(m.name):
-                return True
-
-        for m in manifest:
-            if candidate.description.lower() == m.description.lower():
-                return True
-
-            ratio = _text_overlap_ratio(candidate.description, m.description)
-            if ratio >= DUPLICATE_SIMILARITY_THRESHOLD:
-                return True
-
-        return False
-
-    def _save_entry(self, entry: MemoryEntry) -> MemoryEntry:
-        """Save a new memory entry to disk."""
-        self.store.write_file(entry)
-        return entry
+        return contents

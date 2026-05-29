@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Callable, List, Optional, Union
 
@@ -57,14 +59,30 @@ class MemoryManage:
         extract_agent_fn: Optional[Callable[[str, str], str]] = None,
         turns_between_extraction: int = 5,
     ):
+        self._llm_query = llm_query_fn
         self.store = MemoryStore(memory_root)
         self.index = MemoryIndex(memory_root)
+
+        # 如果 MEMORY.md 不存在但目录下有 .md 文件，自动从游离文件重建索引
+        if not os.path.exists(self.index.index_path):
+            manifest = self.store.scan_files()
+            if manifest:
+                try:
+                    self.index.rebuild_index(manifest)
+                    logger.info(
+                        "MEMORY.md not found, rebuilt from %d orphan .md files",
+                        len(manifest),
+                    )
+                except Exception as e:
+                    logger.warning("游离记忆文件索引重建失败: %s", e)
+
         self.ranker = MemoryRanker(self.store, llm_query_fn)
         self.extractor = MemoryExtractor(
             self.store,
             self.index,
             extract_agent_fn or (lambda _sys, _usr: ""),
             turns_between_extraction,
+            save_callback=lambda content: self.save(content, "", None, True),
         )
 
     # ═══════════════════════════════════════════════════════════════
@@ -135,6 +153,10 @@ class MemoryManage:
 
         When upsert=True and a duplicate is detected, the existing entry is
         updated with the new content instead of returning the old entry.
+
+        LLM-driven in one shot: _save_decision() classifies type, generates
+        name/description, and picks the target file (new or existing).
+        Falls back to cheap heuristics when LLM is unavailable.
         """
         try:
             if not content or not content.strip():
@@ -143,25 +165,87 @@ class MemoryManage:
                     MissingRequiredFieldError("content", "(new)")
                 )
 
-            if isinstance(mem_type, str):
+            stripped = content.strip()
+
+            # ── 1. 一次 LLM 完成分类 + 摘要 + 文件选择 ────────────────
+            if self._llm_query:
+                all_entries = self.store.scan_files()
+                decision = self._save_decision(stripped, all_entries)
+                if decision:
+                    # 类型（用户未传时才用 LLM 结果）
+                    if isinstance(mem_type, str) and not mem_type:
+                        try:
+                            mem_type = MemoryType(decision["type"])
+                        except ValueError:
+                            mem_type = MemoryType.USER
+                    elif isinstance(mem_type, str):
+                        try:
+                            mem_type = MemoryType(mem_type)
+                        except ValueError:
+                            return MemoryFailure(False, InvalidMemoryTypeError(mem_type))
+
+                    meta = metadata or MemoryMetadata(
+                        name="", description="", type=mem_type
+                    )
+
+                    # name/description（用户未传时才用 LLM 结果）
+                    if not meta.name:
+                        meta.name = decision["name"] or stripped[:20]
+                    if not meta.description:
+                        meta.description = decision["description"] or stripped[:50]
+
+                    logger.info(
+                        "save() decision: type=%s name=%r desc=%r target=%s",
+                        mem_type.value,
+                        meta.name,
+                        meta.description,
+                        decision["target_filename"],
+                    )
+
+                    # 目标文件是已有文件 → 合并（需 upsert=True）
+                    target = decision["target_filename"]
+                    if target.upper() != "NEW":
+                        try:
+                            target_entry = self.store.read_file(target)
+                            if not upsert:
+                                # 调用方禁止更新，直接返回已有条目
+                                return MemoryResult(True, target_entry)
+                            merged = self._merge_into_existing(target_entry, stripped)
+                            self.store.write_file(merged)
+                            try:
+                                self.index.update_entry(target, merged.description)
+                            except Exception as e:
+                                logger.warning("索引更新失败: %s", e)
+                            return MemoryResult(True, merged)
+                        except Exception as e:
+                            logger.warning(
+                                "LLM 决策合并失败 %s，fallback 到新建: %s", target, e
+                            )
+
+                    # 走到这里表示 target == "NEW" 或合并失败 → 继续新建流程
+                    # 但跳过下面的 cheap 去重，因为 LLM 已经判断过
+                    return self._create_new_entry(stripped, mem_type, meta)
+
+            # ── 2. Fallback：无 LLM 时的廉价本地逻辑 ──────────────────
+            if isinstance(mem_type, str) and not mem_type:
+                mem_type = MemoryType.USER
+            elif isinstance(mem_type, str):
                 try:
                     mem_type = MemoryType(mem_type)
                 except ValueError:
                     return MemoryFailure(False, InvalidMemoryTypeError(mem_type))
 
             meta = metadata or MemoryMetadata(
-                name="",
-                description="",
-                type=mem_type,
+                name="", description="", type=mem_type
             )
+            if not meta.name or not meta.description:
+                llm_name, llm_desc = self._summarize_content(stripped, mem_type)
+                if not meta.name:
+                    meta.name = llm_name or stripped[:20]
+                if not meta.description:
+                    meta.description = llm_desc or stripped[:50]
 
-            if not meta.name:
-                meta.name = content.strip()[:50]
-            if not meta.description:
-                meta.description = content.strip()[:100]
-
-            filename = generate_filename(mem_type, meta.name)
-
+            # cheap 去重（slug + description 匹配，无 LLM）
             existing_manifest = self.store.scan_files()
             dup = self._find_duplicate(meta, existing_manifest)
             if dup:
@@ -169,37 +253,47 @@ class MemoryManage:
                     return self.update(dup.filename, content, meta)
                 return MemoryResult(True, dup)
 
-            now = datetime.now(timezone.utc)
-            entry = MemoryEntry(
-                id=filename,
-                filename=filename,
-                name=meta.name,
-                description=meta.description,
-                type=mem_type,
-                content=content.strip(),
-                created_at=now,
-                updated_at=now,
-                freshness="今天",
-                is_stale=False,
-                tags=meta.tags or [],
-            )
-
-            self.store.write_file(entry)
-
-            try:
-                self.index.add_entry(filename, meta.description)
-            except Exception as e:
-                logger.error("索引更新失败，回滚文件写入: %s", e)
-                self.store.delete_file(filename)
-                return MemoryFailure(False, e)
-
-            return MemoryResult(True, entry)
+            return self._create_new_entry(stripped, mem_type, meta)
 
         except MemorySystemError as e:
             return MemoryFailure(False, e)
         except Exception as e:
             logger.error("保存记忆失败: %s", e)
             return MemoryFailure(False, e)
+
+    def _create_new_entry(
+        self,
+        content: str,
+        mem_type: MemoryType,
+        meta: MemoryMetadata,
+    ) -> MemoryResponse:
+        """新建记忆文件的公共逻辑。"""
+        filename = generate_filename(mem_type, meta.name)
+        now = datetime.now(timezone.utc)
+        entry = MemoryEntry(
+            id=filename,
+            filename=filename,
+            name=meta.name,
+            description=meta.description,
+            type=mem_type,
+            content=content,
+            created_at=now,
+            updated_at=now,
+            freshness="今天",
+            is_stale=False,
+            tags=meta.tags or [],
+        )
+
+        self.store.write_file(entry)
+
+        try:
+            self.index.add_entry(filename, meta.description)
+        except Exception as e:
+            logger.error("索引更新失败，回滚文件写入: %s", e)
+            self.store.delete_file(filename)
+            return MemoryFailure(False, e)
+
+        return MemoryResult(True, entry)
 
     # ═══════════════════════════════════════════════════════════════
     # update — modify an existing memory entry
@@ -217,19 +311,33 @@ class MemoryManage:
 
             existing.content = content
             existing.updated_at = datetime.now(timezone.utc)
+
+            # 内容变更时，用 LLM 重新生成摘要
             if metadata:
                 if metadata.name:
                     existing.name = metadata.name
                 if metadata.description:
                     existing.description = metadata.description
-                    try:
-                        self.index.update_entry(path, metadata.description)
-                    except Exception as e:
-                        logger.warning("索引更新失败: %s", e)
                 if metadata.tags is not None:
                     existing.tags = metadata.tags
 
+            # 未显式提供 name/description 时，用 LLM 生成
+            if not metadata or not metadata.name or not metadata.description:
+                llm_name, llm_desc = self._summarize_content(
+                    content.strip(), existing.type
+                )
+                if not metadata or not metadata.name:
+                    existing.name = llm_name or content.strip()[:20]
+                if not metadata or not metadata.description:
+                    existing.description = llm_desc or content.strip()[:50]
+
             self.store.write_file(existing)
+
+            try:
+                self.index.update_entry(path, existing.description)
+            except Exception as e:
+                logger.warning("索引更新失败: %s", e)
+
             return MemoryResult(True, existing)
 
         except FileNotFoundInMemoryError as e:
@@ -406,6 +514,236 @@ class MemoryManage:
     # ═══════════════════════════════════════════════════════════════
     # internal helpers
     # ═══════════════════════════════════════════════════════════════
+
+    def _save_decision(
+        self,
+        content: str,
+        existing_entries: list,
+    ) -> Optional[dict]:
+        """一次 LLM 调用完成分类、摘要、文件选择。
+
+        Returns dict with keys:
+            type (str): user|feedback|project|reference
+            name (str): 提炼后的主题词
+            description (str): ≤30 字的核心概括
+            target_filename (str): 要合并的已有文件名，或 "NEW"
+            reason (str): 决策理由
+        Returns None on failure.
+        """
+        if not self._llm_query:
+            return None
+
+        # 构建已有记忆索引（只取 filename + name + description）
+        index_lines = []
+        for e in existing_entries:
+            index_lines.append(f"- {e.filename}: {e.name} | {e.description}")
+        index_text = "\n".join(index_lines) if index_lines else "(尚无记忆)"
+
+        prompt = (
+            "你是一个记忆归档助手。请分析以下新记忆内容，结合已有记忆列表，"
+            "做出完整的归档决策。\n\n"
+            f"新记忆内容:\n{content}\n\n"
+            f"已有记忆文件列表（文件名: 名称 | 描述）:\n{index_text}\n\n"
+            "请返回 JSON 格式（不要任何额外文字、markdown 标记、代码块）:\n"
+            "{\n"
+            '  "type": "user|feedback|project|reference",\n'
+            '  "name": "提炼后的主题词（≤20字，不要带类型前缀）",\n'
+            '  "description": "极度精炼的一句话概括（≤30字），只写核心主题",\n'
+            '  "target_filename": "要合并的已有文件名，或 NEW",\n'
+            '  "reason": "一句话说明决策理由"\n'
+            "}\n\n"
+            "规则:\n"
+            "1. type: user=用户偏好/约定/身份; feedback=评价/建议/投诉; "
+            "project=技术决策/架构; reference=参考资料/文档\n"
+            "2. name: 只提炼核心主题词，不要复述原文，不要带类型前缀\n"
+            "3. description: 极度精炼，≤30字，只写核心主题，不要复述细节\n"
+            "4. target_filename: 如果新记忆与某条已有记忆是同一主题/同一事实，"
+            "返回该文件名；如果是全新内容，返回 NEW\n"
+            "5. 不要返回任何 JSON 之外的文字"
+        )
+
+        try:
+            response = self._llm_query(prompt)
+            if not response:
+                return None
+
+            # 清理可能的 markdown 代码块
+            text = response.strip()
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+
+            decision = json.loads(text)
+            if not isinstance(decision, dict):
+                return None
+
+            # 截断 + 清理
+            decision["name"] = str(decision.get("name", "")).strip()[:20]
+            decision["description"] = str(decision.get("description", "")).strip()[:50]
+            decision["target_filename"] = str(decision.get("target_filename", "NEW")).strip().upper()
+            decision["type"] = str(decision.get("type", "user")).strip().lower()
+
+            logger.info(
+                "_save_decision: type=%s name=%r target=%s reason=%s",
+                decision["type"],
+                decision["name"],
+                decision["target_filename"],
+                decision.get("reason", ""),
+            )
+            return decision
+        except Exception as e:
+            logger.warning("_save_decision failed: %s", e)
+            return None
+
+    def _merge_into_existing(
+        self,
+        entry: MemoryEntry,
+        new_content: str,
+    ) -> MemoryEntry:
+        """Merge new content into an existing memory entry.
+
+        One-shot LLM call: merges content and regenerates name/description.
+        Falls back to local heuristics on failure.
+        """
+        existing = entry.content.strip()
+        new = new_content.strip()
+
+        # Cheap pre-checks before LLM
+        if new == existing or new in existing:
+            entry.updated_at = datetime.now(timezone.utc)
+            return entry
+        if existing in new:
+            entry.content = new
+            entry.updated_at = datetime.now(timezone.utc)
+            return entry
+
+        if not self._llm_query:
+            entry.content = existing + "\n\n---\n\n" + new
+            entry.updated_at = datetime.now(timezone.utc)
+            return entry
+
+        prompt = (
+            "你是一个记忆整理助手。请将新内容合并到已有记忆中，并生成更新后的摘要。\n\n"
+            "规则:\n"
+            "1. 去重：如果新内容和已有内容重复，只保留一份\n"
+            "2. 更新：如果新内容包含更新的信息，用新信息替换旧的\n"
+            "3. 补充：如果新内容是全新信息，追加到已有内容后面\n"
+            "4. 保持简洁，不要过度展开\n\n"
+            f"已有记忆:\n"
+            f"name: {entry.name}\n"
+            f"description: {entry.description}\n"
+            f"content: {existing}\n\n"
+            f"新内容: {new}\n\n"
+            '请返回 JSON 格式（不要任何额外文字、markdown 标记、代码块）:\n'
+            '{\n'
+            '  "merged_content": "合并后的完整内容",\n'
+            '  "name": "更新后的主题词（≤20字，不要带类型前缀）",\n'
+            '  "description": "更新后的一句话概括（≤30字，只写核心主题）"\n'
+            '}\n'
+        )
+
+        try:
+            response = self._llm_query(prompt)
+            if not response:
+                raise ValueError("empty response")
+
+            # Clean markdown fences (same logic as _save_decision)
+            text = response.strip()
+            if text.startswith("```"):
+                text = text.strip("`").strip()
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+
+            decision = json.loads(text)
+            if not isinstance(decision, dict):
+                raise ValueError("not a dict")
+
+            merged = str(decision.get("merged_content", "")).strip()
+            if merged:
+                entry.content = merged
+            else:
+                # LLM 返回空内容视为失败，fallback 到本地拼接
+                raise ValueError("merged_content is empty")
+
+            name = str(decision.get("name", "")).strip()[:20]
+            if name:
+                entry.name = name
+
+            desc = str(decision.get("description", "")).strip()[:50]
+            if desc:
+                entry.description = desc
+
+        except Exception as e:
+            logger.warning("_merge_into_existing LLM failed, fallback to append: %s", e)
+            entry.content = existing + "\n\n---\n\n" + new
+
+        entry.updated_at = datetime.now(timezone.utc)
+        return entry
+
+    def _summarize_content(
+        self, content: str, mem_type: MemoryType
+    ) -> tuple:
+        """Use LLM to generate a concise name and description for the content.
+
+        Returns (name, description) tuple. Falls back to (None, None) on failure.
+        """
+        if not self._llm_query:
+            logger.warning("_summarize_content: _llm_query is None, skipping LLM")
+            return (None, None)
+
+        type_cn = {
+            MemoryType.USER: "用户偏好",
+            MemoryType.FEEDBACK: "用户反馈",
+            MemoryType.PROJECT: "项目知识",
+            MemoryType.REFERENCE: "参考资料",
+        }.get(mem_type, "用户偏好")
+
+        # 缩短内容长度，减少 LLM 复述倾向
+        content_snippet = content[:500] if len(content) > 500 else content
+
+        prompt = (
+            "你是一个记忆摘要助手。你的任务是从以下内容中提取核心主题，生成极简摘要。\n"
+            "严禁复述原文细节，只输出提炼后的关键词和一句话概括。\n\n"
+            f"类型: {type_cn}\n"
+            f"内容:\n{content_snippet}\n\n"
+            "请只回复两行，严格格式如下（不要加任何额外文字、引号或 markdown）：\n"
+            "name: <主题词，≤20字符>\n"
+            "description: <核心主题概括，≤30字>"
+        )
+
+        try:
+            response = self._llm_query(prompt)
+            logger.debug("_summarize_content LLM response: %r", response)
+            if not response:
+                logger.warning("_summarize_content: LLM returned empty response")
+                return (None, None)
+
+            name = ""
+            description = ""
+            for line in response.strip().splitlines():
+                line = line.strip()
+                # 精确匹配 name: / description:，容错 markdown 加粗
+                clean = line.strip("*").strip()
+                lower_clean = clean.lower()
+                if lower_clean.startswith("name:"):
+                    val = clean.split(":", 1)[1].strip()
+                    # 去掉可能的引号
+                    val = val.strip('"').strip("'")
+                    name = val[:20]
+                elif lower_clean.startswith("description:"):
+                    val = clean.split(":", 1)[1].strip()
+                    val = val.strip('"').strip("'")
+                    description = val[:50]
+
+            logger.info(
+                "_summarize_content parsed: name=%r description=%r",
+                name, description,
+            )
+            return (name or None, description or None)
+        except Exception as e:
+            logger.warning("_summarize_content exception: %s", e)
+            return (None, None)
 
     def _check_duplicate(
         self,

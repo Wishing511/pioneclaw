@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["对话"])
 
 
+def _ensure_memory_manager():
+    """获取 MemoryManage 单例（应在 main.py lifespan 中预初始化）。"""
+    mm = get_current_memory_manager()
+    if mm is None:
+        raise RuntimeError(
+            "Memory manager not initialized. "
+            "Please ensure create_memory_manager() is called in main.py lifespan."
+        )
+    return mm
+
+
 async def _record_api_usage(
     db: AsyncSession,
     user_id: int,
@@ -475,7 +486,7 @@ async def react_chat(
     )
     workspace = ws_result.scalar_one_or_none()
     persona = PersonaConfig.from_workspace(workspace, current_user)
-    mm = get_current_memory_manager()
+    mm = _ensure_memory_manager()
     ctx_builder = ContextBuilder(
         persona_config=persona,
         workspace=Path(workspace.path) if workspace and workspace.path else Path.home(),
@@ -749,7 +760,7 @@ async def react_chat_stream(
     )
     workspace = ws_result.scalar_one_or_none()
     persona = PersonaConfig.from_workspace(workspace, current_user)
-    mm = get_current_memory_manager()
+    mm = _ensure_memory_manager()
     ctx_builder = ContextBuilder(
         persona_config=persona,
         workspace=Path(workspace.path) if workspace and workspace.path else Path.home(),
@@ -1207,7 +1218,7 @@ async def _run_chat_task(
             workspace = ws_result.scalar_one_or_none()
             persona = PersonaConfig.from_workspace(workspace, None)
             from pathlib import Path
-            mm = get_current_memory_manager()
+            mm = _ensure_memory_manager()
 
             ctx_builder = ContextBuilder(
                 persona_config=persona,

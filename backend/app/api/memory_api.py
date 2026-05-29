@@ -264,8 +264,8 @@ def create_memory(
         raise HTTPException(status_code=400, detail=f"无效的记忆类型: {request.type}")
 
     meta = MemoryMetadata(
-        name=request.name or request.content[:50],
-        description=request.description or request.content[:100],
+        name=request.name or "",
+        description=request.description or "",
         type=mem_type,
         tags=request.tags or [],
     )

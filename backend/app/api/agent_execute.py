@@ -205,9 +205,13 @@ def _create_memory_services(
                 ],
             )
 
-        # 检查现有单例是否已具备 LLM 能力，避免不必要的重建
+        # 始终用当前 provider 的模型配置更新 memory_manager LLM 闭包，
+        # 保证记忆模块的 LLM 调用和用户当前对话使用同一模型
         existing = get_current_memory_manager()
-        if existing is not None and existing.ranker._llm_query is not None:
+        if existing is not None:
+            existing._llm_query = _llm_query
+            existing.ranker._llm_query = _llm_query
+            existing.extractor._run_agent = _extract_agent
             mm = existing
         else:
             mm = create_memory_manager(
