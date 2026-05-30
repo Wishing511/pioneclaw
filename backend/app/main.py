@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
 
     from app.modules.memory import create_memory_manager
 
-    memory_root = str(Path(__file__).resolve().parent / "memory")
+    memory_root = str(Path(__file__).resolve().parent.parent / "memory")
     await asyncio.to_thread(create_memory_manager, memory_root)
 
     # 启动 ChatTaskBuffer TTL 清理循环
