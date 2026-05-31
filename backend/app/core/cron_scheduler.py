@@ -561,6 +561,43 @@ async def reconcile_cron_jobs() -> dict:
         f"[Cron] 启动恢复: {summary['registered']} 注册, {summary['skipped']} 跳过"
     )
 
+    # ── 注册 AutoDream 内置定时任务 ──────────────────────────────────────
+    try:
+        from app.core.database import async_session_maker
+        from app.models.autodream import AutoDreamConfig
+
+        async with async_session_maker() as session:
+            result = await session.execute(select(AutoDreamConfig).limit(1))
+            ad_config = result.scalar_one_or_none()
+
+        if ad_config and ad_config.enabled and "autodream" not in scheduler._jobs:
+            from datetime import datetime, timezone
+
+            async def _run_autodream_cron():
+                """AutoDream cron 回调（Phase 1 Stub）"""
+                logger.info("[AutoDream] Cron 触发记忆整理（Phase 1 stub）")
+                async with async_session_maker() as session:
+                    from app.models.autodream import AutoDreamLog
+
+                    log = AutoDreamLog(triggered_by="cron", status="success")
+                    log.details = '{"note": "Phase 1 stub - engine not yet implemented"}'
+                    session.add(log)
+                    await session.commit()
+
+            ok = scheduler.add_job(
+                job_id="autodream",
+                cron_expr=ad_config.cron_expression,
+                callback=_run_autodream_cron,
+                enabled=True,
+            )
+            if ok:
+                summary["registered"] += 1
+                logger.info(
+                    f"[AutoDream] 已注册定时任务: {ad_config.cron_expression}"
+                )
+    except Exception as e:
+        logger.warning(f"[AutoDream] Cron 注册跳过: {e}")
+
     # 启动调度器
     if not scheduler._running:
         await scheduler.start()

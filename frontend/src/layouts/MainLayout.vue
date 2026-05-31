@@ -136,6 +136,7 @@ const navKeyMap: Record<string, string> = {
   '/cron': 'nav.cron',
   '/tracing': 'nav.tracing',
   '/layered-memory': 'nav.memory',
+  '/autodream': 'nav.autoDream',
   '/wiki': 'nav.wiki',
   '/user-management': 'nav.userManagement',
   '/ai-management': 'nav.aiManagement',

@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.agent_execute import router as agent_execute_router
 from app.api.agents import router as agents_router
 from app.api.ai_configs import router as ai_configs_router
+from app.api.autodream import router as autodream_router
 from app.api.approvals import router as approvals_router
 from app.api.auth import router as auth_router
 from app.api.channels import router as channels_router
@@ -53,6 +54,7 @@ from app.api.workspaces import router as workspaces_router
 router = APIRouter()
 
 router.include_router(auth_router)
+router.include_router(autodream_router)
 router.include_router(agents_router)
 router.include_router(skills_router)
 router.include_router(dashboard_router)

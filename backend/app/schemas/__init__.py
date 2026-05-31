@@ -1,3 +1,11 @@
+from app.schemas.autodream import (
+    AutoDreamConfigResponse,
+    AutoDreamConfigUpdate,
+    AutoDreamLogListResponse,
+    AutoDreamLogResponse,
+    AutoDreamStatusResponse,
+    AutoDreamTriggerResponse,
+)
 from app.schemas.approval import (
     ApprovalBrief,
     ApprovalCreate,
@@ -219,4 +227,11 @@ __all__ = [
     "LocalLogEntry",
     "ConnectionEventResponse",
     "RunnerReleaseResponse",
+    # AutoDream
+    "AutoDreamConfigResponse",
+    "AutoDreamConfigUpdate",
+    "AutoDreamLogResponse",
+    "AutoDreamLogListResponse",
+    "AutoDreamStatusResponse",
+    "AutoDreamTriggerResponse",
 ]

@@ -70,6 +70,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Memory', icon: 'Memo', group: 'memory' }
       },
       {
+        path: 'autodream',
+        name: 'AutoDream',
+        component: () => import('@/views/AutoDream.vue'),
+        meta: { title: 'AutoDream', icon: 'MagicStick', group: 'memory' }
+      },
+      {
         path: 'wiki',
         name: 'Wiki',
         component: () => import('@/views/Wiki.vue'),

@@ -1,4 +1,5 @@
 from app.models.approval import Approval, ApprovalStatus, ApprovalType
+from app.models.autodream import AutoDreamConfig, AutoDreamLog
 from app.models.connection_event import ConnectionEvent
 from app.models.models import (
     Agent,
@@ -36,6 +37,9 @@ from app.models.wiki import Wiki, WikiSpace, WikiSpaceType, WikiVersion
 from app.models.workspace import Workspace
 
 __all__ = [
+    # AutoDream
+    "AutoDreamConfig",
+    "AutoDreamLog",
     # 原有模型
     "User",
     "Agent",
